@@ -4,17 +4,20 @@ import android.app.AlertDialog
 import android.os.Handler
 import android.os.Looper
 import android.view.LayoutInflater
+import android.view.MotionEvent
 import android.view.View
+import android.view.ViewConfiguration
 import android.view.ViewGroup
 import android.view.animation.DecelerateInterpolator
 import android.widget.TextView
 import android.widget.Toast
 import androidx.media3.common.MediaItem
 import androidx.media3.common.Player
-import androidx.media3.exoplayer.ExoPlayer
 import androidx.media3.exoplayer.DefaultRenderersFactory
+import androidx.media3.exoplayer.ExoPlayer
 import androidx.media3.ui.PlayerView
 import androidx.recyclerview.widget.RecyclerView
+import kotlin.math.abs
 
 class VideoAdapter(
     private val api: IwaraApi,
@@ -32,7 +35,6 @@ class VideoAdapter(
     private var pipMode = false
 
     fun replace(newItems: List<VideoItem>) {
-        // RecyclerView 可能复用现有 Holder；这里只释放播放器，不能把 Holder 从跟踪集合清掉。
         holders.toList().forEach { it.release() }
         items.clear()
         items.addAll(newItems)
@@ -78,7 +80,6 @@ class VideoAdapter(
     }
 
     private fun preloadAround(position: Int) {
-        // 只预解析后续视频源，不提前创建额外 ExoPlayer，避免多个硬件解码器互相抢资源。
         listOf(position + 1, position + 2).forEach { index ->
             val item = items.getOrNull(index) ?: return@forEach
             if (item.sources != null) return@forEach
@@ -124,6 +125,7 @@ class VideoAdapter(
         private val download = view.findViewById<TextView>(R.id.download)
         private val pip = view.findViewById<TextView>(R.id.pip)
         private val likeBurst = view.findViewById<TextView>(R.id.likeBurst)
+        private val speedIndicator = view.findViewById<TextView>(R.id.speedIndicator)
 
         private var player: ExoPlayer? = null
         private var bound: VideoItem? = null
@@ -136,6 +138,23 @@ class VideoAdapter(
         private var stalledChecks = 0
         private var pendingSingleTap: Runnable? = null
         private var lastTap = 0L
+
+        private val touchSlop = ViewConfiguration.get(itemView.context).scaledTouchSlop
+        private var downX = 0f
+        private var downY = 0f
+        private var touchMoved = false
+        private var speedBoosting = false
+        private val holdToSpeed = Runnable {
+            if (active && !touchMoved) {
+                player?.let { p ->
+                    if (p.playbackState != Player.STATE_IDLE) {
+                        p.setPlaybackSpeed(2f)
+                        speedBoosting = true
+                        speedIndicator.visibility = View.VISIBLE
+                    }
+                }
+            }
+        }
 
         fun bind(item: VideoItem) {
             releasePlayerOnly()
@@ -180,6 +199,45 @@ class VideoAdapter(
                     }
                     pendingSingleTap = action
                     tapHandler.postDelayed(action, 300L)
+                }
+            }
+
+            itemView.setOnTouchListener { v, event ->
+                when (event.actionMasked) {
+                    MotionEvent.ACTION_DOWN -> {
+                        downX = event.x
+                        downY = event.y
+                        touchMoved = false
+                        tapHandler.removeCallbacks(holdToSpeed)
+                        tapHandler.postDelayed(holdToSpeed, 450L)
+                        true
+                    }
+                    MotionEvent.ACTION_MOVE -> {
+                        if (!touchMoved &&
+                            (abs(event.x - downX) > touchSlop || abs(event.y - downY) > touchSlop)
+                        ) {
+                            touchMoved = true
+                            tapHandler.removeCallbacks(holdToSpeed)
+                            if (speedBoosting) stopSpeedBoost()
+                        }
+                        true
+                    }
+                    MotionEvent.ACTION_UP -> {
+                        tapHandler.removeCallbacks(holdToSpeed)
+                        if (speedBoosting) {
+                            stopSpeedBoost()
+                        } else if (!touchMoved) {
+                            v.performClick()
+                        }
+                        true
+                    }
+                    MotionEvent.ACTION_CANCEL -> {
+                        tapHandler.removeCallbacks(holdToSpeed)
+                        if (speedBoosting) stopSpeedBoost()
+                        touchMoved = true
+                        true
+                    }
+                    else -> true
                 }
             }
 
@@ -275,10 +333,18 @@ class VideoAdapter(
                 if (!active && player == null) return
                 if (active) persistHistory(completed = false)
                 active = false
+                tapHandler.removeCallbacks(holdToSpeed)
+                stopSpeedBoost()
                 stopWatchdog()
-                // 切页时直接释放旧解码器，彻底杜绝后台音频/视频解码继续运行。
                 releasePlayerOnly()
             }
+        }
+
+        private fun stopSpeedBoost() {
+            tapHandler.removeCallbacks(holdToSpeed)
+            speedBoosting = false
+            speedIndicator.visibility = View.GONE
+            player?.setPlaybackSpeed(1f)
         }
 
         private fun forceSilent() {
@@ -451,6 +517,8 @@ class VideoAdapter(
         fun release() {
             persistHistory(completed = false)
             active = false
+            tapHandler.removeCallbacks(holdToSpeed)
+            stopSpeedBoost()
             stopWatchdog()
             generation++
             bound = null
@@ -460,8 +528,11 @@ class VideoAdapter(
         }
 
         private fun releasePlayerOnly() {
+            speedBoosting = false
+            speedIndicator.visibility = View.GONE
             playerView.player = null
             player?.let { p ->
+                p.setPlaybackSpeed(1f)
                 p.playWhenReady = false
                 p.volume = 0f
                 p.stop()

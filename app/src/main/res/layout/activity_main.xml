@@ -11,15 +11,69 @@
         android:orientation="vertical" />
 
     <LinearLayout
+        android:id="@+id/topBar"
         android:layout_width="match_parent"
-        android:layout_height="56dp"
+        android:layout_height="58dp"
         android:layout_gravity="top"
         android:gravity="center"
         android:orientation="horizontal"
-        android:paddingTop="8dp">
-        <TextView android:id="@+id/tabTrending" android:text="趋势" android:textColor="#FFFFFFFF" android:textSize="17sp" android:textStyle="bold" android:gravity="center" android:layout_width="96dp" android:layout_height="match_parent" />
-        <TextView android:id="@+id/tabPopular" android:text="热门" android:textColor="#99FFFFFF" android:textSize="17sp" android:gravity="center" android:layout_width="96dp" android:layout_height="match_parent" />
-        <TextView android:id="@+id/tabLatest" android:text="最新" android:textColor="#99FFFFFF" android:textSize="17sp" android:gravity="center" android:layout_width="96dp" android:layout_height="match_parent" />
+        android:paddingTop="6dp"
+        android:background="#26000000">
+
+        <TextView
+            android:id="@+id/tabRecommend"
+            android:layout_width="58dp"
+            android:layout_height="match_parent"
+            android:gravity="center"
+            android:text="推荐"
+            android:textColor="#FFFFFFFF"
+            android:textSize="16sp"
+            android:textStyle="bold" />
+
+        <TextView
+            android:id="@+id/tabTrending"
+            android:layout_width="58dp"
+            android:layout_height="match_parent"
+            android:gravity="center"
+            android:text="趋势"
+            android:textColor="#99FFFFFF"
+            android:textSize="16sp" />
+
+        <TextView
+            android:id="@+id/tabPopular"
+            android:layout_width="58dp"
+            android:layout_height="match_parent"
+            android:gravity="center"
+            android:text="热门"
+            android:textColor="#99FFFFFF"
+            android:textSize="16sp" />
+
+        <TextView
+            android:id="@+id/tabLatest"
+            android:layout_width="58dp"
+            android:layout_height="match_parent"
+            android:gravity="center"
+            android:text="最新"
+            android:textColor="#99FFFFFF"
+            android:textSize="16sp" />
+
+        <TextView
+            android:id="@+id/btnSearch"
+            android:layout_width="50dp"
+            android:layout_height="match_parent"
+            android:gravity="center"
+            android:text="⌕"
+            android:textColor="#FFFFFFFF"
+            android:textSize="27sp" />
+
+        <TextView
+            android:id="@+id/btnMenu"
+            android:layout_width="50dp"
+            android:layout_height="match_parent"
+            android:gravity="center"
+            android:text="⋮"
+            android:textColor="#FFFFFFFF"
+            android:textSize="29sp" />
     </LinearLayout>
 
     <ProgressBar

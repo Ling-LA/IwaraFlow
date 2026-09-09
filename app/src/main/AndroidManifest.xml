@@ -10,7 +10,7 @@
         android:theme="@style/Theme.IwaraFlow"
         android:label="IwaraFlow">
         <activity
-            android:name=".MainActivity"
+            android:name=".MainActivityV3"
             android:screenOrientation="portrait"
             android:supportsPictureInPicture="true"
             android:resizeableActivity="true"
@@ -21,5 +21,12 @@
                 <category android:name="android.intent.category.LAUNCHER" />
             </intent-filter>
         </activity>
+        <activity
+            android:name=".MainActivity"
+            android:screenOrientation="portrait"
+            android:supportsPictureInPicture="true"
+            android:resizeableActivity="true"
+            android:configChanges="screenSize|smallestScreenSize|screenLayout|orientation"
+            android:exported="false" />
     </application>
 </manifest>

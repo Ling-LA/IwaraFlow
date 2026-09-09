@@ -8,17 +8,25 @@
         <item name="android:statusBarColor">#000000</item>
         <item name="android:colorAccent">#FF5C85</item>
         <item name="colorAccent">#FF5C85</item>
+        <item name="alertDialogTheme">@style/Theme.IwaraFlow.Dialog</item>
         <item name="buttonBarPositiveButtonStyle">@style/IwaraFlow.DialogButton.Positive</item>
         <item name="buttonBarNegativeButtonStyle">@style/IwaraFlow.DialogButton.Negative</item>
         <item name="buttonBarNeutralButtonStyle">@style/IwaraFlow.DialogButton.Negative</item>
     </style>
 
-    <!--
-        Do not rely on per-device AlertDialog button tinting here.  Some OEM themes
-        keep AppCompat dialog buttons borderless even after backgroundTint is set,
-        which made Login/Save look completely transparent.  These styles force a
-        real rounded background at the theme level for every primary dialog action.
-    -->
+    <style name="Theme.IwaraFlow.Dialog" parent="Theme.AppCompat.Light.Dialog.Alert">
+        <item name="android:windowBackground">@drawable/bg_dialog_surface</item>
+        <item name="android:colorAccent">#FF5C85</item>
+        <item name="colorAccent">#FF5C85</item>
+        <item name="android:textColorPrimary">#17324A</item>
+        <item name="android:textColorSecondary">#607D93</item>
+        <item name="buttonBarPositiveButtonStyle">@style/IwaraFlow.DialogButton.Positive</item>
+        <item name="buttonBarNegativeButtonStyle">@style/IwaraFlow.DialogButton.Negative</item>
+        <item name="buttonBarNeutralButtonStyle">@style/IwaraFlow.DialogButton.Negative</item>
+    </style>
+
+    <!-- OEM AlertDialog themes sometimes keep the primary button borderless even after
+         runtime backgroundTint.  Force a real rounded background at theme level. -->
     <style name="IwaraFlow.DialogButton.Positive" parent="Widget.AppCompat.Button.ButtonBar.AlertDialog">
         <item name="android:textColor">#FFFFFFFF</item>
         <item name="android:textStyle">bold</item>
@@ -32,7 +40,7 @@
     </style>
 
     <style name="IwaraFlow.DialogButton.Negative" parent="Widget.AppCompat.Button.ButtonBar.AlertDialog">
-        <item name="android:textColor">#FF5C85</item>
+        <item name="android:textColor">#E94E78</item>
         <item name="android:textStyle">bold</item>
         <item name="android:textSize">14sp</item>
         <item name="android:minHeight">42dp</item>

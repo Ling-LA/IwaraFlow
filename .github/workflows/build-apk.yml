@@ -5,12 +5,17 @@ on:
     branches: [main]
   workflow_dispatch:
 
+permissions:
+  contents: write
+
 jobs:
   build:
     runs-on: ubuntu-latest
     steps:
       - name: Checkout
         uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
 
       - name: Set up JDK 17
         uses: actions/setup-java@v4
@@ -63,9 +68,37 @@ jobs:
           APKSIGNER="$ANDROID_HOME/build-tools/36.0.0/apksigner"
           "$APKSIGNER" verify --verbose --print-certs out/IwaraFlow-signed.apk
 
-      - name: Upload signed APK
+      - name: Upload signed APK artifact
         uses: actions/upload-artifact@v4
         with:
           name: IwaraFlow-signed-APK
           path: out/IwaraFlow-signed.apk
           if-no-files-found: error
+
+      - name: Publish or refresh GitHub Release
+        if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          VERSION=$(grep -oP 'versionName\s*=\s*"\K[^"]+' app/build.gradle.kts | head -n 1)
+          test -n "$VERSION"
+          TAG="v$VERSION"
+          NOTES=$(cat <<EOF
+          IwaraFlow $TAG
+
+          此 Release 由 main 分支的固定签名构建自动发布。
+          App 内“检查更新”会读取此 Release 并下载安装 IwaraFlow-signed.apk。
+
+          Commit: $GITHUB_SHA
+          EOF
+          )
+          if gh release view "$TAG" >/dev/null 2>&1; then
+            gh release upload "$TAG" out/IwaraFlow-signed.apk --clobber
+            gh release edit "$TAG" --title "IwaraFlow $TAG" --notes "$NOTES"
+          else
+            gh release create "$TAG" out/IwaraFlow-signed.apk \
+              --target "$GITHUB_SHA" \
+              --title "IwaraFlow $TAG" \
+              --notes "$NOTES"
+          fi

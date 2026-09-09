@@ -37,6 +37,7 @@ class MainActivityV3 : AppCompatActivity() {
     private lateinit var recommender: RecommendationEngine
     private lateinit var playableGate: PlayableVideoGate
     private lateinit var mediaCache: MediaPreloadCache
+    private lateinit var updates: UpdateManager
     private lateinit var pager: ViewPager2
     private lateinit var loading: ProgressBar
     private lateinit var error: TextView
@@ -63,6 +64,7 @@ class MainActivityV3 : AppCompatActivity() {
         recommender = RecommendationEngine(api, history)
         playableGate = PlayableVideoGate(api)
         mediaCache = MediaPreloadCache(this)
+        updates = UpdateManager(this)
 
         pager = findViewById(R.id.pager)
         loading = findViewById(R.id.loading)
@@ -90,6 +92,7 @@ class MainActivityV3 : AppCompatActivity() {
 
         setupTopBar()
         if (intent.getBooleanExtra("return_recommend", false)) returnToRecommend() else loadFeed(reset = true)
+        window.decorView.postDelayed({ if (!isFinishing && !isDestroyed) updates.checkOnLaunch() }, 1800L)
     }
 
     override fun onNewIntent(intent: Intent) {
@@ -187,7 +190,6 @@ class MainActivityV3 : AppCompatActivity() {
 
         val callback: (Result<List<VideoItem>>) -> Unit = { result ->
             result.onSuccess { raw ->
-                // Trending / popularity / date / search all pass the same playable gate.
                 playableGate.filterPlayable(raw, prefs.defaultQuality, maxItems = pageSize) { playable ->
                     runOnUiThread {
                         if (requestId != requestSerial) return@runOnUiThread
@@ -278,7 +280,7 @@ class MainActivityV3 : AppCompatActivity() {
 
     private fun showMainMenu() {
         val account = if (api.isLoggedIn()) "退出 Iwara 登录" else "登录 Iwara"
-        val items = arrayOf(account, "浏览历史", "本地收藏", "Iwara 点赞记录", "已关注用户", "设置", "重新加载当前流")
+        val items = arrayOf(account, "浏览历史", "本地收藏", "Iwara 点赞记录", "已关注用户", "设置", "检查更新", "重新加载当前流")
         val dialog = AlertDialog.Builder(this).setTitle("IwaraFlow").setItems(items) { _, which ->
             when (which) {
                 0 -> if (api.isLoggedIn()) { api.logout(); Toast.makeText(this, "已退出登录", Toast.LENGTH_SHORT).show(); loadFeed(reset = true) } else showLoginDialog()
@@ -287,7 +289,8 @@ class MainActivityV3 : AppCompatActivity() {
                 3 -> showRemoteLikes()
                 4 -> showFollowingUsers()
                 5 -> showSettingsDialog()
-                6 -> loadFeed(reset = true)
+                6 -> updates.check(manual = true)
+                7 -> loadFeed(reset = true)
             }
         }.create()
         dialog.setOnShowListener { styleDialogButtons(dialog) }; dialog.show()
@@ -466,11 +469,16 @@ class MainActivityV3 : AppCompatActivity() {
         adapter.setPipMode(isInPictureInPictureMode)
     }
 
-    override fun onStart() { super.onStart(); if (!isInPictureInPictureMode) adapter.resumeActive() }
+    override fun onStart() {
+        super.onStart()
+        updates.tryContinueInstall()
+        if (!isInPictureInPictureMode) adapter.resumeActive()
+    }
+
     override fun onStop() { if (!isInPictureInPictureMode) adapter.pauseAll(); super.onStop() }
     private fun showError(message: String) { error.text = message; error.visibility = View.VISIBLE }
 
     override fun onDestroy() {
-        adapter.releaseAll(); playableGate.close(); mediaCache.close(); recommender.close(); api.close(); history.close(); super.onDestroy()
+        adapter.releaseAll(); playableGate.close(); mediaCache.close(); recommender.close(); updates.close(); api.close(); history.close(); super.onDestroy()
     }
 }

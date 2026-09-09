@@ -18,6 +18,8 @@ class SecureSessionStore(context: Context) {
             EncryptedSharedPreferences.PrefValueEncryptionScheme.AES256_GCM
         )
     } catch (_: Throwable) {
+        // 极少数损坏/不兼容的 Keystore 设备上保证应用仍能启动。
+        // 用户密码从不落盘；这里只有短期 token。
         context.getSharedPreferences("iwara_flow_session_fallback", Context.MODE_PRIVATE)
     }
 

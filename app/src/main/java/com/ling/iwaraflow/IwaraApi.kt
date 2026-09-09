@@ -13,25 +13,25 @@ class IwaraApi {
     private val apiRoot = "https://apiq.iwara.tv"
     private val siteRoot = "https://www.iwara.tv"
     private val client = OkHttpClient.Builder()
-        .connectTimeout(15, TimeUnit.SECONDS)
-        .readTimeout(30, TimeUnit.SECONDS)
-        .followRedirects(true)
-        .build()
+    .connectTimeout(15, TimeUnit.SECONDS)
+    .readTimeout(30, TimeUnit.SECONDS)
+    .followRedirects(true)
+    .build()
 
     private fun baseRequest(url: String) = Request.Builder()
-        .url(url)
-        .header("Referer", "$siteRoot/")
-        .header("Origin", siteRoot)
-        .header("X-Site", "www.iwara.tv")
-        .header("User-Agent", "Mozilla/5.0 (Linux; Android 14) AppleWebKit/537.36 Chrome/152 Mobile Safari/537.36")
+    .url(url)
+    .header("Referer", "$siteRoot/")
+    .header("Origin", siteRoot)
+    .header("X-Site", "www.iwara.tv")
+    .header("User-Agent", "Mozilla/5.0 (Linux; Android 14) AppleWebKit/537.36 Chrome/152 Mobile Safari/537.36")
 
     fun getVideos(sort: String, page: Int = 0, limit: Int = 20, callback: (Result<List<VideoItem>>) -> Unit) {
         val url = "$apiRoot/videos".toHttpUrl().newBuilder()
-            .addQueryParameter("sort", sort)
-            .addQueryParameter("rating", "all")
-            .addQueryParameter("page", page.toString())
-            .addQueryParameter("limit", limit.toString())
-            .build()
+        .addQueryParameter("sort", sort)
+        .addQueryParameter("rating", "all")
+        .addQueryParameter("page", page.toString())
+        .addQueryParameter("limit", limit.toString())
+        .build()
         client.newCall(baseRequest(url.toString()).get().build()).enqueue(object : Callback {
             override fun onFailure(call: Call, e: IOException) = callback(Result.failure(e))
             override fun onResponse(call: Call, response: Response) {
@@ -54,10 +54,10 @@ class IwaraApi {
                                 id = o.optString("id"),
                                 title = o.optString("title", "Untitled"),
                                 author = user?.optString("name")?.takeIf { n -> n.isNotBlank() }
-                                    ?: user?.optString("username") ?: "Iwara",
+                                ?: user?.optString("username") ?: "Iwara",
                                 tags = tags.filter { t -> t.isNotBlank() },
                                 likes = o.optInt("numLikes", 0)
-                            )
+                                )
                         }
                         callback(Result.success(list))
                     } catch (e: Exception) { callback(Result.failure(e)) }
@@ -87,11 +87,11 @@ class IwaraApi {
     private fun resolveFileUrl(fileUrl: String, callback: (Result<String>) -> Unit) {
         val parsed = fileUrl.toHttpUrlOrNull() ?: return callback(Result.failure(IOException("Bad fileUrl")))
         val expires = parsed.queryParameter("expires") ?: return callback(Result.failure(IOException("Missing expires")))
-        val fileId = parsed.pathSegments().lastOrNull()?.takeIf { it.isNotBlank() }
-            ?: return callback(Result.failure(IOException("Missing file id")))
+        val fileId = parsed.pathSegments.lastOrNull()?.takeIf { it.isNotBlank() }
+        ?: return callback(Result.failure(IOException("Missing file id")))
         val key = "${fileId}_${expires}_mSvL05GfEmeEmsEYfGCnVpEjYgTJraJN"
         val sha = MessageDigest.getInstance("SHA-1").digest(key.toByteArray())
-            .joinToString("") { "%02x".format(it) }
+        .joinToString("") { "%02x".format(it) }
         val req = baseRequest(fileUrl).header("X-Version", sha).get().build()
         client.newCall(req).enqueue(object : Callback {
             override fun onFailure(call: Call, e: IOException) = callback(Result.failure(e))
@@ -106,11 +106,11 @@ class IwaraApi {
                             val s = arr.getJSONObject(i)
                             val srcObj = s.optJSONObject("src") ?: continue
                             val raw = srcObj.optString("download").takeIf { u -> u.isNotBlank() }
-                                ?: srcObj.optString("view").takeIf { u -> u.isNotBlank() }
-                                ?: continue
+                            ?: srcObj.optString("view").takeIf { u -> u.isNotBlank() }
+                            ?: continue
                             val name = s.optString("name")
                             val score = Regex("(\\d+)").find(name)?.groupValues?.get(1)?.toIntOrNull()
-                                ?: if (name.equals("source", true)) 9999 else 0
+                            ?: if (name.equals("source", true)) 9999 else 0
                             if (score > bestScore) { bestScore = score; bestUrl = raw }
                         }
                         val u = bestUrl ?: return callback(Result.failure(IOException("No playable source")))

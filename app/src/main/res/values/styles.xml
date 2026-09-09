@@ -9,9 +9,9 @@
         <item name="android:colorAccent">#FF5C85</item>
         <item name="colorAccent">#FF5C85</item>
         <item name="alertDialogTheme">@style/Theme.IwaraFlow.Dialog</item>
-        <item name="buttonBarPositiveButtonStyle">@style/IwaraFlow.DialogButton.Positive</item>
-        <item name="buttonBarNegativeButtonStyle">@style/IwaraFlow.DialogButton.Negative</item>
-        <item name="buttonBarNeutralButtonStyle">@style/IwaraFlow.DialogButton.Negative</item>
+        <item name="buttonBarPositiveButtonStyle">@style/IwaraFlow.DialogButton.Text</item>
+        <item name="buttonBarNegativeButtonStyle">@style/IwaraFlow.DialogButton.Text</item>
+        <item name="buttonBarNeutralButtonStyle">@style/IwaraFlow.DialogButton.Text</item>
     </style>
 
     <style name="Theme.IwaraFlow.Dialog" parent="Theme.AppCompat.Light.Dialog.Alert">
@@ -20,28 +20,18 @@
         <item name="colorAccent">#FF5C85</item>
         <item name="android:textColorPrimary">#17324A</item>
         <item name="android:textColorSecondary">#607D93</item>
-        <item name="buttonBarPositiveButtonStyle">@style/IwaraFlow.DialogButton.Positive</item>
-        <item name="buttonBarNegativeButtonStyle">@style/IwaraFlow.DialogButton.Negative</item>
-        <item name="buttonBarNeutralButtonStyle">@style/IwaraFlow.DialogButton.Negative</item>
+        <item name="buttonBarPositiveButtonStyle">@style/IwaraFlow.DialogButton.Text</item>
+        <item name="buttonBarNegativeButtonStyle">@style/IwaraFlow.DialogButton.Text</item>
+        <item name="buttonBarNeutralButtonStyle">@style/IwaraFlow.DialogButton.Text</item>
     </style>
 
-    <!-- Some OEMs ignore AlertDialog button backgrounds. Keep the positive action
-         readable even in that case by using a strong dark-pink text fallback. -->
-    <style name="IwaraFlow.DialogButton.Positive" parent="Widget.AppCompat.Button.ButtonBar.AlertDialog">
-        <item name="android:textColor">#C93663</item>
-        <item name="android:textStyle">bold</item>
-        <item name="android:textSize">15sp</item>
-        <item name="android:background">@drawable/bg_dialog_primary_button</item>
-        <item name="android:minWidth">92dp</item>
-        <item name="android:minHeight">44dp</item>
-        <item name="android:paddingLeft">18dp</item>
-        <item name="android:paddingRight">18dp</item>
-    </style>
-
-    <style name="IwaraFlow.DialogButton.Negative" parent="Widget.AppCompat.Button.ButtonBar.AlertDialog">
+    <!-- All AlertDialog actions intentionally use one identical text-button style.
+         This avoids OEMs hiding the positive action background while leaving white text. -->
+    <style name="IwaraFlow.DialogButton.Text" parent="Widget.AppCompat.Button.ButtonBar.AlertDialog">
         <item name="android:textColor">#D84B73</item>
         <item name="android:textStyle">bold</item>
         <item name="android:textSize">14sp</item>
+        <item name="android:background">@android:color/transparent</item>
         <item name="android:minHeight">42dp</item>
         <item name="android:paddingLeft">16dp</item>
         <item name="android:paddingRight">16dp</item>

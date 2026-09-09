@@ -1,0 +1,41 @@
+<?xml version="1.0" encoding="utf-8"?>
+<FrameLayout xmlns:android="http://schemas.android.com/apk/res/android"
+    android:layout_width="match_parent"
+    android:layout_height="match_parent"
+    android:background="#000000">
+
+    <androidx.viewpager2.widget.ViewPager2
+        android:id="@+id/pager"
+        android:layout_width="match_parent"
+        android:layout_height="match_parent"
+        android:orientation="vertical" />
+
+    <LinearLayout
+        android:layout_width="match_parent"
+        android:layout_height="56dp"
+        android:layout_gravity="top"
+        android:gravity="center"
+        android:orientation="horizontal"
+        android:paddingTop="8dp">
+        <TextView android:id="@+id/tabTrending" android:text="趋势" android:textColor="#FFFFFFFF" android:textSize="17sp" android:textStyle="bold" android:gravity="center" android:layout_width="96dp" android:layout_height="match_parent" />
+        <TextView android:id="@+id/tabPopular" android:text="热门" android:textColor="#99FFFFFF" android:textSize="17sp" android:gravity="center" android:layout_width="96dp" android:layout_height="match_parent" />
+        <TextView android:id="@+id/tabLatest" android:text="最新" android:textColor="#99FFFFFF" android:textSize="17sp" android:gravity="center" android:layout_width="96dp" android:layout_height="match_parent" />
+    </LinearLayout>
+
+    <ProgressBar
+        android:id="@+id/loading"
+        android:layout_width="48dp"
+        android:layout_height="48dp"
+        android:layout_gravity="center" />
+
+    <TextView
+        android:id="@+id/error"
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:layout_gravity="center"
+        android:gravity="center"
+        android:padding="24dp"
+        android:textColor="#FFFFFFFF"
+        android:textSize="15sp"
+        android:visibility="gone" />
+</FrameLayout>

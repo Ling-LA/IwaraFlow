@@ -17,6 +17,19 @@ Android 原生的 Iwara 竖屏短视频流播放器，目标是提供类似短�
 - **刷新推荐时排除已看视频**：只在重新生成推荐列表时过滤历史记录，不再在滑动过程中连续自动跳过
 - **可播放验证**：视频进入推荐/趋势/人气/最新/搜索列表前，先解析实际 CDN 播放源并进行 Range 探测；确认能返回媒体数据后才显示
 
+### 作者主页 / 关注 / 好友
+
+- 点击视频作者名可进入作者主页
+- 作者主页分页展示该作者作品
+- 不可播放作品保留在作者列表，并显示“仅限好友观看 / 没有权限 / 视频处理中 / 资源失效”等原因
+- 点击作者列表中可播放视频后，进入仅包含该作者作品的竖滑播放流
+- 返回顺序：作者播放流 → 作者作品列表 → 推荐页
+- 关注状态同步 Iwara 官方数据
+- 支持关注 / 取消关注作者
+- 主菜单可查看 Iwara 官方“已关注用户”并进入作者主页
+- 支持发送好友申请 / 取消好友申请 / 删除好友
+- 好友关系状态通过 Iwara 官方接口读取
+
 ### 播放器与预加载
 
 - AndroidX Media3 / ExoPlayer
@@ -42,6 +55,8 @@ Android 原生的 Iwara 竖屏短视频流播放器，目标是提供类似短�
 - 密码不保存到本地
 - Iwara 点赞真实同步：`POST / DELETE /video/{id}/like`
 - Iwara 点赞记录：`/favorites/videos`
+- Iwara 关注同步
+- Iwara 好友关系同步
 
 ### 本地收藏
 
@@ -67,6 +82,17 @@ IwaraFlow 的星形收藏是**纯本地收藏**，与 Iwara 官方点赞完全�
 - 搜索结果同样经过可播放验证
 - 使用 Android DownloadManager 下载
 - 下载前可选择视频清晰度
+
+### 应用内更新
+
+- 启动 App 后后台检查 GitHub 最新 Release
+- 自动检查间隔约 6 小时，避免频繁请求
+- 主菜单提供 **检查更新** 手动入口
+- 发现新版本后显示：当前版本、新版本号、更新内容
+- 点击“立即更新”直接下载固定签名 `IwaraFlow-signed.apk`
+- 下载完成后自动拉起 Android 系统安装界面
+- Android 8+ 如未授权“安装未知应用”，会自动进入对应授权页面，返回 App 后继续安装
+- 更新 APK 使用与现有安装包相同的固定签名，可直接覆盖升级
 
 ## 推荐算法
 
@@ -102,6 +128,7 @@ IwaraFlow 的星形收藏是**纯本地收藏**，与 Iwara 官方点赞完全�
 - 登录、保存、搜索等主按钮增加 OEM 主题兼容兜底，确保按钮文字可见
 - 搜索和登录输入框改为浅蓝色系
 - 浏览历史改为浅蓝背景 + 浅色卡片 + 深色文字
+- 作者主页采用浅蓝色卡片列表
 - 调整卡片圆角、内边距和条目间距
 - 画质 / 下载 / 小窗按钮带文字说明，避免只有图标难以理解
 - IwaraFlow 专属 Android launcher 图标
@@ -117,6 +144,7 @@ IwaraFlow 的星形收藏是**纯本地收藏**，与 Iwara 官方点赞完全�
 - AndroidX Security Crypto
 - Android DownloadManager
 - Android Picture-in-Picture
+- GitHub Releases 应用内更新
 
 ## 构建
 
@@ -132,20 +160,43 @@ IwaraFlow 的星形收藏是**纯本地收藏**，与 Iwara 官方点赞完全�
 gradlew.bat assembleDebug
 ```
 
-## GitHub Actions APK
+## GitHub Actions APK / Release
 
-仓库包含自动 Android 构建工作流。
+仓库包含自动 Android 构建与发布工作流。
 
 每次推送到 `main` 后会自动：
 
 1. 配置 JDK / Android SDK / Gradle
-2. 构建可安装 APK
-3. 使用 `apksigner verify` 检查 APK 签名
-4. 上传 `IwaraFlow-signed-APK` Artifact
+2. 构建 release APK
+3. 使用仓库内固定 keystore 对 APK 签名
+4. 使用 `apksigner verify` 验证签名
+5. 上传 `IwaraFlow-signed-APK` Actions Artifact
+6. 根据 `versionName` 创建或刷新对应 GitHub Release
+7. 将 `IwaraFlow-signed.apk` 上传为 Release 资产，供 App 内更新直接下载
 
-> 当前 Actions 产物可以直接安装。后续若需要不同版本长期无缝覆盖安装，建议配置固定 release keystore 与 GitHub Secrets，避免构建环境签名变化。
+> 发布新正式版本时必须同时提高 `versionCode` 与 `versionName`，否则已安装相同版本号的客户端不会弹出更新提示。
 
 ## 版本说明
+
+### v0.6.0
+
+- 新增应用内检查更新
+- 启动时后台自动检查新版本
+- 主菜单新增“检查更新”
+- 更新弹窗展示当前版本 / 新版本 / Release 更新内容
+- 支持直接下载固定签名 APK 并拉起系统覆盖安装
+- GitHub Actions 自动发布/刷新 GitHub Release APK
+
+### v0.5.0
+
+- 点击作者名进入作者主页
+- 作者主页展示作者全部视频并分页加载
+- 不可播放作者作品保留并显示具体原因
+- 点击作者作品后只在该作者可播放作品中上下滑动
+- 新增 Iwara 官方关注 / 取消关注同步
+- 新增 Iwara 官方好友申请 / 取消申请 / 删除好友同步
+- 主菜单新增已关注用户列表
+- 作者播放流返回作者列表，再返回推荐页
 
 ### v0.4.0
 

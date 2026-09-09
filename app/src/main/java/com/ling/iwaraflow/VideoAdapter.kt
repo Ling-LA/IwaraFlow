@@ -12,6 +12,7 @@ import android.widget.Toast
 import androidx.media3.common.MediaItem
 import androidx.media3.common.Player
 import androidx.media3.exoplayer.ExoPlayer
+import androidx.media3.exoplayer.DefaultRenderersFactory
 import androidx.media3.ui.PlayerView
 import androidx.recyclerview.widget.RecyclerView
 
@@ -55,13 +56,13 @@ class VideoAdapter(
 
     fun setActive(position: Int) {
         activePosition = position
-        holders.forEach { holder ->
+        holders.toList().forEach { holder ->
             holder.setActive(holder.bindingAdapterPosition == activePosition)
         }
         preloadAround(position)
     }
 
-    fun pauseAll() = holders.forEach { it.setActive(false) }
+    fun pauseAll() = holders.toList().forEach { it.setActive(false) }
 
     fun resumeActive() = holders.forEach { holder ->
         holder.setActive(holder.bindingAdapterPosition == activePosition)
@@ -77,7 +78,7 @@ class VideoAdapter(
     }
 
     private fun preloadAround(position: Int) {
-        // ViewPager2 自己会创建相邻页并 prepare；这里额外提前解析下下条的 CDN 地址。
+        // 只预解析后续视频源，不提前创建额外 ExoPlayer，避免多个硬件解码器互相抢资源。
         listOf(position + 1, position + 2).forEach { index ->
             val item = items.getOrNull(index) ?: return@forEach
             if (item.sources != null) return@forEach
@@ -130,6 +131,9 @@ class VideoAdapter(
         private var generation = 0
         private var likeBusy = false
         private val tapHandler = Handler(Looper.getMainLooper())
+        private val watchdogHandler = Handler(Looper.getMainLooper())
+        private var lastWatchdogPosition = -1L
+        private var stalledChecks = 0
         private var pendingSingleTap: Runnable? = null
         private var lastTap = 0L
 
@@ -145,7 +149,13 @@ class VideoAdapter(
             quality.text = displayQuality(item)
 
             like.setOnClickListener { toggleRemoteLike(item, !item.liked, animate = false) }
-            favorite.setOnClickListener { toggleRemoteLike(item, !item.liked, animate = false) }
+            favorite.setOnClickListener {
+                val desired = !item.localFavorite
+                history.setLocalFavorite(item, desired)
+                if (desired) history.recordInteraction(item, "favorite", 1.4)
+                updateLikeUi(item)
+                Toast.makeText(itemView.context, if (desired) "已收藏到本地" else "已取消本地收藏", Toast.LENGTH_SHORT).show()
+            }
             quality.setOnClickListener { showQualityChooser(item, false) }
             download.setOnClickListener { showQualityChooser(item, true) }
             pip.setOnClickListener { onEnterPip() }
@@ -178,7 +188,10 @@ class VideoAdapter(
 
         private fun start(item: VideoItem) {
             val bindGeneration = generation
-            val p = ExoPlayer.Builder(itemView.context).build().apply {
+            if (!active) return
+            val renderersFactory = DefaultRenderersFactory(itemView.context)
+                .setEnableDecoderFallback(true)
+            val p = ExoPlayer.Builder(itemView.context, renderersFactory).build().apply {
                 repeatMode = Player.REPEAT_MODE_OFF
                 playWhenReady = false
                 volume = 0f
@@ -225,7 +238,7 @@ class VideoAdapter(
             val shouldPlay = active && (p.isPlaying || !preservePosition)
             item.streamUrl = source.url
             item.selectedQuality = if (preferred == "highest") null else source.name
-            quality.text = if (preferred == "highest") "最高" else source.name
+            quality.text = "画质\n" + if (preferred == "highest") "最高" else source.name
             p.setMediaItem(MediaItem.fromUri(source.url))
             if (oldPosition > 0) p.seekTo(oldPosition)
             p.prepare()
@@ -241,37 +254,88 @@ class VideoAdapter(
         }
 
         fun setActive(enabled: Boolean) {
-            if (active == enabled && player != null) {
-                if (!enabled) forceSilent()
-                return
-            }
-            if (!enabled && active) persistHistory(completed = false)
-            active = enabled
-            val p = player ?: return
             if (enabled) {
-                p.volume = 1f
-                if (p.playbackState == Player.STATE_ENDED) {
-                    p.seekTo(0L)
-                    p.prepare()
+                if (active && player != null) return
+                active = true
+                if (player == null) {
+                    bound?.let { start(it) }
+                } else {
+                    player?.apply {
+                        volume = 1f
+                        playWhenReady = true
+                        play()
+                    }
                 }
-                p.playWhenReady = true
-                p.play()
                 bound?.let { item ->
-                    // 只在真正成为当前页时写历史；推荐筛选发生在这之前。
-                    history.recordWatch(item, p.currentPosition, p.duration.coerceAtLeast(0L), false)
+                    val p = player
+                    history.recordWatch(item, p?.currentPosition ?: 0L, (p?.duration ?: 0L).coerceAtLeast(0L), false)
                 }
+                startWatchdog()
             } else {
-                forceSilent()
+                if (!active && player == null) return
+                if (active) persistHistory(completed = false)
+                active = false
+                stopWatchdog()
+                // 切页时直接释放旧解码器，彻底杜绝后台音频/视频解码继续运行。
+                releasePlayerOnly()
             }
         }
 
         private fun forceSilent() {
             player?.let { p ->
-                // 三重保险：旧页面的异步解析即使刚完成，也不能在后台“复活”。
                 p.playWhenReady = false
                 p.pause()
                 p.volume = 0f
             }
+        }
+
+        private val watchdog = object : Runnable {
+            override fun run() {
+                val p = player
+                if (!active || p == null) return
+                val position = p.currentPosition
+                val shouldAdvance = p.playWhenReady && p.playbackState == Player.STATE_READY
+                if (shouldAdvance && lastWatchdogPosition >= 0 && position <= lastWatchdogPosition + 120L) {
+                    stalledChecks++
+                } else {
+                    stalledChecks = 0
+                }
+                if (stalledChecks >= 2) {
+                    recoverStalledPlayback(position)
+                    stalledChecks = 0
+                }
+                lastWatchdogPosition = position
+                watchdogHandler.postDelayed(this, 3000L)
+            }
+        }
+
+        private fun startWatchdog() {
+            watchdogHandler.removeCallbacks(watchdog)
+            lastWatchdogPosition = -1L
+            stalledChecks = 0
+            watchdogHandler.postDelayed(watchdog, 3000L)
+        }
+
+        private fun stopWatchdog() {
+            watchdogHandler.removeCallbacks(watchdog)
+            lastWatchdogPosition = -1L
+            stalledChecks = 0
+        }
+
+        private fun recoverStalledPlayback(position: Long) {
+            val item = bound ?: return
+            val sources = item.sources ?: return
+            val p = player ?: return
+            val source = api.chooseSource(sources, item.selectedQuality ?: prefs.defaultQuality) ?: return
+            p.stop()
+            p.clearMediaItems()
+            p.setMediaItem(MediaItem.fromUri(source.url))
+            p.prepare()
+            if (position > 0L) p.seekTo(position)
+            p.volume = 1f
+            p.playWhenReady = true
+            p.play()
+            Toast.makeText(itemView.context, "播放器已自动恢复", Toast.LENGTH_SHORT).show()
         }
 
         private fun persistHistory(completed: Boolean) {
@@ -298,8 +362,6 @@ class VideoAdapter(
                             item.likes = (item.likes + if (desired) 1 else -1).coerceAtLeast(0)
                         }
                         item.liked = desired
-                        // Iwara 的 Favorites 页面就是 liked videos；本地表作为离线镜像。
-                        history.setLocalFavorite(item, desired)
                         if (desired) history.recordInteraction(item, "like", 2.0)
                         updateLikeUi(item)
                     }.onFailure {
@@ -313,8 +375,8 @@ class VideoAdapter(
         private fun updateLikeUi(item: VideoItem) {
             like.text = if (item.liked) "♥" else "♡"
             like.setTextColor(if (item.liked) 0xFFFF365D.toInt() else 0xFFFFFFFF.toInt())
-            favorite.text = if (item.liked) "★" else "☆"
-            favorite.setTextColor(if (item.liked) 0xFFFFD54F.toInt() else 0xFFFFFFFF.toInt())
+            favorite.text = if (item.localFavorite) "★" else "☆"
+            favorite.setTextColor(if (item.localFavorite) 0xFFFFD54F.toInt() else 0xFFFFFFFF.toInt())
             likeCount.text = formatCount(item.likes)
         }
 
@@ -372,7 +434,7 @@ class VideoAdapter(
                         onDownload(item, source)
                     } else {
                         item.selectedQuality = source.name
-                        quality.text = source.name
+                        quality.text = "画质\n${source.name}"
                         prepareChosenSource(item, sources, preservePosition = true)
                     }
                 }
@@ -389,6 +451,7 @@ class VideoAdapter(
         fun release() {
             persistHistory(completed = false)
             active = false
+            stopWatchdog()
             generation++
             bound = null
             pendingSingleTap?.let { tapHandler.removeCallbacks(it) }
@@ -407,9 +470,12 @@ class VideoAdapter(
             player = null
         }
 
-        private fun displayQuality(item: VideoItem): String = item.selectedQuality ?: when (prefs.defaultQuality) {
-            "highest" -> "最高"
-            else -> prefs.defaultQuality
+        private fun displayQuality(item: VideoItem): String {
+            val value = item.selectedQuality ?: when (prefs.defaultQuality) {
+                "highest" -> "最高"
+                else -> prefs.defaultQuality
+            }
+            return "画质\n$value"
         }
 
         private fun formatCount(value: Int): String = when {

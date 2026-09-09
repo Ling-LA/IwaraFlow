@@ -1,5 +1,6 @@
 <?xml version="1.0" encoding="utf-8"?>
 <FrameLayout xmlns:android="http://schemas.android.com/apk/res/android"
+    xmlns:app="http://schemas.android.com/apk/res-auto"
     android:id="@+id/root"
     android:layout_width="match_parent"
     android:layout_height="match_parent"
@@ -9,9 +10,23 @@
         android:id="@+id/playerView"
         android:layout_width="match_parent"
         android:layout_height="match_parent"
-        android:keepScreenOn="true" />
+        android:keepScreenOn="true"
+        app:resize_mode="fit"
+        app:use_controller="false" />
+
+    <TextView
+        android:id="@+id/likeBurst"
+        android:layout_width="160dp"
+        android:layout_height="160dp"
+        android:layout_gravity="center"
+        android:gravity="center"
+        android:text="♥"
+        android:textColor="#FFFF365D"
+        android:textSize="118sp"
+        android:visibility="gone" />
 
     <LinearLayout
+        android:id="@+id/infoPanel"
         android:layout_width="match_parent"
         android:layout_height="wrap_content"
         android:layout_gravity="bottom"
@@ -19,20 +34,95 @@
         android:paddingStart="16dp"
         android:paddingEnd="88dp"
         android:paddingBottom="28dp">
-        <TextView android:id="@+id/author" android:layout_width="wrap_content" android:layout_height="wrap_content" android:textColor="#FFFFFFFF" android:textSize="16sp" android:textStyle="bold" />
-        <TextView android:id="@+id/title" android:layout_width="wrap_content" android:layout_height="wrap_content" android:layout_marginTop="6dp" android:maxLines="3" android:textColor="#FFFFFFFF" android:textSize="15sp" />
-        <TextView android:id="@+id/tags" android:layout_width="wrap_content" android:layout_height="wrap_content" android:layout_marginTop="5dp" android:maxLines="2" android:textColor="#CCFFFFFF" android:textSize="13sp" />
+
+        <TextView
+            android:id="@+id/author"
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:textColor="#FFFFFFFF"
+            android:textSize="16sp"
+            android:textStyle="bold" />
+
+        <TextView
+            android:id="@+id/title"
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:layout_marginTop="6dp"
+            android:maxLines="3"
+            android:textColor="#FFFFFFFF"
+            android:textSize="15sp" />
+
+        <TextView
+            android:id="@+id/tags"
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:layout_marginTop="5dp"
+            android:maxLines="2"
+            android:textColor="#CCFFFFFF"
+            android:textSize="13sp" />
     </LinearLayout>
 
     <LinearLayout
-        android:layout_width="72dp"
+        android:id="@+id/actionPanel"
+        android:layout_width="76dp"
         android:layout_height="wrap_content"
         android:layout_gravity="end|bottom"
         android:gravity="center"
         android:orientation="vertical"
-        android:paddingBottom="36dp">
-        <TextView android:id="@+id/like" android:layout_width="match_parent" android:layout_height="64dp" android:gravity="center" android:text="♡" android:textColor="#FFFFFFFF" android:textSize="38sp" />
-        <TextView android:id="@+id/likeCount" android:layout_width="match_parent" android:layout_height="wrap_content" android:gravity="center" android:textColor="#FFFFFFFF" android:textSize="12sp" />
-        <TextView android:id="@+id/favorite" android:layout_width="match_parent" android:layout_height="64dp" android:gravity="center" android:text="☆" android:textColor="#FFFFFFFF" android:textSize="36sp" />
+        android:paddingBottom="28dp">
+
+        <TextView
+            android:id="@+id/like"
+            android:layout_width="match_parent"
+            android:layout_height="54dp"
+            android:gravity="center"
+            android:text="♡"
+            android:textColor="#FFFFFFFF"
+            android:textSize="36sp" />
+
+        <TextView
+            android:id="@+id/likeCount"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:gravity="center"
+            android:textColor="#FFFFFFFF"
+            android:textSize="12sp" />
+
+        <TextView
+            android:id="@+id/favorite"
+            android:layout_width="match_parent"
+            android:layout_height="50dp"
+            android:gravity="center"
+            android:text="☆"
+            android:textColor="#FFFFFFFF"
+            android:textSize="32sp" />
+
+        <TextView
+            android:id="@+id/quality"
+            android:layout_width="match_parent"
+            android:layout_height="42dp"
+            android:gravity="center"
+            android:text="最高"
+            android:textColor="#FFFFFFFF"
+            android:textSize="12sp"
+            android:textStyle="bold" />
+
+        <TextView
+            android:id="@+id/download"
+            android:layout_width="match_parent"
+            android:layout_height="46dp"
+            android:gravity="center"
+            android:text="↓"
+            android:textColor="#FFFFFFFF"
+            android:textSize="30sp" />
+
+        <TextView
+            android:id="@+id/pip"
+            android:layout_width="match_parent"
+            android:layout_height="44dp"
+            android:gravity="center"
+            android:text="▣"
+            android:textColor="#FFFFFFFF"
+            android:textSize="26sp" />
     </LinearLayout>
 </FrameLayout>

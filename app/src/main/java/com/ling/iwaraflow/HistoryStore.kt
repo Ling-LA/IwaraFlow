@@ -110,6 +110,7 @@ class HistoryStore(context: Context) : SQLiteOpenHelper(context, "iwaraflow.db",
             put("created_at", System.currentTimeMillis())
         }
         writableDatabase.insert("interactions", null, values)
+        // 防止长期使用无限增长。
         writableDatabase.execSQL(
             "DELETE FROM interactions WHERE id NOT IN (SELECT id FROM interactions ORDER BY created_at DESC LIMIT 1000)"
         )

@@ -214,15 +214,15 @@ class MainActivityV3 : AppCompatActivity() {
         }
         panel.addView(TextView(this).apply {
             text = "搜索标题、标签或作者"
-            setTextColor(0xB3FFFFFF.toInt())
+            setTextColor(0xFF607D93.toInt())
             textSize = 13f
             setPadding(0, 0, 0, dp(10))
         })
         val input = EditText(this).apply {
             hint = "例如 MMD、角色名、作者名"
             setSingleLine(true)
-            setTextColor(0xFFFFFFFF.toInt())
-            setHintTextColor(0x66FFFFFF)
+            setTextColor(0xFF17324A.toInt())
+            setHintTextColor(0x99607D93.toInt())
             background = ContextCompat.getDrawable(this@MainActivityV3, R.drawable.bg_input)
             setPadding(dp(16), dp(12), dp(16), dp(12))
         }
@@ -280,8 +280,8 @@ class MainActivityV3 : AppCompatActivity() {
             hint = "Iwara 邮箱"
             inputType = InputType.TYPE_CLASS_TEXT or InputType.TYPE_TEXT_VARIATION_EMAIL_ADDRESS
             setSingleLine(true)
-            setTextColor(0xFFFFFFFF.toInt())
-            setHintTextColor(0x66FFFFFF)
+            setTextColor(0xFF17324A.toInt())
+            setHintTextColor(0x99607D93.toInt())
             background = ContextCompat.getDrawable(this@MainActivityV3, R.drawable.bg_input)
             setPadding(dp(16), dp(12), dp(16), dp(12))
         }
@@ -289,8 +289,8 @@ class MainActivityV3 : AppCompatActivity() {
             hint = "密码"
             inputType = InputType.TYPE_CLASS_TEXT or InputType.TYPE_TEXT_VARIATION_PASSWORD
             setSingleLine(true)
-            setTextColor(0xFFFFFFFF.toInt())
-            setHintTextColor(0x66FFFFFF)
+            setTextColor(0xFF17324A.toInt())
+            setHintTextColor(0x99607D93.toInt())
             background = ContextCompat.getDrawable(this@MainActivityV3, R.drawable.bg_input)
             setPadding(dp(16), dp(12), dp(16), dp(12))
         }
@@ -359,7 +359,7 @@ class MainActivityV3 : AppCompatActivity() {
         }
         panel.addView(TextView(this).apply {
             text = subtitle
-            setTextColor(0x99FFFFFF.toInt())
+            setTextColor(0xFF607D93.toInt())
             textSize = 12f
             setPadding(dp(24), dp(4), dp(24), dp(8))
         })
@@ -489,14 +489,19 @@ class MainActivityV3 : AppCompatActivity() {
     }
 
     private fun styleDialogButtons(dialog: AlertDialog) {
-        val accent = 0xFFFF4F78.toInt()
-        dialog.getButton(AlertDialog.BUTTON_POSITIVE)?.apply {
-            setTextColor(0xFFFFFFFF.toInt())
-            backgroundTintList = ColorStateList.valueOf(accent)
-            setPadding(dp(20), 0, dp(20), 0)
+        val accent = 0xFFD84B73.toInt()
+        listOf(
+            AlertDialog.BUTTON_POSITIVE,
+            AlertDialog.BUTTON_NEGATIVE,
+            AlertDialog.BUTTON_NEUTRAL
+        ).forEach { which ->
+            dialog.getButton(which)?.apply {
+                setTextColor(accent)
+                backgroundTintList = ColorStateList.valueOf(0x00000000)
+                setTypeface(null, android.graphics.Typeface.BOLD)
+                textSize = 14f
+            }
         }
-        dialog.getButton(AlertDialog.BUTTON_NEGATIVE)?.setTextColor(accent)
-        dialog.getButton(AlertDialog.BUTTON_NEUTRAL)?.setTextColor(accent)
     }
 
     private fun dp(value: Int): Int = (value * resources.displayMetrics.density).toInt()

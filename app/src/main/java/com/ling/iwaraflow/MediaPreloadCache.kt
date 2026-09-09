@@ -42,8 +42,10 @@ class MediaPreloadCache(context: Context) {
     fun createMediaSource(url: String): MediaSource =
         mediaSourceFactory.createMediaSource(MediaItem.fromUri(url))
 
+    fun prefetch(url: String) = prefetch(url, 2L * 1024L * 1024L)
+
     /** Cache only the beginning of a video so the next swipe can start immediately. */
-    fun prefetch(url: String, bytes: Long = 2L * 1024L * 1024L) {
+    fun prefetch(url: String, bytes: Long) {
         executor.execute {
             runCatching {
                 val dataSpec = DataSpec.Builder()

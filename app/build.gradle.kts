@@ -11,8 +11,8 @@ android {
         applicationId = "com.ling.iwaraflow"
         minSdk = 28
         targetSdk = 36
-        versionCode = 3
-        versionName = "0.3.0"
+        versionCode = 4
+        versionName = "0.4.0"
     }
 
     buildTypes {
@@ -38,5 +38,7 @@ dependencies {
     implementation("androidx.media3:media3-exoplayer:1.11.0")
     implementation("androidx.media3:media3-exoplayer-hls:1.11.0")
     implementation("androidx.media3:media3-ui:1.11.0")
+    implementation("androidx.media3:media3-datasource:1.11.0")
+    implementation("androidx.media3:media3-database:1.11.0")
     implementation("com.squareup.okhttp3:okhttp:4.12.0")
 }

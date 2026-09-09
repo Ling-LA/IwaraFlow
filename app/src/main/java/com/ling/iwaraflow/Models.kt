@@ -6,6 +6,16 @@ data class VideoSource(
     val score: Int
 )
 
+data class IwaraAuthor(
+    val id: String,
+    val name: String,
+    val username: String,
+    val description: String = "",
+    var following: Boolean = false,
+    var friend: Boolean = false,
+    var friendStatus: String = "none"
+)
+
 data class VideoItem(
     val id: String,
     val title: String,
@@ -18,7 +28,12 @@ data class VideoItem(
     var localFavorite: Boolean = false,
     var streamUrl: String? = null,
     var sources: List<VideoSource>? = null,
-    var selectedQuality: String? = null
+    var selectedQuality: String? = null,
+    val authorId: String = "",
+    val authorUsername: String = "",
+    val isPrivate: Boolean = false,
+    val status: String = "",
+    var playbackIssue: String? = null
 )
 
 data class LoginResult(

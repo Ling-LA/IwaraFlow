@@ -11,7 +11,6 @@ import android.view.ViewGroup
 import android.view.animation.DecelerateInterpolator
 import android.widget.TextView
 import android.widget.Toast
-import androidx.media3.common.MediaItem
 import androidx.media3.common.Player
 import androidx.media3.exoplayer.DefaultRenderersFactory
 import androidx.media3.exoplayer.ExoPlayer
@@ -23,6 +22,7 @@ class VideoAdapter(
     private val api: IwaraApi,
     private val history: HistoryStore,
     private val prefs: AppPrefs,
+    private val mediaCache: MediaPreloadCache,
     private val onDownload: (VideoItem, VideoSource) -> Unit,
     private val onEnterPip: () -> Unit,
     private val onEnded: (Int) -> Unit,
@@ -31,10 +31,13 @@ class VideoAdapter(
 
     val items = mutableListOf<VideoItem>()
     private val holders = mutableSetOf<Holder>()
+    private val preloadHandler = Handler(Looper.getMainLooper())
+    private var preloadTask: Runnable? = null
     private var activePosition = RecyclerView.NO_POSITION
     private var pipMode = false
 
     fun replace(newItems: List<VideoItem>) {
+        cancelIdlePreload()
         holders.toList().forEach { it.release() }
         items.clear()
         items.addAll(newItems)
@@ -52,6 +55,7 @@ class VideoAdapter(
     }
 
     fun releaseAll() {
+        cancelIdlePreload()
         holders.toList().forEach { it.release() }
         holders.clear()
     }
@@ -61,14 +65,17 @@ class VideoAdapter(
         holders.toList().forEach { holder ->
             holder.setActive(holder.bindingAdapterPosition == activePosition)
         }
-        preloadAround(position)
+        scheduleIdlePreload(position)
     }
 
-    fun pauseAll() = holders.toList().forEach { it.setActive(false) }
+    fun pauseAll() {
+        cancelIdlePreload()
+        holders.toList().forEach { it.setActive(false) }
+    }
 
     fun resumeActive() = holders.forEach { holder ->
         holder.setActive(holder.bindingAdapterPosition == activePosition)
-    }
+    }.also { scheduleIdlePreload(activePosition) }
 
     fun isActivePlaying(): Boolean = holders.any {
         it.bindingAdapterPosition == activePosition && it.isPlaying()
@@ -79,17 +86,39 @@ class VideoAdapter(
         holders.forEach { it.setChromeVisible(!enabled) }
     }
 
-    private fun preloadAround(position: Int) {
-        listOf(position + 1, position + 2).forEach { index ->
-            val item = items.getOrNull(index) ?: return@forEach
-            if (item.sources != null) return@forEach
-            api.resolveSources(item.id) { result ->
-                result.onSuccess { sources ->
-                    item.sources = sources
-                    item.streamUrl = api.chooseSource(sources, item.selectedQuality ?: prefs.defaultQuality)?.url
+    private fun cancelIdlePreload() {
+        preloadTask?.let { preloadHandler.removeCallbacks(it) }
+        preloadTask = null
+    }
+
+    private fun scheduleIdlePreload(position: Int) {
+        cancelIdlePreload()
+        if (position == RecyclerView.NO_POSITION) return
+        val task = Runnable {
+            val activeReady = holders.any {
+                it.bindingAdapterPosition == position && it.readyForIdlePreload()
+            }
+            if (!activeReady) return@Runnable
+            listOf(position + 1, position + 2).forEach { index ->
+                val item = items.getOrNull(index) ?: return@forEach
+                val knownUrl = item.streamUrl
+                if (!knownUrl.isNullOrBlank()) {
+                    mediaCache.prefetch(knownUrl)
+                } else {
+                    api.resolveSources(item.id) { result ->
+                        result.onSuccess { sources ->
+                            item.sources = sources
+                            val source = api.chooseSource(sources, item.selectedQuality ?: prefs.defaultQuality)
+                            item.streamUrl = source?.url
+                            source?.url?.let(mediaCache::prefetch)
+                        }
+                    }
                 }
             }
         }
+        preloadTask = task
+        // Current playback gets network priority. Only prefetch after it has been READY for a while.
+        preloadHandler.postDelayed(task, 1800L)
     }
 
     override fun onCreateViewHolder(parent: ViewGroup, viewType: Int): Holder {
@@ -191,9 +220,7 @@ class VideoAdapter(
                     lastTap = now
                     val action = Runnable {
                         if (System.currentTimeMillis() - lastTap >= 280L) {
-                            player?.let { p ->
-                                if (p.isPlaying) p.pause() else if (active) p.play()
-                            }
+                            player?.let { p -> if (p.isPlaying) p.pause() else if (active) p.play() }
                             lastTap = 0L
                         }
                     }
@@ -213,9 +240,7 @@ class VideoAdapter(
                         true
                     }
                     MotionEvent.ACTION_MOVE -> {
-                        if (!touchMoved &&
-                            (abs(event.x - downX) > touchSlop || abs(event.y - downY) > touchSlop)
-                        ) {
+                        if (!touchMoved && (abs(event.x - downX) > touchSlop || abs(event.y - downY) > touchSlop)) {
                             touchMoved = true
                             tapHandler.removeCallbacks(holdToSpeed)
                             if (speedBoosting) stopSpeedBoost()
@@ -224,11 +249,7 @@ class VideoAdapter(
                     }
                     MotionEvent.ACTION_UP -> {
                         tapHandler.removeCallbacks(holdToSpeed)
-                        if (speedBoosting) {
-                            stopSpeedBoost()
-                        } else if (!touchMoved) {
-                            v.performClick()
-                        }
+                        if (speedBoosting) stopSpeedBoost() else if (!touchMoved) v.performClick()
                         true
                     }
                     MotionEvent.ACTION_CANCEL -> {
@@ -247,14 +268,17 @@ class VideoAdapter(
         private fun start(item: VideoItem) {
             val bindGeneration = generation
             if (!active) return
-            val renderersFactory = DefaultRenderersFactory(itemView.context)
-                .setEnableDecoderFallback(true)
+            val renderersFactory = DefaultRenderersFactory(itemView.context).setEnableDecoderFallback(true)
             val p = ExoPlayer.Builder(itemView.context, renderersFactory).build().apply {
                 repeatMode = Player.REPEAT_MODE_OFF
                 playWhenReady = false
                 volume = 0f
                 addListener(object : Player.Listener {
                     override fun onPlaybackStateChanged(playbackState: Int) {
+                        if (playbackState == Player.STATE_READY && active) {
+                            val pos = bindingAdapterPosition
+                            if (pos != RecyclerView.NO_POSITION) scheduleIdlePreload(pos)
+                        }
                         if (playbackState == Player.STATE_ENDED && active && bound?.id == item.id) {
                             persistHistory(completed = true)
                             history.recordInteraction(item, "completed", 0.7)
@@ -274,16 +298,13 @@ class VideoAdapter(
                 prepareChosenSource(item, cachedSources, preservePosition = false)
                 return
             }
-
             api.resolveSources(item.id) { result ->
                 itemView.post {
                     if (generation != bindGeneration || bound?.id != item.id || player !== p) return@post
                     result.onSuccess { sources ->
                         item.sources = sources
                         prepareChosenSource(item, sources, preservePosition = false)
-                    }.onFailure {
-                        title.text = "${item.title}\n[播放地址获取失败：${it.message}]"
-                    }
+                    }.onFailure { title.text = "${item.title}\n[播放地址获取失败：${it.message}]" }
                 }
             }
         }
@@ -291,39 +312,29 @@ class VideoAdapter(
         private fun prepareChosenSource(item: VideoItem, sources: List<VideoSource>, preservePosition: Boolean) {
             val p = player ?: return
             val preferred = item.selectedQuality ?: prefs.defaultQuality
-            val source = api.chooseSource(sources, preferred) ?: return
+            val source = if (!item.streamUrl.isNullOrBlank()) {
+                sources.firstOrNull { it.url == item.streamUrl } ?: api.chooseSource(sources, preferred)
+            } else api.chooseSource(sources, preferred)
+            source ?: return
             val oldPosition = if (preservePosition) p.currentPosition else 0L
             val shouldPlay = active && (p.isPlaying || !preservePosition)
             item.streamUrl = source.url
-            item.selectedQuality = if (preferred == "highest") null else source.name
-            quality.text = "画质\n" + if (preferred == "highest") "最高" else source.name
-            p.setMediaItem(MediaItem.fromUri(source.url))
+            if (item.selectedQuality == null && preferred != "highest") item.selectedQuality = source.name
+            quality.text = "画质\n" + (item.selectedQuality ?: if (preferred == "highest") "最高" else source.name)
+            p.setMediaSource(mediaCache.createMediaSource(source.url))
             if (oldPosition > 0) p.seekTo(oldPosition)
             p.prepare()
-            if (active) {
-                p.volume = 1f
-                p.playWhenReady = shouldPlay
-                if (shouldPlay) p.play()
-            } else {
-                p.playWhenReady = false
-                p.volume = 0f
-                p.pause()
-            }
+            p.volume = if (active) 1f else 0f
+            p.playWhenReady = active && shouldPlay
+            if (active && shouldPlay) p.play()
         }
 
         fun setActive(enabled: Boolean) {
             if (enabled) {
                 if (active && player != null) return
                 active = true
-                if (player == null) {
-                    bound?.let { start(it) }
-                } else {
-                    player?.apply {
-                        volume = 1f
-                        playWhenReady = true
-                        play()
-                    }
-                }
+                if (player == null) bound?.let { start(it) }
+                else player?.apply { volume = 1f; playWhenReady = true; play() }
                 bound?.let { item ->
                     val p = player
                     history.recordWatch(item, p?.currentPosition ?: 0L, (p?.duration ?: 0L).coerceAtLeast(0L), false)
@@ -340,19 +351,13 @@ class VideoAdapter(
             }
         }
 
+        fun readyForIdlePreload(): Boolean = active && player?.playbackState == Player.STATE_READY
+
         private fun stopSpeedBoost() {
             tapHandler.removeCallbacks(holdToSpeed)
             speedBoosting = false
             speedIndicator.visibility = View.GONE
             player?.setPlaybackSpeed(1f)
-        }
-
-        private fun forceSilent() {
-            player?.let { p ->
-                p.playWhenReady = false
-                p.pause()
-                p.volume = 0f
-            }
         }
 
         private val watchdog = object : Runnable {
@@ -361,11 +366,8 @@ class VideoAdapter(
                 if (!active || p == null) return
                 val position = p.currentPosition
                 val shouldAdvance = p.playWhenReady && p.playbackState == Player.STATE_READY
-                if (shouldAdvance && lastWatchdogPosition >= 0 && position <= lastWatchdogPosition + 120L) {
-                    stalledChecks++
-                } else {
-                    stalledChecks = 0
-                }
+                if (shouldAdvance && lastWatchdogPosition >= 0 && position <= lastWatchdogPosition + 120L) stalledChecks++
+                else stalledChecks = 0
                 if (stalledChecks >= 2) {
                     recoverStalledPlayback(position)
                     stalledChecks = 0
@@ -392,10 +394,12 @@ class VideoAdapter(
             val item = bound ?: return
             val sources = item.sources ?: return
             val p = player ?: return
-            val source = api.chooseSource(sources, item.selectedQuality ?: prefs.defaultQuality) ?: return
+            val source = sources.firstOrNull { it.url == item.streamUrl }
+                ?: api.chooseSource(sources, item.selectedQuality ?: prefs.defaultQuality)
+                ?: return
             p.stop()
             p.clearMediaItems()
-            p.setMediaItem(MediaItem.fromUri(source.url))
+            p.setMediaSource(mediaCache.createMediaSource(source.url))
             p.prepare()
             if (position > 0L) p.seekTo(position)
             p.volume = 1f
@@ -414,19 +418,14 @@ class VideoAdapter(
 
         private fun toggleRemoteLike(item: VideoItem, desired: Boolean, animate: Boolean) {
             if (likeBusy) return
-            if (!api.isLoggedIn()) {
-                onNeedLogin()
-                return
-            }
+            if (!api.isLoggedIn()) { onNeedLogin(); return }
             likeBusy = true
             if (animate) showLikeBurst()
             api.likeVideo(item.id, desired) { result ->
                 itemView.post {
                     likeBusy = false
                     result.onSuccess {
-                        if (item.liked != desired) {
-                            item.likes = (item.likes + if (desired) 1 else -1).coerceAtLeast(0)
-                        }
+                        if (item.liked != desired) item.likes = (item.likes + if (desired) 1 else -1).coerceAtLeast(0)
                         item.liked = desired
                         if (desired) history.recordInteraction(item, "like", 2.0)
                         updateLikeUi(item)
@@ -452,40 +451,23 @@ class VideoAdapter(
             likeBurst.scaleX = 0.35f
             likeBurst.scaleY = 0.35f
             likeBurst.animate().cancel()
-            likeBurst.animate()
-                .alpha(1f)
-                .scaleX(1.18f)
-                .scaleY(1.18f)
-                .setDuration(160L)
-                .setInterpolator(DecelerateInterpolator())
+            likeBurst.animate().alpha(1f).scaleX(1.18f).scaleY(1.18f)
+                .setDuration(160L).setInterpolator(DecelerateInterpolator())
                 .withEndAction {
-                    likeBurst.animate()
-                        .alpha(0f)
-                        .scaleX(0.85f)
-                        .scaleY(0.85f)
-                        .setStartDelay(180L)
-                        .setDuration(240L)
-                        .withEndAction { likeBurst.visibility = View.GONE }
-                        .start()
-                }
-                .start()
+                    likeBurst.animate().alpha(0f).scaleX(0.85f).scaleY(0.85f)
+                        .setStartDelay(180L).setDuration(240L)
+                        .withEndAction { likeBurst.visibility = View.GONE }.start()
+                }.start()
         }
 
         private fun showQualityChooser(item: VideoItem, forDownload: Boolean) {
             val cached = item.sources
-            if (!cached.isNullOrEmpty()) {
-                openSourceDialog(item, cached, forDownload)
-                return
-            }
+            if (!cached.isNullOrEmpty()) { openSourceDialog(item, cached, forDownload); return }
             Toast.makeText(itemView.context, "正在读取清晰度…", Toast.LENGTH_SHORT).show()
             api.resolveSources(item.id) { result ->
                 itemView.post {
-                    result.onSuccess { sources ->
-                        item.sources = sources
-                        openSourceDialog(item, sources, forDownload)
-                    }.onFailure {
-                        Toast.makeText(itemView.context, "清晰度获取失败：${it.message}", Toast.LENGTH_SHORT).show()
-                    }
+                    result.onSuccess { sources -> item.sources = sources; openSourceDialog(item, sources, forDownload) }
+                        .onFailure { Toast.makeText(itemView.context, "清晰度获取失败：${it.message}", Toast.LENGTH_SHORT).show() }
                 }
             }
         }
@@ -496,15 +478,14 @@ class VideoAdapter(
                 .setTitle(if (forDownload) "选择下载清晰度" else "播放清晰度")
                 .setItems(labels) { _, which ->
                     val source = sources[which]
-                    if (forDownload) {
-                        onDownload(item, source)
-                    } else {
+                    if (forDownload) onDownload(item, source)
+                    else {
                         item.selectedQuality = source.name
+                        item.streamUrl = source.url
                         quality.text = "画质\n${source.name}"
                         prepareChosenSource(item, sources, preservePosition = true)
                     }
-                }
-                .show()
+                }.show()
         }
 
         fun setChromeVisible(visible: Boolean) {
@@ -542,10 +523,7 @@ class VideoAdapter(
         }
 
         private fun displayQuality(item: VideoItem): String {
-            val value = item.selectedQuality ?: when (prefs.defaultQuality) {
-                "highest" -> "最高"
-                else -> prefs.defaultQuality
-            }
+            val value = item.selectedQuality ?: when (prefs.defaultQuality) { "highest" -> "最高"; else -> prefs.defaultQuality }
             return "画质\n$value"
         }
 

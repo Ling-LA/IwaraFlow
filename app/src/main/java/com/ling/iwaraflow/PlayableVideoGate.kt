@@ -76,8 +76,7 @@ class PlayableVideoGate(private val api: IwaraApi) {
             client.newCall(request).execute().use { response ->
                 if (response.code != 200 && response.code != 206) return@use false
                 val source = response.body?.source() ?: return@use false
-                source.request(16)
-                source.buffer.size > 0L
+                source.request(1)
             }
         }.getOrDefault(false)
     }

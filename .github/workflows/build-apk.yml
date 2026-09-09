@@ -29,23 +29,25 @@ jobs:
         with:
           gradle-version: '8.13'
 
-      - name: Build APKs
-        run: gradle :app:assembleDebug :app:assembleRelease --stacktrace --no-daemon
+      - name: Build signed installable APK
+        run: gradle :app:assembleDebug --stacktrace --no-daemon
 
-      - name: Collect APKs
+      - name: Verify APK signature
+        shell: bash
+        run: |
+          APKSIGNER="$ANDROID_HOME/build-tools/36.0.0/apksigner"
+          "$APKSIGNER" verify --verbose --print-certs app/build/outputs/apk/debug/app-debug.apk
+
+      - name: Collect installable APK
         shell: bash
         run: |
           mkdir -p out
-          cp app/build/outputs/apk/debug/app-debug.apk out/IwaraFlow-debug.apk
-          RELEASE_APK="$(find app/build/outputs/apk/release -maxdepth 1 -name '*.apk' | head -n 1)"
-          if [ -n "$RELEASE_APK" ]; then
-            cp "$RELEASE_APK" out/IwaraFlow-release.apk
-          fi
-          ls -lh out
+          cp app/build/outputs/apk/debug/app-debug.apk out/IwaraFlow-signed.apk
+          ls -lh out/IwaraFlow-signed.apk
 
-      - name: Upload APKs
+      - name: Upload signed APK
         uses: actions/upload-artifact@v4
         with:
-          name: IwaraFlow-APK
-          path: out/*.apk
+          name: IwaraFlow-signed-APK
+          path: out/IwaraFlow-signed.apk
           if-no-files-found: error

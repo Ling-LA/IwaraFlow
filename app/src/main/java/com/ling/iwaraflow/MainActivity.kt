@@ -20,11 +20,16 @@ import androidx.core.app.ActivityCompat
 import androidx.core.content.ContextCompat
 import androidx.viewpager2.widget.ViewPager2
 
+/**
+ * Legacy activity kept only as a rollback entry. The launcher uses MainActivityV3.
+ * Keep its adapter wiring compile-compatible with the current player stack.
+ */
 class MainActivity : AppCompatActivity() {
     private lateinit var api: IwaraApi
     private lateinit var history: HistoryStore
     private lateinit var prefs: AppPrefs
     private lateinit var recommender: RecommendationEngine
+    private lateinit var mediaCache: MediaPreloadCache
     private lateinit var pager: ViewPager2
     private lateinit var loading: ProgressBar
     private lateinit var error: TextView
@@ -48,6 +53,7 @@ class MainActivity : AppCompatActivity() {
         history = HistoryStore(this)
         prefs = AppPrefs(this)
         recommender = RecommendationEngine(api, history)
+        mediaCache = MediaPreloadCache(this)
 
         pager = findViewById(R.id.pager)
         loading = findViewById(R.id.loading)
@@ -58,6 +64,7 @@ class MainActivity : AppCompatActivity() {
             api = api,
             history = history,
             prefs = prefs,
+            mediaCache = mediaCache,
             onDownload = ::enqueueDownload,
             onEnterPip = ::enterPip,
             onEnded = ::onVideoEnded,
@@ -188,9 +195,8 @@ class MainActivity : AppCompatActivity() {
     }
 
     private fun onVideoEnded(position: Int) {
-        if (position + 1 < adapter.itemCount) {
-            pager.setCurrentItem(position + 1, true)
-        } else {
+        if (position + 1 < adapter.itemCount) pager.setCurrentItem(position + 1, true)
+        else {
             pendingAdvanceAfterLoad = true
             loadMore()
         }
@@ -215,8 +221,7 @@ class MainActivity : AppCompatActivity() {
                     currentPage = 0
                     loadFeed(reset = true)
                 }
-            }
-            .show()
+            }.show()
     }
 
     private fun showMainMenu() {
@@ -236,15 +241,11 @@ class MainActivity : AppCompatActivity() {
                     3 -> showSettingsDialog()
                     4 -> loadFeed(reset = true)
                 }
-            }
-            .show()
+            }.show()
     }
 
     private fun showLoginDialog() {
-        val container = LinearLayout(this).apply {
-            orientation = LinearLayout.VERTICAL
-            setPadding(48, 8, 48, 0)
-        }
+        val container = LinearLayout(this).apply { orientation = LinearLayout.VERTICAL; setPadding(48, 8, 48, 0) }
         val email = EditText(this).apply {
             hint = "Iwara 邮箱"
             inputType = InputType.TYPE_CLASS_TEXT or InputType.TYPE_TEXT_VARIATION_EMAIL_ADDRESS
@@ -257,7 +258,6 @@ class MainActivity : AppCompatActivity() {
         }
         container.addView(email)
         container.addView(password)
-
         val dialog = AlertDialog.Builder(this)
             .setTitle("登录 Iwara")
             .setMessage("密码仅用于本次 /user/login 请求，不会保存；登录 Token 使用 Android 加密存储。")
@@ -278,10 +278,7 @@ class MainActivity : AppCompatActivity() {
                     runOnUiThread {
                         dialog.getButton(AlertDialog.BUTTON_POSITIVE).isEnabled = true
                         Toast.makeText(this, result.message, Toast.LENGTH_SHORT).show()
-                        if (result.success) {
-                            dialog.dismiss()
-                            loadFeed(reset = true)
-                        }
+                        if (result.success) { dialog.dismiss(); loadFeed(reset = true) }
                     }
                 }
             }
@@ -296,18 +293,13 @@ class MainActivity : AppCompatActivity() {
             return
         }
         val labels = list.map { "${it.title}\n@${it.author}" }.toTypedArray()
-        AlertDialog.Builder(this)
-            .setTitle("浏览历史")
+        AlertDialog.Builder(this).setTitle("浏览历史")
             .setItems(labels) { _, which -> openSingleVideo(list[which].id) }
-            .setNegativeButton("关闭", null)
-            .show()
+            .setNegativeButton("关闭", null).show()
     }
 
     private fun showRemoteFavorites() {
-        if (!api.isLoggedIn()) {
-            showLoginDialog()
-            return
-        }
+        if (!api.isLoggedIn()) { showLoginDialog(); return }
         loading.visibility = View.VISIBLE
         api.getFavoriteVideos { result ->
             runOnUiThread {
@@ -347,38 +339,17 @@ class MainActivity : AppCompatActivity() {
     }
 
     private fun showSettingsDialog() {
-        val panel = LinearLayout(this).apply {
-            orientation = LinearLayout.VERTICAL
-            setPadding(48, 12, 48, 8)
-        }
-        val skipSeen = CheckBox(this).apply {
-            text = "推荐/热门流自动跳过已看视频"
-            isChecked = prefs.skipSeen
-        }
-        val autoNext = CheckBox(this).apply {
-            text = "播放完毕自动进入下一条"
-            isChecked = prefs.autoNext
-        }
-        val autoPip = CheckBox(this).apply {
-            text = "切到后台时自动进入画中画"
-            isChecked = prefs.autoPip
-        }
-        val qualityLabel = TextView(this).apply {
-            text = "默认清晰度"
-            setPadding(0, 18, 0, 4)
-        }
+        val panel = LinearLayout(this).apply { orientation = LinearLayout.VERTICAL; setPadding(48, 12, 48, 8) }
+        val skipSeen = CheckBox(this).apply { text = "推荐/热门流自动跳过已看视频"; isChecked = prefs.skipSeen }
+        val autoNext = CheckBox(this).apply { text = "播放完毕自动进入下一条"; isChecked = prefs.autoNext }
+        val autoPip = CheckBox(this).apply { text = "切到后台时自动进入画中画"; isChecked = prefs.autoPip }
+        val qualityLabel = TextView(this).apply { text = "默认清晰度"; setPadding(0, 18, 0, 4) }
         val qualityValues = arrayOf("highest", "Source", "1080", "720", "540", "360")
         val qualityNames = arrayOf("最高可用/原画", "Source", "1080p", "720p", "540p", "360p")
         val spinner = Spinner(this)
         spinner.adapter = ArrayAdapter(this, android.R.layout.simple_spinner_dropdown_item, qualityNames)
-        val current = qualityValues.indexOf(prefs.defaultQuality).let { if (it >= 0) it else 0 }
-        spinner.setSelection(current)
-        panel.addView(skipSeen)
-        panel.addView(autoNext)
-        panel.addView(autoPip)
-        panel.addView(qualityLabel)
-        panel.addView(spinner)
-
+        spinner.setSelection(qualityValues.indexOf(prefs.defaultQuality).let { if (it >= 0) it else 0 })
+        panel.addView(skipSeen); panel.addView(autoNext); panel.addView(autoPip); panel.addView(qualityLabel); panel.addView(spinner)
         AlertDialog.Builder(this)
             .setTitle("播放与推荐设置")
             .setView(panel)
@@ -390,8 +361,7 @@ class MainActivity : AppCompatActivity() {
                 prefs.defaultQuality = qualityValues[spinner.selectedItemPosition]
                 Toast.makeText(this, "设置已保存", Toast.LENGTH_SHORT).show()
                 loadFeed(reset = true)
-            }
-            .show()
+            }.show()
     }
 
     private fun enqueueDownload(item: VideoItem, source: VideoSource) {
@@ -416,8 +386,7 @@ class MainActivity : AppCompatActivity() {
                 .setAllowedOverMetered(true)
                 .setAllowedOverRoaming(false)
                 .setDestinationInExternalPublicDir(Environment.DIRECTORY_DOWNLOADS, "IwaraFlow/$fileName")
-            val manager = getSystemService(Context.DOWNLOAD_SERVICE) as DownloadManager
-            manager.enqueue(request)
+            (getSystemService(Context.DOWNLOAD_SERVICE) as DownloadManager).enqueue(request)
             history.recordInteraction(item, "download", 1.1)
             Toast.makeText(this, "已加入系统下载：${source.name}", Toast.LENGTH_SHORT).show()
         } catch (e: Exception) {
@@ -428,10 +397,7 @@ class MainActivity : AppCompatActivity() {
     private fun enterPip() {
         if (Build.VERSION.SDK_INT < Build.VERSION_CODES.O) return
         try {
-            val params = PictureInPictureParams.Builder()
-                .setAspectRatio(Rational(16, 9))
-                .build()
-            enterPictureInPictureMode(params)
+            enterPictureInPictureMode(PictureInPictureParams.Builder().setAspectRatio(Rational(16, 9)).build())
         } catch (e: Exception) {
             Toast.makeText(this, "画中画启动失败：${e.message}", Toast.LENGTH_SHORT).show()
         }
@@ -465,6 +431,7 @@ class MainActivity : AppCompatActivity() {
 
     override fun onDestroy() {
         adapter.releaseAll()
+        mediaCache.close()
         recommender.close()
         api.close()
         history.close()

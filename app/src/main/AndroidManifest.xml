@@ -12,6 +12,10 @@
         android:icon="@mipmap/ic_launcher"
         android:roundIcon="@mipmap/ic_launcher_round">
         <activity
+            android:name=".AuthorActivity"
+            android:screenOrientation="portrait"
+            android:exported="false" />
+        <activity
             android:name=".MainActivityV3"
             android:screenOrientation="portrait"
             android:supportsPictureInPicture="true"

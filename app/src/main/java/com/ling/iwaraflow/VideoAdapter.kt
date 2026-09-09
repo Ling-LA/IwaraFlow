@@ -31,6 +31,7 @@ class VideoAdapter(
     private var pipMode = false
 
     fun replace(newItems: List<VideoItem>) {
+        // RecyclerView 可能复用现有 Holder；这里只释放播放器，不能把 Holder 从跟踪集合清掉。
         holders.toList().forEach { it.release() }
         items.clear()
         items.addAll(newItems)
@@ -76,6 +77,7 @@ class VideoAdapter(
     }
 
     private fun preloadAround(position: Int) {
+        // ViewPager2 自己会创建相邻页并 prepare；这里额外提前解析下下条的 CDN 地址。
         listOf(position + 1, position + 2).forEach { index ->
             val item = items.getOrNull(index) ?: return@forEach
             if (item.sources != null) return@forEach
@@ -255,6 +257,7 @@ class VideoAdapter(
                 p.playWhenReady = true
                 p.play()
                 bound?.let { item ->
+                    // 只在真正成为当前页时写历史；推荐筛选发生在这之前。
                     history.recordWatch(item, p.currentPosition, p.duration.coerceAtLeast(0L), false)
                 }
             } else {
@@ -264,6 +267,7 @@ class VideoAdapter(
 
         private fun forceSilent() {
             player?.let { p ->
+                // 三重保险：旧页面的异步解析即使刚完成，也不能在后台“复活”。
                 p.playWhenReady = false
                 p.pause()
                 p.volume = 0f
@@ -294,6 +298,7 @@ class VideoAdapter(
                             item.likes = (item.likes + if (desired) 1 else -1).coerceAtLeast(0)
                         }
                         item.liked = desired
+                        // Iwara 的 Favorites 页面就是 liked videos；本地表作为离线镜像。
                         history.setLocalFavorite(item, desired)
                         if (desired) history.recordInteraction(item, "like", 2.0)
                         updateLikeUi(item)

@@ -25,22 +25,21 @@
         <item name="buttonBarNeutralButtonStyle">@style/IwaraFlow.DialogButton.Negative</item>
     </style>
 
-    <!-- OEM AlertDialog themes sometimes keep the primary button borderless even after
-         runtime backgroundTint.  Force a real rounded background at theme level. -->
+    <!-- Some OEMs ignore AlertDialog button backgrounds. Keep the positive action
+         readable even in that case by using a strong dark-pink text fallback. -->
     <style name="IwaraFlow.DialogButton.Positive" parent="Widget.AppCompat.Button.ButtonBar.AlertDialog">
-        <item name="android:textColor">#FFFFFFFF</item>
+        <item name="android:textColor">#C93663</item>
         <item name="android:textStyle">bold</item>
-        <item name="android:textSize">14sp</item>
+        <item name="android:textSize">15sp</item>
         <item name="android:background">@drawable/bg_dialog_primary_button</item>
-        <item name="android:backgroundTint">#FF5C85</item>
-        <item name="android:minWidth">88dp</item>
-        <item name="android:minHeight">42dp</item>
+        <item name="android:minWidth">92dp</item>
+        <item name="android:minHeight">44dp</item>
         <item name="android:paddingLeft">18dp</item>
         <item name="android:paddingRight">18dp</item>
     </style>
 
     <style name="IwaraFlow.DialogButton.Negative" parent="Widget.AppCompat.Button.ButtonBar.AlertDialog">
-        <item name="android:textColor">#E94E78</item>
+        <item name="android:textColor">#D84B73</item>
         <item name="android:textStyle">bold</item>
         <item name="android:textSize">14sp</item>
         <item name="android:minHeight">42dp</item>

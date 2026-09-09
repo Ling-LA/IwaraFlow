@@ -29,21 +29,39 @@ jobs:
         with:
           gradle-version: '8.13'
 
-      - name: Build signed installable APK
-        run: gradle :app:assembleDebug --stacktrace --no-daemon
+      - name: Decode fixed signing keystore
+        shell: bash
+        run: |
+          mkdir -p "$RUNNER_TEMP/iwaraflow-signing"
+          base64 -d signing/iwaraflow-dev.jks.b64 > "$RUNNER_TEMP/iwaraflow-signing/iwaraflow-dev.jks"
+          keytool -list -keystore "$RUNNER_TEMP/iwaraflow-signing/iwaraflow-dev.jks" -storepass iwaraflow -alias iwaraflow >/dev/null
+
+      - name: Build unsigned release APK
+        run: gradle :app:assembleRelease --stacktrace --no-daemon
+
+      - name: Sign APK with fixed key
+        shell: bash
+        run: |
+          APKSIGNER="$ANDROID_HOME/build-tools/36.0.0/apksigner"
+          UNSIGNED_APK="$(find app/build/outputs/apk/release -maxdepth 1 -name '*unsigned*.apk' | head -n 1)"
+          if [ -z "$UNSIGNED_APK" ]; then
+            UNSIGNED_APK="$(find app/build/outputs/apk/release -maxdepth 1 -name '*.apk' | head -n 1)"
+          fi
+          test -n "$UNSIGNED_APK"
+          mkdir -p out
+          "$APKSIGNER" sign \
+            --ks "$RUNNER_TEMP/iwaraflow-signing/iwaraflow-dev.jks" \
+            --ks-key-alias iwaraflow \
+            --ks-pass pass:iwaraflow \
+            --key-pass pass:iwaraflow \
+            --out out/IwaraFlow-signed.apk \
+            "$UNSIGNED_APK"
 
       - name: Verify APK signature
         shell: bash
         run: |
           APKSIGNER="$ANDROID_HOME/build-tools/36.0.0/apksigner"
-          "$APKSIGNER" verify --verbose --print-certs app/build/outputs/apk/debug/app-debug.apk
-
-      - name: Collect installable APK
-        shell: bash
-        run: |
-          mkdir -p out
-          cp app/build/outputs/apk/debug/app-debug.apk out/IwaraFlow-signed.apk
-          ls -lh out/IwaraFlow-signed.apk
+          "$APKSIGNER" verify --verbose --print-certs out/IwaraFlow-signed.apk
 
       - name: Upload signed APK
         uses: actions/upload-artifact@v4

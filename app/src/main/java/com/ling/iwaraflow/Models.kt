@@ -1,10 +1,38 @@
 package com.ling.iwaraflow
 
+data class VideoSource(
+    val name: String,
+    val url: String,
+    val score: Int
+)
+
 data class VideoItem(
     val id: String,
     val title: String,
     val author: String,
     val tags: List<String>,
-    val likes: Int,
-    var streamUrl: String? = null
+    var likes: Int,
+    val views: Int = 0,
+    val createdAt: Long = 0L,
+    var liked: Boolean = false,
+    var localFavorite: Boolean = false,
+    var streamUrl: String? = null,
+    var sources: List<VideoSource>? = null,
+    var selectedQuality: String? = null
 )
+
+data class LoginResult(
+    val success: Boolean,
+    val message: String
+)
+
+data class PreferenceProfile(
+    val authorWeights: Map<String, Double>,
+    val tagWeights: Map<String, Double>
+) {
+    fun score(item: VideoItem): Double {
+        val author = authorWeights[item.author.lowercase()] ?: 0.0
+        val tags = item.tags.sumOf { tagWeights[it.lowercase()] ?: 0.0 }
+        return author + tags
+    }
+}

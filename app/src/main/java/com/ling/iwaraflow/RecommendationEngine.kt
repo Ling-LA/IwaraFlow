@@ -40,6 +40,7 @@ class RecommendationEngine(
                     if (previous == null) {
                         merged[item.id] = item to sourceBoost
                     } else {
+                        // 同一视频同时进入多个热门榜时额外加分。
                         merged[item.id] = previous.first to (previous.second + sourceBoost * 0.55)
                         if (item.likes > previous.first.likes) previous.first.likes = item.likes
                     }

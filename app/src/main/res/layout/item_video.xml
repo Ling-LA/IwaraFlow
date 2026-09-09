@@ -102,9 +102,10 @@
             android:layout_width="match_parent"
             android:layout_height="42dp"
             android:gravity="center"
-            android:text="最高"
+            android:text="画质\n最高"
             android:textColor="#FFFFFFFF"
-            android:textSize="12sp"
+            android:textSize="11sp"
+            android:lineSpacingExtra="1dp"
             android:textStyle="bold" />
 
         <TextView
@@ -112,17 +113,19 @@
             android:layout_width="match_parent"
             android:layout_height="46dp"
             android:gravity="center"
-            android:text="↓"
+            android:text="⬇\n下载"
             android:textColor="#FFFFFFFF"
-            android:textSize="30sp" />
+            android:textSize="12sp"
+            android:textStyle="bold" />
 
         <TextView
             android:id="@+id/pip"
             android:layout_width="match_parent"
             android:layout_height="44dp"
             android:gravity="center"
-            android:text="▣"
+            android:text="▣\n小窗"
             android:textColor="#FFFFFFFF"
-            android:textSize="26sp" />
+            android:textSize="12sp"
+            android:textStyle="bold" />
     </LinearLayout>
 </FrameLayout>

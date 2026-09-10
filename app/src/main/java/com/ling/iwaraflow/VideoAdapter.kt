@@ -233,7 +233,7 @@ class VideoAdapter(
                 history.setLocalFavorite(item, desired)
                 if (desired) history.recordInteraction(item, "favorite", 1.4)
                 updateLikeUi(item)
-                Toast.makeText(itemView.context, if (desired) "已收藏到本地" else "已取消本地收藏", Toast.LENGTH_SHORT).show()
+                Toast.makeText(itemView.context, if (desired) "已收藏" else "已取消收藏", Toast.LENGTH_SHORT).show()
             }
             quality.setOnClickListener { showQualityChooser(item, false) }
             download.setOnClickListener { showQualityChooser(item, true) }

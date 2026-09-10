@@ -85,7 +85,7 @@ class NavigationDeviceTest {
 
     /** ViewPager2 binds the first card on a later frame, so idle alone does not guarantee a holder. */
     private fun awaitFixturePlayer(activity: Activity, pagerId: Int): ExoPlayer {
-        val deadline = SystemClock.uptimeMillis() + 5_000
+        val deadline = SystemClock.uptimeMillis() + 10_000
         while (SystemClock.uptimeMillis() < deadline) {
             var bound: ExoPlayer? = null
             main {
@@ -107,7 +107,8 @@ class NavigationDeviceTest {
             player.seekTo(1_500)
             player.play()
         }
-        val deadline = SystemClock.uptimeMillis() + 5_000
+        // The emulator decodes h264 in software, so the first frame can take a while.
+        val deadline = SystemClock.uptimeMillis() + 30_000
         while (SystemClock.uptimeMillis() < deadline) {
             var ready = false
             main { ready = player.isPlaying && player.videoSize.width > 0 }

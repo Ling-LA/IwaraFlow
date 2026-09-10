@@ -11,6 +11,7 @@ data class IwaraAuthor(
     val name: String,
     val username: String,
     val description: String = "",
+    val avatarUrl: String = "",
     var following: Boolean = false,
     var friend: Boolean = false,
     var friendStatus: String = "none"

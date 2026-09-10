@@ -1,5 +1,6 @@
 package com.ling.iwaraflow
 
+import android.app.Activity
 import android.app.DownloadManager
 import android.content.Context
 import android.content.Intent
@@ -280,17 +281,7 @@ class AuthorActivity : AppCompatActivity() {
         if (exiting) return
         exiting = true
         feedAdapter.pauseAll()
-
-        // Some OEM/gesture-navigation combinations collapse the whole task when this Activity is
-        // simply finished. Move the already-existing main Activity to the front first. REORDER_TO_FRONT
-        // keeps its adapter, selected tab, current item and resumePositionMs intact; unlike CLEAR_TOP
-        // it does not destroy/recreate the main feed.
-        runCatching {
-            startActivity(Intent(this, MainActivityV3::class.java).apply {
-                addFlags(Intent.FLAG_ACTIVITY_REORDER_TO_FRONT or Intent.FLAG_ACTIVITY_SINGLE_TOP)
-                putExtra(EXTRA_RETURN_FROM_AUTHOR, true)
-            })
-        }
+        setResult(Activity.RESULT_OK, Intent().putExtra(EXTRA_RETURN_FROM_AUTHOR, true))
         finish()
     }
 
@@ -365,7 +356,7 @@ class AuthorActivity : AppCompatActivity() {
 
     private fun download(item: VideoItem, source: VideoSource) {
         try {
-            val fileName = item.title.replace(Regex("[\\/:*?\"<>|]"), "_").take(80) + "_${source.name}.mp4"
+            val fileName = item.title.replace(Regex("[\\\\/:*?\"<>|]"), "_").take(80) + "_${source.name}.mp4"
             val request = DownloadManager.Request(Uri.parse(source.url))
                 .setTitle(item.title).setMimeType("video/mp4")
                 .addRequestHeader("Referer", "https://www.iwara.tv/")

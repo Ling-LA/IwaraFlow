@@ -16,6 +16,7 @@ import androidx.media3.exoplayer.DefaultRenderersFactory
 import androidx.media3.exoplayer.ExoPlayer
 import androidx.media3.ui.PlayerView
 import androidx.recyclerview.widget.RecyclerView
+import java.lang.ref.WeakReference
 import kotlin.math.abs
 
 class VideoAdapter(
@@ -35,6 +36,14 @@ class VideoAdapter(
     private var preloadTask: Runnable? = null
     private var activePosition = RecyclerView.NO_POSITION
     private var pipMode = false
+    private var released = false
+
+    init {
+        // Opening another video surface (for example AuthorActivity) immediately revokes playback
+        // ownership from the previous adapter. This avoids MainActivity continuing underneath it,
+        // including the case where MainActivity attempted to auto-enter PiP during navigation.
+        registerAndClaim(this)
+    }
 
     fun replace(newItems: List<VideoItem>) {
         cancelIdlePreload()
@@ -58,9 +67,13 @@ class VideoAdapter(
         cancelIdlePreload()
         holders.toList().forEach { it.release() }
         holders.clear()
+        released = true
+        unregister(this)
     }
 
     fun setActive(position: Int) {
+        if (released) return
+        claimPlaybackOwnership(this)
         activePosition = position
         holders.toList().forEach { holder ->
             holder.setActive(holder.bindingAdapterPosition == activePosition)
@@ -73,9 +86,14 @@ class VideoAdapter(
         holders.toList().forEach { it.setActive(false) }
     }
 
-    fun resumeActive() = holders.forEach { holder ->
-        holder.setActive(holder.bindingAdapterPosition == activePosition)
-    }.also { scheduleIdlePreload(activePosition) }
+    fun resumeActive() {
+        if (released) return
+        claimPlaybackOwnership(this)
+        holders.forEach { holder ->
+            holder.setActive(holder.bindingAdapterPosition == activePosition)
+        }
+        scheduleIdlePreload(activePosition)
+    }
 
     fun isActivePlaying(): Boolean = holders.any {
         it.bindingAdapterPosition == activePosition && it.isPlaying()
@@ -531,6 +549,32 @@ class VideoAdapter(
             value >= 10_000 -> "%.1fw".format(value / 10_000.0)
             value >= 1_000 -> "%.1fk".format(value / 1_000.0)
             else -> value.toString()
+        }
+    }
+
+    companion object {
+        private val registryLock = Any()
+        private val adapters = mutableListOf<WeakReference<VideoAdapter>>()
+        private var owner: WeakReference<VideoAdapter>? = null
+
+        private fun registerAndClaim(adapter: VideoAdapter) = synchronized(registryLock) {
+            adapters.removeAll { it.get() == null }
+            if (adapters.none { it.get() === adapter }) adapters += WeakReference(adapter)
+            val previous = owner?.get()
+            if (previous !== null && previous !== adapter) previous.pauseAll()
+            owner = WeakReference(adapter)
+        }
+
+        private fun claimPlaybackOwnership(adapter: VideoAdapter) = synchronized(registryLock) {
+            adapters.removeAll { it.get() == null }
+            val previous = owner?.get()
+            if (previous !== null && previous !== adapter) previous.pauseAll()
+            owner = WeakReference(adapter)
+        }
+
+        private fun unregister(adapter: VideoAdapter) = synchronized(registryLock) {
+            adapters.removeAll { it.get() == null || it.get() === adapter }
+            if (owner?.get() === adapter) owner = null
         }
     }
 }

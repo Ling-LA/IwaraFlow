@@ -11,6 +11,7 @@ import android.view.ViewGroup
 import android.view.animation.DecelerateInterpolator
 import android.widget.TextView
 import android.widget.Toast
+import androidx.media3.common.PlaybackException
 import androidx.media3.common.Player
 import androidx.media3.exoplayer.DefaultLoadControl
 import androidx.media3.exoplayer.DefaultRenderersFactory
@@ -193,6 +194,7 @@ class VideoAdapter(
         private var active = false
         private var generation = 0
         private var likeBusy = false
+        private var recoveryAttempts = 0
         private val tapHandler = Handler(Looper.getMainLooper())
         private val watchdogHandler = Handler(Looper.getMainLooper())
         private var lastWatchdogPosition = -1L
@@ -220,6 +222,7 @@ class VideoAdapter(
         fun bind(item: VideoItem) {
             release()
             bound = item
+            recoveryAttempts = 0
             item.localFavorite = history.isLocalFavorite(item.id)
             author.text = "@${item.author}"
             title.text = item.title
@@ -307,7 +310,12 @@ class VideoAdapter(
                 playWhenReady = false
                 volume = 0f
                 addListener(object : Player.Listener {
+                    override fun onPlayerError(error: PlaybackException) {
+                        if (active && bound?.id == item.id) refreshSourceAfterError(item, error.errorCodeName)
+                    }
+
                     override fun onPlaybackStateChanged(playbackState: Int) {
+                        if (playbackState == Player.STATE_READY) recoveryAttempts = 0
                         if (playbackState == Player.STATE_READY && active) {
                             val pos = bindingAdapterPosition
                             if (pos != RecyclerView.NO_POSITION) scheduleIdlePreload(pos)
@@ -450,6 +458,38 @@ class VideoAdapter(
             p.playWhenReady = true
             p.play()
             Toast.makeText(itemView.context, "播放器已自动恢复", Toast.LENGTH_SHORT).show()
+        }
+
+        /**
+         * 播放出错就重新解析播放地址再来一次。
+         *
+         * Iwara 的 fileUrl 带 expires，开着 App 放久了地址会过期，播放器报错后停在 IDLE，
+         * 卡片就一直黑屏——滑到下一条却能放，因为那条的地址是刚解析的。之前没有错误监听，
+         * 这种黑屏永远不会自己恢复。
+         */
+        private fun refreshSourceAfterError(item: VideoItem, reason: String) {
+            val p = player ?: return
+            val position = p.currentPosition.coerceAtLeast(0L)
+            if (recoveryAttempts >= MAX_ERROR_RECOVERIES) {
+                title.text = "${item.title}\n[播放失败：$reason]"
+                return
+            }
+            recoveryAttempts += 1
+            val bindGeneration = generation
+            item.sources = null
+            item.streamUrl = null
+            api.resolveSources(item.id) { result ->
+                itemView.post {
+                    if (released || !active || generation != bindGeneration || bound?.id != item.id) return@post
+                    result.onSuccess { sources ->
+                        item.sources = sources
+                        item.resumePositionMs = position
+                        prepareChosenSource(item, sources, preservePosition = false)
+                    }.onFailure {
+                        title.text = "${item.title}\n[播放地址刷新失败：${it.message}]"
+                    }
+                }
+            }
         }
 
         private fun persistHistory(completed: Boolean) {
@@ -616,6 +656,8 @@ class VideoAdapter(
         .build()
 
     companion object {
+        /** 同一条视频最多自动刷新几次播放地址，避免真的放不了时无限重试。 */
+        const val MAX_ERROR_RECOVERIES = 2
         const val MIN_BUFFER_MS = 12_000
         const val MAX_BUFFER_MS = 25_000
         const val BUFFER_FOR_PLAYBACK_MS = 1_200

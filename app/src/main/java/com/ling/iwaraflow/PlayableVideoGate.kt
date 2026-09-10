@@ -10,8 +10,8 @@ class PlayableVideoGate(private val api: IwaraApi) {
     private val coordinator = Executors.newSingleThreadExecutor()
     private val probes = Executors.newFixedThreadPool(8)
     private val client = OkHttpClient.Builder()
-        .connectTimeout(4, TimeUnit.SECONDS)
-        .readTimeout(5, TimeUnit.SECONDS)
+        .connectTimeout(3, TimeUnit.SECONDS)
+        .readTimeout(4, TimeUnit.SECONDS)
         .followRedirects(true)
         .build()
 
@@ -22,10 +22,10 @@ class PlayableVideoGate(private val api: IwaraApi) {
         callback: (List<VideoItem>) -> Unit
     ) {
         coordinator.execute {
-            // First-screen latency matters more than validating a whole 28-48 item page up front.
-            // Validate a small leading window, show it immediately, then normal pagination keeps
-            // bringing in more already-validated items as the user approaches the end.
-            val candidateCount = minOf(items.size, minOf(maxItems + 4, 16))
+            // Cold start used to wait for up to 16 CDN/source validations before showing the
+            // first frame. Ten parallel candidates are enough to seed a swipe feed while keeping
+            // the invariant that every item shown has already passed a real media-byte probe.
+            val candidateCount = minOf(items.size, minOf(maxItems + 2, 10))
             val candidates = items.take(candidateCount)
             val futures: List<Future<Pair<Int, VideoItem>>> = candidates.mapIndexed { index, item ->
                 probes.submit<Pair<Int, VideoItem>> { Pair(index, inspectOne(item, quality)) }

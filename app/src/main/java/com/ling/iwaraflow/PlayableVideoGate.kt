@@ -6,9 +6,12 @@ import java.util.concurrent.Executors
 import java.util.concurrent.Future
 import java.util.concurrent.TimeUnit
 
-class PlayableVideoGate(private val api: IwaraApi) {
+class PlayableVideoGate(
+    private val api: IwaraApi,
+    private val batchBudgetMs: Long = DEFAULT_BATCH_BUDGET_MS
+) {
     private val coordinator = Executors.newSingleThreadExecutor()
-    private val probes = Executors.newFixedThreadPool(8)
+    private val probes = Executors.newFixedThreadPool(MAX_CANDIDATES)
     private val lifecycleLock = Any()
     @Volatile private var closed = false
     private val client = OkHttpClient.Builder()
@@ -21,21 +24,25 @@ class PlayableVideoGate(private val api: IwaraApi) {
         items: List<VideoItem>,
         quality: String,
         maxItems: Int = items.size,
+        onFirstBatch: ((List<VideoItem>) -> Unit)? = null,
         callback: (List<VideoItem>) -> Unit
     ) {
         enqueue {
             // Cold start used to wait for up to 16 CDN/source validations before showing the
             // first frame. Ten parallel candidates are enough to seed a swipe feed while keeping
             // the invariant that every item shown has already passed a real media-byte probe.
-            val candidateCount = minOf(items.size, minOf(maxItems + 2, 10))
+            val candidateCount = minOf(items.size, minOf(maxItems + 2, MAX_CANDIDATES))
             val candidates = items.take(candidateCount)
             val futures = inspectAsync(candidates, quality)
-            val accepted: List<VideoItem> = futures
-                .mapNotNull { future -> runCatching { future.get() }.getOrNull() }
-                .sortedBy { pair -> pair.first }
-                .map { pair -> pair.second }
-                .filter { item -> item.playbackIssue == null }
-                .take(maxItems)
+            val deadline = System.nanoTime() + TimeUnit.MILLISECONDS.toNanos(batchBudgetMs)
+            if (onFirstBatch != null) {
+                // The feed only needs its leading cards to start playing, so a single slow CDN
+                // candidate must not hold the whole cold start. Stopping at the first candidate
+                // that is still running keeps this head an exact prefix of the final list.
+                val head = collect(futures, FIRST_BATCH, deadline, stopOnPending = true)
+                if (!closed && head.isNotEmpty()) onFirstBatch(head)
+            }
+            val accepted = collect(futures, maxItems, deadline, stopOnPending = false)
             if (!closed) callback(accepted)
         }
     }
@@ -50,6 +57,30 @@ class PlayableVideoGate(private val api: IwaraApi) {
                 .map { pair -> pair.second }
             if (!closed) callback(inspected)
         }
+    }
+
+    private fun collect(
+        futures: List<Future<Pair<Int, VideoItem>>>,
+        limit: Int,
+        deadlineNanos: Long,
+        stopOnPending: Boolean
+    ): List<VideoItem> {
+        val accepted = ArrayList<VideoItem>(minOf(limit, futures.size))
+        for (future in futures) {
+            if (accepted.size >= limit) break
+            // 已经验证完的候选不受预算影响，只有还在跑的才可能被跳过。
+            val decided = if (future.isDone) runCatching { future.get() }.getOrNull() else {
+                val remaining = deadlineNanos - System.nanoTime()
+                if (remaining <= 0L) null
+                else runCatching { future.get(remaining, TimeUnit.NANOSECONDS) }.getOrNull()
+            }
+            if (decided == null) {
+                if (stopOnPending) break else continue
+            }
+            val item = decided.second
+            if (item.playbackIssue == null) accepted += item
+        }
+        return accepted
     }
 
     private fun enqueue(task: () -> Unit) = synchronized(lifecycleLock) {
@@ -120,5 +151,12 @@ class PlayableVideoGate(private val api: IwaraApi) {
             probes.shutdownNow()
         }
         HttpClientCleanup.close(client)
+    }
+
+    companion object {
+        private const val MAX_CANDIDATES = 10
+        private const val FIRST_BATCH = 3
+        /** A straggling candidate is dropped from the batch instead of holding the feed forever. */
+        private const val DEFAULT_BATCH_BUDGET_MS = 12_000L
     }
 }

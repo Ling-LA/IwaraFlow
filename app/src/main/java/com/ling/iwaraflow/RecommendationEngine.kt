@@ -1,11 +1,13 @@
 package com.ling.iwaraflow
 
 import java.util.concurrent.Executors
+import java.util.concurrent.TimeUnit
 import kotlin.math.ln
 
 class RecommendationEngine(
     private val api: IwaraApi,
-    private val history: HistoryStore
+    private val history: HistoryStore,
+    private val listBudgetMs: Long = DEFAULT_LIST_BUDGET_MS
 ) {
     private val io = Executors.newSingleThreadExecutor()
 
@@ -30,8 +32,13 @@ class RecommendationEngine(
                 }
             }
             val merged = LinkedHashMap<String, Pair<VideoItem, Double>>()
+            // One stalled ranking endpoint used to hold the whole cold start; a request that
+            // misses the budget is treated like the failures this merge already tolerates.
+            val deadline = System.nanoTime() + TimeUnit.MILLISECONDS.toNanos(listBudgetMs)
             futures.forEach { f ->
-                val result = runCatching { f.get() }.getOrNull() ?: return@forEach
+                val remaining = deadline - System.nanoTime()
+                val result = (if (remaining <= 0L) null
+                else runCatching { f.get(remaining, TimeUnit.NANOSECONDS) }.getOrNull()) ?: return@forEach
                 val (baseWeight, videos) = result
                 videos.forEachIndexed { index, item ->
                     val rankBonus = (36 - index).coerceAtLeast(0) / 36.0
@@ -80,4 +87,8 @@ class RecommendationEngine(
     }
 
     fun close() = io.shutdownNow()
+
+    companion object {
+        private const val DEFAULT_LIST_BUDGET_MS = 9_000L
+    }
 }

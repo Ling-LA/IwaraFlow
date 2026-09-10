@@ -52,6 +52,8 @@ class MainActivityV3 : AppCompatActivity() {
     private var pendingAdvanceAfterLoad = false
     private var pagingEnabled = true
     private var requestSerial = 0
+    private var awaitingFullFeed = false
+    private var launchUpdateChecked = false
     private var openingInternalPage = false
     private var pendingVideoId: String? = null
     private val pageSize = 28
@@ -92,6 +94,7 @@ class MainActivityV3 : AppCompatActivity() {
 
         api = IwaraApi(this)
         history = HistoryStore(this)
+        history.warmUp()
         prefs = AppPrefs(this)
         recommender = RecommendationEngine(api, history)
         playableGate = PlayableVideoGate(api)
@@ -124,7 +127,15 @@ class MainActivityV3 : AppCompatActivity() {
 
         setupTopBar()
         if (intent.getBooleanExtra("return_recommend", false)) returnToRecommend() else loadFeed(reset = true)
-        window.decorView.postDelayed({ if (!isFinishing && !isDestroyed) updates.checkOnLaunch() }, 1800L)
+        // 兜底：即使首屏加载失败，也仍然会检查更新。正常情况下首屏出来后会更早触发。
+        window.decorView.postDelayed({ runLaunchUpdateCheck() }, 9000L)
+    }
+
+    /** 启动检查更新不和首屏视频抢冷启动的网络。 */
+    private fun runLaunchUpdateCheck() {
+        if (launchUpdateChecked || isFinishing || isDestroyed) return
+        launchUpdateChecked = true
+        updates.checkOnLaunch()
     }
 
     override fun onNewIntent(intent: Intent) {
@@ -163,7 +174,7 @@ class MainActivityV3 : AppCompatActivity() {
             if (sameHomeMode && newMode == "recommend") {
                 saveCurrentHomeSession()
                 homeFeedSessions.remove("recommend")
-                requestSerial++
+                invalidateRequests()
                 mode = "recommend"
                 searchQuery = null
                 pagingEnabled = true
@@ -176,7 +187,7 @@ class MainActivityV3 : AppCompatActivity() {
             if (sameHomeMode) return
 
             saveCurrentHomeSession()
-            requestSerial++
+            invalidateRequests()
             mode = newMode
             pagingEnabled = true
             searchQuery = null
@@ -242,31 +253,28 @@ class MainActivityV3 : AppCompatActivity() {
     private fun loadFeed(reset: Boolean) {
         if (reset) {
             currentPage = 0
-            requestSerial++
+            invalidateRequests()
             loading.visibility = View.VISIBLE
             error.visibility = View.GONE
         }
         val requestId = requestSerial
+        val emptyMessage = if (mode == "recommend" && searchQuery == null) {
+            "没有找到可播放的推荐视频。可以稍后刷新，或关闭“刷新推荐时排除已看视频”。"
+        } else "这一页没有可播放视频"
+        val head: ((List<VideoItem>) -> Unit)? = if (reset) {
+            { batch: List<VideoItem> -> runOnUiThread { showFeedHead(requestId, batch) } }
+        } else null
 
         if (mode == "recommend" && searchQuery == null && currentPage == 0) {
             recommender.load(prefs.skipSeen) { result ->
                 result.onSuccess { raw ->
-                    playableGate.filterPlayable(raw.take(48), prefs.defaultQuality, maxItems = 30) { playable ->
-                        runOnUiThread {
-                            if (requestId != requestSerial) return@runOnUiThread
-                            loading.visibility = View.GONE
-                            val list = decorate(playable)
-                            if (list.isEmpty()) showError("没有找到可播放的推荐视频。可以稍后刷新，或关闭“刷新推荐时排除已看视频”。")
-                            else {
-                                adapter.replace(list)
-                                pager.setCurrentItem(0, false)
-                                adapter.setActive(0)
-                            }
-                        }
+                    playableGate.filterPlayable(raw.take(48), prefs.defaultQuality, maxItems = 30, onFirstBatch = head) { playable ->
+                        runOnUiThread { showFeedReset(requestId, playable, emptyMessage) }
                     }
                 }.onFailure {
                     runOnUiThread {
                         if (requestId != requestSerial) return@runOnUiThread
+                        awaitingFullFeed = false
                         loading.visibility = View.GONE
                         showError("推荐加载失败\n${it.message}")
                     }
@@ -277,32 +285,21 @@ class MainActivityV3 : AppCompatActivity() {
 
         val callback: (Result<List<VideoItem>>) -> Unit = { result ->
             result.onSuccess { raw ->
-                playableGate.filterPlayable(raw, prefs.defaultQuality, maxItems = pageSize) { playable ->
+                playableGate.filterPlayable(raw, prefs.defaultQuality, maxItems = pageSize, onFirstBatch = head) { playable ->
                     runOnUiThread {
                         if (requestId != requestSerial) return@runOnUiThread
-                        loading.visibility = View.GONE
                         loadingMore = false
-                        val list = decorate(playable)
-                        if (reset) {
-                            if (list.isEmpty()) showError("这一页没有可播放视频")
-                            else {
-                                adapter.replace(list)
-                                pager.setCurrentItem(0, false)
-                                adapter.setActive(0)
-                            }
-                        } else {
-                            val before = adapter.itemCount
-                            adapter.append(list)
-                            if (pendingAdvanceAfterLoad && adapter.itemCount > before) {
-                                pendingAdvanceAfterLoad = false
-                                pager.setCurrentItem(before, true)
-                            }
+                        if (reset) showFeedReset(requestId, playable, emptyMessage)
+                        else {
+                            loading.visibility = View.GONE
+                            appendFeed(decorate(playable))
                         }
                     }
                 }
             }.onFailure {
                 runOnUiThread {
                     if (requestId != requestSerial) return@runOnUiThread
+                    awaitingFullFeed = false
                     loading.visibility = View.GONE
                     loadingMore = false
                     if (reset) showError("Iwara 数据加载失败\n${it.message}\n\n请确认网络可以访问 iwara.tv")
@@ -315,8 +312,57 @@ class MainActivityV3 : AppCompatActivity() {
         else api.getVideos(if (mode == "recommend") "trending" else mode, currentPage, pageSize, callback)
     }
 
+    /**
+     * 验证最快的前几条先上屏并开始播放，剩下的候选继续在后台验证。
+     * 这一批永远是完整结果的前缀，所以补齐时顺序不会变。
+     */
+    private fun showFeedHead(requestId: Int, batch: List<VideoItem>) {
+        if (requestId != requestSerial || batch.isEmpty()) return
+        awaitingFullFeed = true
+        loading.visibility = View.GONE
+        error.visibility = View.GONE
+        adapter.replace(decorate(batch))
+        pager.setCurrentItem(0, false)
+        adapter.setActive(0)
+        window.decorView.postDelayed({ runLaunchUpdateCheck() }, 1500L)
+    }
+
+    private fun showFeedReset(requestId: Int, playable: List<VideoItem>, emptyMessage: String) {
+        if (requestId != requestSerial) return
+        val filling = awaitingFullFeed
+        awaitingFullFeed = false
+        loading.visibility = View.GONE
+        val list = decorate(playable)
+        if (filling && adapter.itemCount > 0) {
+            appendFeed(list)
+            return
+        }
+        if (list.isEmpty()) showError(emptyMessage)
+        else {
+            error.visibility = View.GONE
+            adapter.replace(list)
+            pager.setCurrentItem(0, false)
+            adapter.setActive(0)
+        }
+    }
+
+    private fun appendFeed(list: List<VideoItem>) {
+        val before = adapter.itemCount
+        adapter.append(list)
+        if (pendingAdvanceAfterLoad && adapter.itemCount > before) {
+            pendingAdvanceAfterLoad = false
+            pager.setCurrentItem(before, true)
+        }
+    }
+
+    /** 作废还在飞行中的请求，同时解除首屏补齐期间的翻页保护。 */
+    private fun invalidateRequests() {
+        requestSerial++
+        awaitingFullFeed = false
+    }
+
     private fun loadMore() {
-        if (loadingMore || adapter.itemCount == 0) return
+        if (loadingMore || awaitingFullFeed || adapter.itemCount == 0) return
         loadingMore = true
         currentPage += 1
         loadFeed(reset = false)
@@ -380,7 +426,7 @@ class MainActivityV3 : AppCompatActivity() {
                 val q = input.text.toString().trim()
                 if (q.isNotBlank()) {
                     saveCurrentHomeSession()
-                    requestSerial++
+                    invalidateRequests()
                     searchQuery = q
                     mode = "search"
                     pagingEnabled = true
@@ -447,7 +493,7 @@ class MainActivityV3 : AppCompatActivity() {
             loading.visibility = View.GONE
             result.onSuccess { item ->
                 saveCurrentHomeSession()
-                item.localFavorite = history.isLocalFavorite(item.id); pagingEnabled = false; mode = "single"; searchQuery = null; requestSerial++
+                item.localFavorite = history.isLocalFavorite(item.id); pagingEnabled = false; mode = "single"; searchQuery = null; invalidateRequests()
                 adapter.replace(listOf(item)); pager.setCurrentItem(0, false); adapter.setActive(0)
             }.onFailure { Toast.makeText(this, it.message ?: "视频加载失败", Toast.LENGTH_LONG).show() }
             if (!openingInternalPage && lifecycle.currentState.isAtLeast(Lifecycle.State.RESUMED)) adapter.resumeActive()
@@ -561,7 +607,7 @@ class MainActivityV3 : AppCompatActivity() {
     private fun showError(message: String) { error.text = message; error.visibility = View.VISIBLE }
 
     override fun onDestroy() {
-        requestSerial++
+        invalidateRequests()
         adapter.releaseAll(); playableGate.close(); mediaCache.close(); recommender.close(); updates.close(); api.close(); history.close(); super.onDestroy()
     }
 }

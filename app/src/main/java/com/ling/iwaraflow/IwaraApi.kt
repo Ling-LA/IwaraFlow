@@ -32,6 +32,12 @@ class IwaraApi(context: Context) {
         .followRedirects(true)
         .build()
 
+    init {
+        // Keystore 解锁和加密 SharedPreferences 的第一次打开都比较慢，
+        // 放到后台线程和界面初始化并行，冷启动主线程不再等它。
+        runCatching { io.execute { runCatching { session.warmUp() } } }
+    }
+
     fun isLoggedIn(): Boolean = !session.refreshToken.isNullOrBlank()
     fun logout() = session.clear()
 

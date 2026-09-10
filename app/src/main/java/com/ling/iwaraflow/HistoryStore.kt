@@ -227,6 +227,14 @@ class HistoryStore(context: Context) : SQLiteOpenHelper(context, "iwaraflow.db",
         return PreferenceProfile(author, tags)
     }
 
+    /**
+     * 首次查询会顺带打开数据库并跑升级迁移。启动时在后台先做掉，
+     * 首屏视频到达后主线程读收藏状态就不用再等这一步。
+     */
+    fun warmUp() {
+        Thread({ runCatching { readableDatabase } }, "IwaraFlow-history-warmup").apply { isDaemon = true }.start()
+    }
+
     private fun splitTags(raw: String?): List<String> =
         raw?.split("\u001F")?.filter { it.isNotBlank() } ?: emptyList()
 }

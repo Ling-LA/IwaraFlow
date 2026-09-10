@@ -13,8 +13,10 @@ import androidx.media3.datasource.cache.SimpleCache
 import androidx.media3.exoplayer.source.DefaultMediaSourceFactory
 import androidx.media3.exoplayer.source.MediaSource
 import java.io.File
+import java.util.concurrent.ExecutionException
 import java.util.concurrent.ExecutorService
 import java.util.concurrent.Executors
+import java.util.concurrent.Future
 import java.util.concurrent.atomic.AtomicInteger
 
 /**
@@ -22,11 +24,22 @@ import java.util.concurrent.atomic.AtomicInteger
  *
  * SimpleCache cannot be opened twice for the same directory. MainActivity and AuthorActivity can
  * coexist on the back stack, so all facades share one cache instance and one prefetch executor.
+ *
+ * Opening the 256 MB LRU index and its database used to run inside Activity.onCreate. It is now
+ * built on a background thread while the first feed request is already in flight; callers join
+ * only when a video really needs a media source.
  */
 @OptIn(UnstableApi::class)
 class MediaPreloadCache(context: Context) {
-    private val shared = acquire(context.applicationContext)
+    private val pending: Future<SharedState> = warmUp(context.applicationContext)
     private var closed = false
+
+    private val shared: SharedState
+        get() = try {
+            pending.get()
+        } catch (e: ExecutionException) {
+            throw e.cause ?: e
+        }
 
     fun createMediaSource(url: String): MediaSource =
         shared.mediaSourceFactory.createMediaSource(MediaItem.fromUri(url))
@@ -36,14 +49,15 @@ class MediaPreloadCache(context: Context) {
     /** Cache only the beginning of a video so the next swipe can start immediately. */
     fun prefetch(url: String, bytes: Long) {
         if (closed) return
-        shared.executor.execute {
+        val state = shared
+        state.executor.execute {
             runCatching {
                 val dataSpec = DataSpec.Builder()
                     .setUri(url)
                     .setPosition(0)
                     .setLength(bytes)
                     .build()
-                CacheWriter(shared.cacheFactory.createDataSource(), dataSpec, null, null).cache()
+                CacheWriter(state.cacheFactory.createDataSource(), dataSpec, null, null).cache()
             }
         }
     }
@@ -51,6 +65,8 @@ class MediaPreloadCache(context: Context) {
     fun close() {
         if (closed) return
         closed = true
+        // 引用计数必须等 acquire 真正跑完，否则会漏掉一次释放。
+        runCatching { pending.get() }
         releaseShared()
     }
 
@@ -65,6 +81,13 @@ class MediaPreloadCache(context: Context) {
         private val lock = Any()
         private val refs = AtomicInteger(0)
         @Volatile private var state: SharedState? = null
+        private val initExecutor = Executors.newSingleThreadExecutor { task ->
+            Thread(task, "IwaraFlow-media-cache-init").apply { isDaemon = true }
+        }
+
+        // 单线程串行化，等价于原来的 synchronized(lock) 顺序，引用计数不会错乱。
+        private fun warmUp(context: Context): Future<SharedState> =
+            initExecutor.submit<SharedState> { acquire(context) }
 
         private fun acquire(context: Context): SharedState = synchronized(lock) {
             val existing = state

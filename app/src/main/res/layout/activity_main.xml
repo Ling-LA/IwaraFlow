@@ -30,12 +30,23 @@
             android:textSize="16sp"
             android:textStyle="bold" />
 
+        <!-- Keep existing IDs/mappings, but present them in official Iwara order:
+             date = 最新, trending = 流行, popularity = 人气. -->
+        <TextView
+            android:id="@+id/tabLatest"
+            android:layout_width="58dp"
+            android:layout_height="match_parent"
+            android:gravity="center"
+            android:text="最新"
+            android:textColor="#99FFFFFF"
+            android:textSize="16sp" />
+
         <TextView
             android:id="@+id/tabTrending"
             android:layout_width="58dp"
             android:layout_height="match_parent"
             android:gravity="center"
-            android:text="趋势"
+            android:text="流行"
             android:textColor="#99FFFFFF"
             android:textSize="16sp" />
 
@@ -44,16 +55,7 @@
             android:layout_width="58dp"
             android:layout_height="match_parent"
             android:gravity="center"
-            android:text="热门"
-            android:textColor="#99FFFFFF"
-            android:textSize="16sp" />
-
-        <TextView
-            android:id="@+id/tabLatest"
-            android:layout_width="58dp"
-            android:layout_height="match_parent"
-            android:gravity="center"
-            android:text="最新"
+            android:text="人气"
             android:textColor="#99FFFFFF"
             android:textSize="16sp" />
 

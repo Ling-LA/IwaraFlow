@@ -8,10 +8,10 @@ import java.util.concurrent.TimeUnit
 
 class PlayableVideoGate(private val api: IwaraApi) {
     private val coordinator = Executors.newSingleThreadExecutor()
-    private val probes = Executors.newFixedThreadPool(5)
+    private val probes = Executors.newFixedThreadPool(8)
     private val client = OkHttpClient.Builder()
-        .connectTimeout(8, TimeUnit.SECONDS)
-        .readTimeout(10, TimeUnit.SECONDS)
+        .connectTimeout(4, TimeUnit.SECONDS)
+        .readTimeout(5, TimeUnit.SECONDS)
         .followRedirects(true)
         .build()
 
@@ -22,7 +22,12 @@ class PlayableVideoGate(private val api: IwaraApi) {
         callback: (List<VideoItem>) -> Unit
     ) {
         coordinator.execute {
-            val futures: List<Future<Pair<Int, VideoItem>>> = items.mapIndexed { index, item ->
+            // First-screen latency matters more than validating a whole 28-48 item page up front.
+            // Validate a small leading window, show it immediately, then normal pagination keeps
+            // bringing in more already-validated items as the user approaches the end.
+            val candidateCount = minOf(items.size, minOf(maxItems + 4, 16))
+            val candidates = items.take(candidateCount)
+            val futures: List<Future<Pair<Int, VideoItem>>> = candidates.mapIndexed { index, item ->
                 probes.submit<Pair<Int, VideoItem>> { Pair(index, inspectOne(item, quality)) }
             }
             val accepted: List<VideoItem> = futures
@@ -84,7 +89,7 @@ class PlayableVideoGate(private val api: IwaraApi) {
     private fun probe(url: String): Boolean {
         val request = Request.Builder()
             .url(url)
-            .header("Range", "bytes=0-65535")
+            .header("Range", "bytes=0-4095")
             .header("Accept", "*/*")
             .header("Referer", "https://www.iwara.tv/")
             .header("User-Agent", "Mozilla/5.0 (Linux; Android 14) AppleWebKit/537.36 Chrome/152 Mobile Safari/537.36")

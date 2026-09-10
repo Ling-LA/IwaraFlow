@@ -27,13 +27,6 @@
         android:textSize="34sp"
         android:visibility="gone" />
 
-    <com.ling.iwaraflow.PauseSeekBar
-        android:id="@+id/pauseSeekBar"
-        android:layout_width="match_parent"
-        android:layout_height="28dp"
-        android:layout_gravity="top|start"
-        android:visibility="gone" />
-
     <TextView
         android:id="@+id/likeBurst"
         android:layout_width="160dp"
@@ -118,6 +111,13 @@
             android:maxLines="2"
             android:textColor="#CCFFFFFF"
             android:textSize="13sp" />
+
+        <com.ling.iwaraflow.PauseSeekBar
+            android:id="@+id/pauseSeekBar"
+            android:layout_width="match_parent"
+            android:layout_height="28dp"
+            android:layout_marginTop="6dp"
+            android:visibility="gone" />
     </LinearLayout>
 
     <LinearLayout
@@ -182,6 +182,16 @@
             android:layout_height="44dp"
             android:gravity="center"
             android:text="▣\n小窗"
+            android:textColor="#FFFFFFFF"
+            android:textSize="12sp"
+            android:textStyle="bold" />
+
+        <TextView
+            android:id="@+id/share"
+            android:layout_width="match_parent"
+            android:layout_height="44dp"
+            android:gravity="center"
+            android:text="↗\n分享"
             android:textColor="#FFFFFFFF"
             android:textSize="12sp"
             android:textStyle="bold" />

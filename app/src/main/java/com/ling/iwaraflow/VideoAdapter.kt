@@ -181,6 +181,7 @@ class VideoAdapter(
         private val quality = view.findViewById<TextView>(R.id.quality)
         private val download = view.findViewById<TextView>(R.id.download)
         private val pip = view.findViewById<TextView>(R.id.pip)
+        private val share = view.findViewById<TextView>(R.id.share)
         private val likeBurst = view.findViewById<TextView>(R.id.likeBurst)
         private val speedIndicator = view.findViewById<TextView>(R.id.speedIndicator)
 
@@ -234,6 +235,7 @@ class VideoAdapter(
             quality.setOnClickListener { showQualityChooser(item, false) }
             download.setOnClickListener { showQualityChooser(item, true) }
             pip.setOnClickListener { onEnterPip() }
+            share.setOnClickListener { VideoShare.share(itemView.context, item) }
 
             itemView.setOnClickListener {
                 val now = System.currentTimeMillis()

@@ -286,7 +286,7 @@ class MainActivityV3 : AppCompatActivity() {
         if (mode == "recommend" && currentPage == 0) {
             recommender.load(prefs.skipSeen) { result ->
                 result.onSuccess { raw ->
-                    note("推荐候选 ${raw.size} 条")
+                    note("推荐候选 ${raw.size} 条（抽页 ${recommender.sampledPages.joinToString(",")}）")
                     val firstPage = minOf(recommendFirstPage, NetworkProfile.coldStartCandidates(this))
                     val first = raw.take(firstPage)
                     val rest = raw.drop(firstPage)

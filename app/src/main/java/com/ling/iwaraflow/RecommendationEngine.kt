@@ -1,5 +1,6 @@
 package com.ling.iwaraflow
 
+import java.util.Random
 import java.util.concurrent.ExecutorService
 import java.util.concurrent.Executors
 import java.util.concurrent.TimeUnit
@@ -8,27 +9,36 @@ import kotlin.math.ln
 /**
  * 推荐候选的来源。
  *
- * 以前只取 trending / popularity / likes / views 各一页：后两个是全站历史总榜，
- * 基本是一组固定不变的老视频，前两个轮换也很慢，所以候选池每次都是同一批约 100 条，
- * 看得多的账号很快就没得可推。现在候选来自三处：
+ * Iwara 每个月新增六千多个视频，按发布时间能一直翻到一千多页（第 1000 页已经是
+ * 半年前），十二年的存量更是看不完。所以“没有可推荐的视频”从来不是片源不够，
+ * 而是取片源的方式不对：以前每次刷新都从各个榜单的**第 0 页**开始拿，
+ * 于是每次拿到的都是同一批最新的一两百条，看过一遍就真的没了。
  *
- * - **关注作者的更新**（订阅流）：关注了一百多个作者就该有一百多个作者的新作品；
- * - **最新投稿**：Iwara 每天几十条新视频，往后翻页等于取之不尽；
- * - **热门榜单**：仍然保留，用来保证质量和轮换。
+ * 现在每一轮都在整个存档里随机抽页——靠前的页抽中概率高（新内容仍然优先），
+ * 但尾巴足够长，能摸到几个月甚至一年前的视频。候选来自四处：
  *
- * 排序仍然由本地口味（作者 / 标签偏好）、点赞量、播放量、新鲜度共同决定，
+ * - **关注作者的更新**（订阅流）：首页 + 往前翻的存量；
+ * - **最新投稿**：第 0 页保证新鲜，再随机抽存档里的若干页；
+ * - **热门 / 流行榜**：保证质量，同样不只看第一页；
+ *
+ * 排序由本地口味（作者 / 标签偏好）、点赞量、播放量、新鲜度共同决定，
  * 关注的作者再额外加分。
  */
 class RecommendationEngine(
     private val api: IwaraApi,
     private val history: HistoryStore,
-    private val listBudgetMs: Long = DEFAULT_LIST_BUDGET_MS
+    private val listBudgetMs: Long = DEFAULT_LIST_BUDGET_MS,
+    private val random: Random = Random()
 ) {
     private val io = Executors.newSingleThreadExecutor()
     private val followingIo = Executors.newSingleThreadExecutor()
     @Volatile private var followingIds: Set<String> = emptySet()
     @Volatile private var followingSyncedAt = 0L
     @Volatile private var followingRunning = false
+
+    /** 本次刷新在存档里抽到的页码，只用于诊断。 */
+    @Volatile var sampledPages: List<Int> = emptyList()
+        private set
 
     fun load(skipSeen: Boolean, callback: (Result<List<VideoItem>>) -> Unit) {
         io.execute {
@@ -46,7 +56,8 @@ class RecommendationEngine(
     }
 
     private fun loadBlocking(skipSeen: Boolean): List<VideoItem> {
-        val pool = Executors.newFixedThreadPool(RANKINGS.size + 2)
+        // 一轮最多同时发这么多请求：卡住的那个不能把后面排队的也拖住。
+        val pool = Executors.newFixedThreadPool(MAX_PARALLEL_REQUESTS)
         try {
             val deadline = System.nanoTime() + TimeUnit.MILLISECONDS.toNanos(listBudgetMs)
             val merged = LinkedHashMap<String, Pair<VideoItem, Double>>()
@@ -56,7 +67,7 @@ class RecommendationEngine(
                 pool.submit<List<VideoItem>> { api.getFavoriteVideosBlocking() }
             } else null
 
-            mergePage(pool, merged, page = 0, deadline = deadline)
+            mergeRound(pool, merged, round = 0, deadline = deadline)
             if (merged.isEmpty()) throw IllegalStateException("所有推荐榜单请求均失败")
 
             likedFuture?.let { f ->
@@ -69,14 +80,14 @@ class RecommendationEngine(
             if (!skipSeen) return rank(merged).take(MAX_RESULTS)
 
             var buckets = split(rank(merged))
-            // 没看过的不够就继续往后翻。翻的是订阅流和最新投稿，它们是按时间排的，
-            // 越往后越是没看过的内容，而不是同一批总榜老视频。
-            var page = 1
-            while (buckets.fresh.size < MIN_FRESH_CANDIDATES && page <= MAX_EXTRA_PAGES) {
+            // 没看过的不够就再抽几轮。每轮抽的都是存档里别的页，不是往后走一页——
+            // 一千多页的存量里挪一页解决不了任何问题。
+            var round = 1
+            while (buckets.fresh.size < MIN_FRESH_CANDIDATES && round <= MAX_EXTRA_ROUNDS) {
                 val extraDeadline = System.nanoTime() + TimeUnit.MILLISECONDS.toNanos(listBudgetMs)
                 val before = merged.size
-                mergePage(pool, merged, page = page, deadline = extraDeadline)
-                page += 1
+                mergeRound(pool, merged, round = round, deadline = extraDeadline)
+                round += 1
                 if (merged.size == before) break
                 buckets = split(rank(merged))
             }
@@ -92,36 +103,68 @@ class RecommendationEngine(
         }
     }
 
-    private fun mergePage(
+    /** 一次请求：某个榜单（或订阅流）的某一页。 */
+    internal data class PageRequest(val sort: String, val page: Int, val weight: Double)
+
+    /**
+     * 这一轮抓哪几页。第 0 轮保证有各榜单的首页（新内容还是要优先，冷启动也要快），
+     * 每一轮都额外在存档深处随机抽几页，所以连着刷新两次拿到的不是同一批视频。
+     */
+    internal fun requestsFor(round: Int): List<PageRequest> {
+        val requests = ArrayList<PageRequest>()
+        val loggedIn = api.isLoggedIn()
+        if (round == 0) sampledPages = emptyList()
+        if (round == 0) {
+            if (loggedIn) requests += PageRequest(SUBSCRIBED, 0, SUBSCRIBED_WEIGHT)
+            RANKINGS.forEach { (sort, weight) -> requests += PageRequest(sort, 0, weight) }
+        } else if (loggedIn) {
+            // 关注的作者不是只有最新那一页作品，往前翻同样是没看过的更新。
+            // 放在补抽轮里，免得给冷启动再加一次请求。
+            requests += PageRequest(SUBSCRIBED, samplePage(SUBSCRIBED_DEPTH), SUBSCRIBED_WEIGHT * 0.85)
+        }
+        requests += PageRequest("date", samplePage(ARCHIVE_DEPTH), 2.2)
+        requests += PageRequest("popularity", samplePage(POPULAR_DEPTH), 2.4)
+        if (round > 0) requests += PageRequest("date", samplePage(ARCHIVE_DEPTH), 2.0)
+        return requests
+    }
+
+    /**
+     * 从 1..[depth] 里抽一页，概率偏向靠前（平方分布），但尾巴够长。
+     * 按发布时间一页 36 条，抽到第 300 页大约是一个多月前，第 1000 页是半年前。
+     */
+    private fun samplePage(depth: Int): Int {
+        val u = random.nextDouble()
+        val page = (1 + u * u * (depth - 1)).toInt().coerceIn(1, depth)
+        // 诊断信息里带上抽到的页，下次再有“推荐不出视频”的报告就能一眼看出是不是又卡在首页。
+        sampledPages = sampledPages + page
+        return page
+    }
+
+    private fun mergeRound(
         pool: ExecutorService,
         merged: LinkedHashMap<String, Pair<VideoItem, Double>>,
-        page: Int,
+        round: Int,
         deadline: Long
     ) {
-        val sources = ArrayList<Pair<Double, java.util.concurrent.Future<List<VideoItem>>>>()
-        if (api.isLoggedIn()) {
-            sources += SUBSCRIBED_WEIGHT to
-                pool.submit<List<VideoItem>> { api.getSubscribedVideosBlocking(page, PAGE_SIZE) }
-        }
-        RANKINGS.forEach { (sort, weight) ->
-            // 总榜类的榜单只取第一页：往后翻还是同一批老视频，白费一次请求。
-            if (page == 0 || sort in DEEP_SORTS) {
-                sources += weight to
-                    pool.submit<List<VideoItem>> { api.getVideosBlocking(sort, page = page, limit = PAGE_SIZE) }
+        val sources = requestsFor(round).map { request ->
+            request to pool.submit<List<VideoItem>> {
+                if (request.sort == SUBSCRIBED) api.getSubscribedVideosBlocking(request.page, PAGE_SIZE)
+                else api.getVideosBlocking(request.sort, page = request.page, limit = PAGE_SIZE)
             }
         }
         // One stalled ranking endpoint used to hold the whole cold start; a request that
         // misses the budget is treated like the failures this merge already tolerates.
-        sources.forEach { (baseWeight, future) ->
+        sources.forEach { (request, future) ->
             val remaining = deadline - System.nanoTime()
             val videos = (if (remaining <= 0L) null
             else runCatching { future.get(remaining, TimeUnit.NANOSECONDS) }.getOrNull()) ?: return@forEach
             videos.forEachIndexed { index, item ->
                 val rankBonus = (PAGE_SIZE - index).coerceAtLeast(0) / PAGE_SIZE.toDouble()
-                // 越靠后的页排名加成越低，但仍然按同一套分数参与排序。
-                val pageDecay = 1.0 / (1.0 + page * 0.35)
+                // 后面几轮补进来的稍微让一让，但不按页码衰减——存档深处的页不比首页差，
+                // 只是更老，老不老交给下面的新鲜度去评。
+                val roundDecay = 1.0 / (1.0 + round * 0.18)
                 val previous = merged[item.id]
-                val sourceBoost = (baseWeight + rankBonus * 0.8) * pageDecay
+                val sourceBoost = (request.weight + rankBonus * 0.8) * roundDecay
                 if (previous == null) {
                     merged[item.id] = item to sourceBoost
                 } else {
@@ -145,7 +188,9 @@ class RecommendationEngine(
                 val ageDays = if (item.createdAt > 0L) {
                     ((now - item.createdAt).coerceAtLeast(0L) / 86_400_000.0)
                 } else 30.0
-                val freshness = 1.9 / (1.0 + ageDays / 12.0)
+                // 新片加分，但不能是断崖：候选现在有一大半来自存档，
+                // 按原来的曲线，一个月前的视频就已经被压到几乎没有分了。
+                val freshness = 1.6 / (1.0 + ageDays / 30.0)
                 val affinity = profile.score(item).coerceAtMost(8.0) * 0.38
                 // 关注了就是明确的口味信号，比任何榜单名次都直接。
                 val followBonus = if (item.authorId.isNotBlank() && item.authorId in followed) FOLLOW_BONUS else 0.0
@@ -207,22 +252,31 @@ class RecommendationEngine(
     }
 
     companion object {
-        /** 榜单来源。总榜类只取第一页，按时间排的可以一直往后翻。 */
+        /** 首轮一定会取的榜单首页。 */
         private val RANKINGS = listOf(
             "trending" to 3.0,
             "popularity" to 2.6,
             "date" to 2.4
         )
-        private val DEEP_SORTS = setOf("date")
+        internal const val SUBSCRIBED = "__subscribed__"
         /** 关注作者的更新权重最高：这是用户自己选的作者。 */
         private const val SUBSCRIBED_WEIGHT = 3.6
         private const val FOLLOW_BONUS = 1.4
         private const val PAGE_SIZE = 36
         private const val MAX_RESULTS = 80
-        /** 低于这个数量就认为“排除已看”把候选榨干了，需要翻页或者放宽。 */
+        /** 首轮 6 个请求 + 点赞同步，留一点余量。 */
+        private const val MAX_PARALLEL_REQUESTS = 8
+        /**
+         * 随机抽页的范围。一页 36 条，按发布时间 900 页大概能回溯到一年前；
+         * 流行榜按同一套存量排序，取 400 页足够换着看。
+         */
+        internal const val ARCHIVE_DEPTH = 900
+        internal const val POPULAR_DEPTH = 400
+        internal const val SUBSCRIBED_DEPTH = 40
+        /** 低于这个数量就认为“排除已看”把候选榨干了，需要再抽几轮或者放宽。 */
         const val MIN_FRESH_CANDIDATES = 12
-        /** 最多再往后翻几页找没看过的视频。 */
-        const val MAX_EXTRA_PAGES = 4
+        /** 最多再抽几轮找没看过的视频。 */
+        const val MAX_EXTRA_ROUNDS = 3
         private const val MAX_FOLLOWING_PAGES = 40
         private const val FOLLOWING_TTL_MS = 6L * 60L * 60L * 1000L
         private const val DEFAULT_LIST_BUDGET_MS = 9_000L

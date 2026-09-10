@@ -6,15 +6,16 @@ import org.junit.runner.RunWith
 import org.mockito.Mockito.*
 import org.robolectric.RobolectricTestRunner
 import org.robolectric.annotation.Config
+import java.util.Random
 import java.util.concurrent.CountDownLatch
 import java.util.concurrent.TimeUnit
 import java.util.concurrent.atomic.AtomicReference
 
 /**
- * 候选来源。以前只有四个总榜，其中 likes / views 是全站历史总榜——一组几乎不变的老视频，
- * 所以看得多的账号很快就没得可推。关注作者的更新和每天的新投稿才是取之不尽的来源。
+ * 候选来源。Iwara 每月新增六千多个视频，存量十二年，所以“推荐不出视频”从来不是
+ * 片源问题——是取片源的方式问题：每次都从第 0 页拿，拿到的永远是同一批最新视频。
  *
- * 这里一律用“结果里有没有这条视频”来断言：每个来源返回带自己名字的视频，
+ * 这里一律用“结果里有没有这条视频”来断言：每个来源返回带自己名字和页码的视频，
  * 没被取用的来源自然不会出现在结果里。
  */
 @RunWith(RobolectricTestRunner::class)
@@ -56,6 +57,8 @@ class RecommendationSourcesTest {
         return api
     }
 
+    private fun pageOf(id: String): Int = id.substringAfter("-p").substringBefore("-").toInt()
+
     @Test fun theSubscriptionFeedIsOneOfTheSources() {
         val feed = load(RecommendationEngine(api(loggedIn = true), history()))
         assertTrue("关注作者的更新必须进入候选", feed.any { it.id.startsWith("subscribed-") })
@@ -63,7 +66,7 @@ class RecommendationSourcesTest {
 
     @Test fun newUploadsAreOneOfTheSources() {
         val feed = load(RecommendationEngine(api(loggedIn = false), history()))
-        assertTrue("最新投稿必须进入候选", feed.any { it.id.startsWith("date-") })
+        assertTrue("最新投稿必须进入候选", feed.any { it.id.startsWith("date-p0-") })
     }
 
     @Test fun theAllTimeTopChartsAreNoLongerRead() {
@@ -74,13 +77,39 @@ class RecommendationSourcesTest {
         assertTrue("热门榜单仍然保留", feed.any { it.id.startsWith("trending-") })
     }
 
-    @Test fun deepeningWalksTheTimeOrderedFeedsNotTheStaticCharts() {
-        // 第一页全看过，逼它继续往后翻。
+    @Test fun everyRefreshAlsoReachesIntoTheArchiveNotJustTheFirstPage() {
+        // 这是整个问题的根子：以前四个来源全取第 0 页，刷一百次也是那一两百条。
+        val feed = load(RecommendationEngine(api(loggedIn = true), history()))
+        assertTrue("必须有来自存档深处的候选，而不是清一色第 0 页",
+            feed.any { pageOf(it.id) > 0 })
+    }
+
+    @Test fun twoRefreshesDoNotLandOnTheSamePages() {
+        val first = load(RecommendationEngine(api(loggedIn = false), history(), random = Random(1)))
+        val second = load(RecommendationEngine(api(loggedIn = false), history(), random = Random(9)))
+        val deepFirst = first.map { pageOf(it.id) }.filter { it > 0 }.toSet()
+        val deepSecond = second.map { pageOf(it.id) }.filter { it > 0 }.toSet()
+        assertTrue("两次刷新抽到的页要不一样，否则等于没换", deepFirst != deepSecond)
+    }
+
+    @Test fun theSampledPagesGoDeepEnoughToMatter() {
+        // 一页 36 条。存量按发布时间有一千多页，只在前几页里打转是没有意义的。
+        val engine = RecommendationEngine(api(loggedIn = true), history(), random = Random(7))
+        val pages = (0..3).flatMap { round -> engine.requestsFor(round) }
+            .filter { it.page > 0 }
+            .map { it.page }
+        engine.close()
+        assertTrue("没有抽到任何深页", pages.isNotEmpty())
+        assertTrue("抽页要能到几十页开外，实测最深只有 ${pages.maxOrNull()}",
+            pages.any { it > 20 })
+        assertTrue("抽页不能越界", pages.all { it <= RecommendationEngine.ARCHIVE_DEPTH })
+    }
+
+    @Test fun seeingEverythingOnTheFirstPageIsNotRunningOutOfVideos() {
+        // 首页全看过。存量还有一千多页，这时候必须还能推得出东西。
         val seenFirstPage = { id: String -> id.contains("-p0-") }
-        val feed = load(RecommendationEngine(api(loggedIn = true), history(seenFirstPage)))
-        assertTrue("翻页要沿着最新投稿继续找", feed.any { it.id.startsWith("date-p1-") })
-        assertTrue("翻页也要继续看关注作者的更新", feed.any { it.id.startsWith("subscribed-p1-") })
-        assertTrue("热门榜单只取第一页，往后翻还是同一批老视频",
-            feed.none { it.id.startsWith("trending-p1-") || it.id.startsWith("popularity-p1-") })
+        val feed = load(RecommendationEngine(api(loggedIn = true), history(seenFirstPage), random = Random(3)))
+        assertTrue("看完首页不该就没得推了", feed.isNotEmpty())
+        assertTrue("推出来的必须是没看过的存档视频", feed.all { pageOf(it.id) > 0 })
     }
 }

@@ -10,6 +10,7 @@ import android.view.View
 import android.widget.Button
 import android.widget.TextView
 import android.widget.Toast
+import androidx.activity.OnBackPressedCallback
 import androidx.appcompat.app.AppCompatActivity
 import androidx.recyclerview.widget.LinearLayoutManager
 import androidx.recyclerview.widget.RecyclerView
@@ -98,10 +99,18 @@ class AuthorActivity : AppCompatActivity() {
             }
         })
 
-        findViewById<View>(R.id.authorBack).setOnClickListener { finishToMain() }
-        findViewById<View>(R.id.feedBack).setOnClickListener { showList() }
+        findViewById<View>(R.id.authorBack).setOnClickListener { handleBack() }
+        findViewById<View>(R.id.feedBack).setOnClickListener { handleBack() }
         followButton.setOnClickListener { toggleFollow() }
         friendButton.setOnClickListener { toggleFriend() }
+
+        // Use AndroidX back dispatch so gesture navigation, the system back key and our own
+        // on-screen back buttons all follow exactly the same navigation path.
+        onBackPressedDispatcher.addCallback(this, object : OnBackPressedCallback(true) {
+            override fun handleOnBackPressed() {
+                handleBack()
+            }
+        })
 
         val username = intent.getStringExtra(EXTRA_USERNAME).orEmpty()
         val id = intent.getStringExtra(EXTRA_ID).orEmpty()
@@ -262,6 +271,14 @@ class AuthorActivity : AppCompatActivity() {
         listPage.visibility = View.VISIBLE
     }
 
+    private fun handleBack() {
+        if (inFeed) {
+            showList()
+        } else {
+            finishToMain()
+        }
+    }
+
     private fun nextWork(position: Int) {
         if (position + 1 < feedAdapter.itemCount) {
             pager.setCurrentItem(position + 1, true)
@@ -363,16 +380,13 @@ class AuthorActivity : AppCompatActivity() {
     }
 
     private fun finishToMain() {
+        // Release the author player before reviving MainActivity so there is never an overlap.
+        feedAdapter.pauseAll()
         startActivity(Intent(this, MainActivityV3::class.java).apply {
             addFlags(Intent.FLAG_ACTIVITY_CLEAR_TOP or Intent.FLAG_ACTIVITY_SINGLE_TOP)
             putExtra("return_recommend", true)
         })
         finish()
-    }
-
-    @Deprecated("Deprecated in Java")
-    override fun onBackPressed() {
-        if (inFeed) showList() else finishToMain()
     }
 
     override fun onStart() {
@@ -381,7 +395,7 @@ class AuthorActivity : AppCompatActivity() {
     }
 
     override fun onStop() {
-        if (inFeed) feedAdapter.pauseAll()
+        feedAdapter.pauseAll()
         super.onStop()
     }
 

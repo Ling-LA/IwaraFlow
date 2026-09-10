@@ -35,7 +35,8 @@ data class VideoItem(
     val isPrivate: Boolean = false,
     val status: String = "",
     val thumbnailUrl: String = "",
-    var playbackIssue: String? = null
+    var playbackIssue: String? = null,
+    var resumePositionMs: Long = 0L
 )
 
 data class LoginResult(

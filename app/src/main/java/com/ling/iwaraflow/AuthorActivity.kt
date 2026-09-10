@@ -1,9 +1,7 @@
 package com.ling.iwaraflow
 
-import android.app.Activity
 import android.app.DownloadManager
 import android.content.Context
-import android.content.Intent
 import android.net.Uri
 import android.os.Bundle
 import android.os.Environment
@@ -11,7 +9,6 @@ import android.view.View
 import android.widget.Button
 import android.widget.TextView
 import android.widget.Toast
-import androidx.activity.OnBackPressedCallback
 import androidx.appcompat.app.AppCompatActivity
 import androidx.recyclerview.widget.LinearLayoutManager
 import androidx.recyclerview.widget.RecyclerView
@@ -106,10 +103,6 @@ class AuthorActivity : AppCompatActivity() {
         followButton.setOnClickListener { toggleFollow() }
         friendButton.setOnClickListener { toggleFriend() }
 
-        onBackPressedDispatcher.addCallback(this, object : OnBackPressedCallback(true) {
-            override fun handleOnBackPressed() = handleBack()
-        })
-
         val username = intent.getStringExtra(EXTRA_USERNAME).orEmpty()
         val id = intent.getStringExtra(EXTRA_ID).orEmpty()
         val display = intent.getStringExtra(EXTRA_NAME).orEmpty()
@@ -122,16 +115,16 @@ class AuthorActivity : AppCompatActivity() {
             loadNextPage()
         } else {
             Toast.makeText(this, "缺少作者信息", Toast.LENGTH_SHORT).show()
-            finishSafelyToMain()
+            finishSafely()
         }
     }
 
     private fun loadProfile(username: String) {
         statusView.text = "正在读取作者资料…"
         api.getAuthorProfile(username) { result ->
-            if (isFinishing || isDestroyed) return@getAuthorProfile
+            if (isFinishing || isDestroyed || exiting) return@getAuthorProfile
             runOnUiThread {
-                if (isFinishing || isDestroyed) return@runOnUiThread
+                if (isFinishing || isDestroyed || exiting) return@runOnUiThread
                 result.onSuccess { loaded ->
                     author = loaded
                     nameView.text = loaded.name
@@ -140,9 +133,9 @@ class AuthorActivity : AppCompatActivity() {
                     refreshRelationUi()
                     if (api.isLoggedIn()) {
                         api.getFriendStatus(loaded.id) { statusResult ->
-                            if (isFinishing || isDestroyed) return@getFriendStatus
+                            if (isFinishing || isDestroyed || exiting) return@getFriendStatus
                             runOnUiThread {
-                                if (isFinishing || isDestroyed) return@runOnUiThread
+                                if (isFinishing || isDestroyed || exiting) return@runOnUiThread
                                 statusResult.onSuccess {
                                     loaded.friendStatus = it
                                     loaded.friend = it == "friends"
@@ -152,9 +145,7 @@ class AuthorActivity : AppCompatActivity() {
                         }
                     }
                     loadNextPage()
-                }.onFailure {
-                    statusView.text = "作者资料加载失败：${it.message}"
-                }
+                }.onFailure { statusView.text = "作者资料加载失败：${it.message}" }
             }
         }
     }
@@ -281,35 +272,33 @@ class AuthorActivity : AppCompatActivity() {
 
     private fun handleBack() {
         if (exiting) return
-        if (inFeed) showList() else finishSafelyToMain()
+        if (inFeed) showList() else finishSafely()
     }
 
-    private fun finishSafelyToMain() {
+    private fun finishSafely() {
         if (exiting) return
         exiting = true
+        // Do not tear down Media3/SQLite during the system back animation. Android owns the
+        // transition; resources are released from onDestroy after the Activity is detached.
         feedAdapter.pauseAll()
-        feedAdapter.releaseAll()
-        setResult(Activity.RESULT_OK, Intent().putExtra(EXTRA_RETURN_RECOMMEND, true))
         finish()
+    }
+
+    @Deprecated("Deprecated in Java")
+    override fun onBackPressed() {
+        handleBack()
     }
 
     private fun nextWork(position: Int) {
         if (exiting) return
-        if (position + 1 < feedAdapter.itemCount) {
-            pager.setCurrentItem(position + 1, true)
-        } else if (!noMore) {
-            loadNextPage()
-        } else if (feedAdapter.itemCount > 0) {
-            pager.setCurrentItem(if (playableWorks.size > 1) 1 else 0, true)
-        }
+        if (position + 1 < feedAdapter.itemCount) pager.setCurrentItem(position + 1, true)
+        else if (!noMore) loadNextPage()
+        else if (feedAdapter.itemCount > 0) pager.setCurrentItem(if (playableWorks.size > 1) 1 else 0, true)
     }
 
     private fun toggleFollow() {
         val a = author ?: return
-        if (!api.isLoggedIn()) {
-            Toast.makeText(this, "请先登录 Iwara", Toast.LENGTH_SHORT).show()
-            return
-        }
+        if (!api.isLoggedIn()) { Toast.makeText(this, "请先登录 Iwara", Toast.LENGTH_SHORT).show(); return }
         followButton.isEnabled = false
         val desired = !a.following
         api.followUser(a.id, desired) { result ->
@@ -317,22 +306,15 @@ class AuthorActivity : AppCompatActivity() {
             runOnUiThread {
                 if (isFinishing || isDestroyed || exiting) return@runOnUiThread
                 followButton.isEnabled = true
-                result.onSuccess {
-                    a.following = desired
-                    refreshRelationUi()
-                }.onFailure {
-                    Toast.makeText(this, it.message ?: "关注操作失败", Toast.LENGTH_SHORT).show()
-                }
+                result.onSuccess { a.following = desired; refreshRelationUi() }
+                    .onFailure { Toast.makeText(this, it.message ?: "关注操作失败", Toast.LENGTH_SHORT).show() }
             }
         }
     }
 
     private fun toggleFriend() {
         val a = author ?: return
-        if (!api.isLoggedIn()) {
-            Toast.makeText(this, "请先登录 Iwara", Toast.LENGTH_SHORT).show()
-            return
-        }
+        if (!api.isLoggedIn()) { Toast.makeText(this, "请先登录 Iwara", Toast.LENGTH_SHORT).show(); return }
         friendButton.isEnabled = false
         val remove = a.friendStatus == "pending" || a.friendStatus == "friends"
         api.setFriend(a.id, !remove) { result ->
@@ -351,22 +333,14 @@ class AuthorActivity : AppCompatActivity() {
                             if (a.friend) refreshWorksAfterRelationshipChange()
                         }
                     }
-                }.onFailure {
-                    Toast.makeText(this, it.message ?: "好友操作失败", Toast.LENGTH_SHORT).show()
-                }
+                }.onFailure { Toast.makeText(this, it.message ?: "好友操作失败", Toast.LENGTH_SHORT).show() }
             }
         }
     }
 
     private fun refreshWorksAfterRelationshipChange() {
-        works.clear()
-        playableWorks.clear()
-        listAdapter.notifyDataSetChanged()
-        feedAdapter.replace(emptyList())
-        page = 0
-        noMore = false
-        loadingPage = false
-        loadNextPage()
+        works.clear(); playableWorks.clear(); listAdapter.notifyDataSetChanged(); feedAdapter.replace(emptyList())
+        page = 0; noMore = false; loadingPage = false; loadNextPage()
     }
 
     private fun refreshRelationUi() {
@@ -383,8 +357,7 @@ class AuthorActivity : AppCompatActivity() {
         try {
             val fileName = item.title.replace(Regex("[\\\\/:*?\"<>|]"), "_").take(80) + "_${source.name}.mp4"
             val request = DownloadManager.Request(Uri.parse(source.url))
-                .setTitle(item.title)
-                .setMimeType("video/mp4")
+                .setTitle(item.title).setMimeType("video/mp4")
                 .addRequestHeader("Referer", "https://www.iwara.tv/")
                 .setNotificationVisibility(DownloadManager.Request.VISIBILITY_VISIBLE_NOTIFY_COMPLETED)
                 .setDestinationInExternalPublicDir(Environment.DIRECTORY_DOWNLOADS, "IwaraFlow/$fileName")
@@ -396,9 +369,7 @@ class AuthorActivity : AppCompatActivity() {
     }
 
     @Suppress("UNUSED_PARAMETER")
-    fun openAuthorProfile(view: View) {
-        if (inFeed) showList()
-    }
+    fun openAuthorProfile(view: View) { if (inFeed) showList() }
 
     override fun onStart() {
         super.onStart()
@@ -423,6 +394,5 @@ class AuthorActivity : AppCompatActivity() {
         const val EXTRA_ID = "author_id"
         const val EXTRA_NAME = "author_name"
         const val EXTRA_USERNAME = "author_username"
-        const val EXTRA_RETURN_RECOMMEND = "return_recommend"
     }
 }

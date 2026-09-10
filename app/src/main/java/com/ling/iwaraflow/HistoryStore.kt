@@ -91,7 +91,7 @@ class HistoryStore(context: Context) : SQLiteOpenHelper(context, "iwaraflow.db",
     }
 
     @Synchronized
-    private fun markSeen(videoId: String, timestamp: Long) {
+    fun markSeen(videoId: String, timestamp: Long = System.currentTimeMillis()) {
         if (videoId.isBlank()) return
         val db = writableDatabase
         val initial = ContentValues().apply {
@@ -128,6 +128,7 @@ class HistoryStore(context: Context) : SQLiteOpenHelper(context, "iwaraflow.db",
                 put("created_at", System.currentTimeMillis())
             }
             writableDatabase.insertWithOnConflict("favorites", null, values, SQLiteDatabase.CONFLICT_REPLACE)
+            markSeen(item.id)
         } else {
             writableDatabase.delete("favorites", "video_id=?", arrayOf(item.id))
         }

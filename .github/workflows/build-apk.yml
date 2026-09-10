@@ -46,7 +46,9 @@ jobs:
             adb shell settings put system screen_off_timeout 1800000
             gradle :app:connectedDebugAndroidTest --stacktrace --no-daemon
             gradle :app:connectedDebugAndroidTest -Pandroid.testInstrumentationRunnerArguments.backMode=key --stacktrace --no-daemon
-            adb shell cmd overlay enable --user 0 com.android.internal.systemui.navbar.gestural
+            adb shell cmd overlay enable-exclusive --user 0 --category com.android.internal.systemui.navbar.gestural
+            sleep 2
+            adb shell wm dismiss-keyguard
             gradle :app:connectedDebugAndroidTest -Pandroid.testInstrumentationRunnerArguments.backMode=gesture --stacktrace --no-daemon
       - name: Upload regression reports
         if: always()

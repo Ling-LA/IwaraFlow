@@ -1,5 +1,6 @@
 package com.ling.iwaraflow
 
+import android.app.Activity
 import android.app.DownloadManager
 import android.content.Context
 import android.content.Intent
@@ -43,6 +44,7 @@ class AuthorActivity : AppCompatActivity() {
     private var noMore = false
     private var inFeed = false
     private var adjustingLoopEdge = false
+    private var exiting = false
     private val pageSize = 36
 
     override fun onCreate(savedInstanceState: Bundle?) {
@@ -104,12 +106,8 @@ class AuthorActivity : AppCompatActivity() {
         followButton.setOnClickListener { toggleFollow() }
         friendButton.setOnClickListener { toggleFriend() }
 
-        // Use AndroidX back dispatch so gesture navigation, the system back key and our own
-        // on-screen back buttons all follow exactly the same navigation path.
         onBackPressedDispatcher.addCallback(this, object : OnBackPressedCallback(true) {
-            override fun handleOnBackPressed() {
-                handleBack()
-            }
+            override fun handleOnBackPressed() = handleBack()
         })
 
         val username = intent.getStringExtra(EXTRA_USERNAME).orEmpty()
@@ -124,14 +122,16 @@ class AuthorActivity : AppCompatActivity() {
             loadNextPage()
         } else {
             Toast.makeText(this, "缺少作者信息", Toast.LENGTH_SHORT).show()
-            finish()
+            finishSafelyToMain()
         }
     }
 
     private fun loadProfile(username: String) {
         statusView.text = "正在读取作者资料…"
         api.getAuthorProfile(username) { result ->
+            if (isFinishing || isDestroyed) return@getAuthorProfile
             runOnUiThread {
+                if (isFinishing || isDestroyed) return@runOnUiThread
                 result.onSuccess { loaded ->
                     author = loaded
                     nameView.text = loaded.name
@@ -140,7 +140,9 @@ class AuthorActivity : AppCompatActivity() {
                     refreshRelationUi()
                     if (api.isLoggedIn()) {
                         api.getFriendStatus(loaded.id) { statusResult ->
+                            if (isFinishing || isDestroyed) return@getFriendStatus
                             runOnUiThread {
+                                if (isFinishing || isDestroyed) return@runOnUiThread
                                 statusResult.onSuccess {
                                     loaded.friendStatus = it
                                     loaded.friend = it == "friends"
@@ -159,13 +161,15 @@ class AuthorActivity : AppCompatActivity() {
 
     private fun loadNextPage() {
         val a = author ?: return
-        if (loadingPage || noMore || a.id.isBlank()) return
+        if (loadingPage || noMore || a.id.isBlank() || exiting) return
         loadingPage = true
         statusView.text = if (works.isEmpty()) "正在检查作者作品是否可播放…" else "正在加载更多作品…"
         api.getAuthorVideos(a.id, page, pageSize) { result ->
+            if (isFinishing || isDestroyed || exiting) return@getAuthorVideos
             result.onSuccess { raw ->
                 if (raw.isEmpty()) {
                     runOnUiThread {
+                        if (isFinishing || isDestroyed || exiting) return@runOnUiThread
                         loadingPage = false
                         noMore = true
                         if (inFeed) rebuildFeedKeepingCurrent()
@@ -174,7 +178,9 @@ class AuthorActivity : AppCompatActivity() {
                     return@onSuccess
                 }
                 gate.inspectAll(raw, prefs.defaultQuality) { checked ->
+                    if (isFinishing || isDestroyed || exiting) return@inspectAll
                     runOnUiThread {
+                        if (isFinishing || isDestroyed || exiting) return@runOnUiThread
                         val currentId = if (inFeed) feedAdapter.items.getOrNull(pager.currentItem)?.id else null
                         val start = works.size
                         works += checked
@@ -189,6 +195,7 @@ class AuthorActivity : AppCompatActivity() {
                 }
             }.onFailure {
                 runOnUiThread {
+                    if (isFinishing || isDestroyed || exiting) return@runOnUiThread
                     loadingPage = false
                     statusView.text = "作品加载失败：${it.message}"
                 }
@@ -236,7 +243,7 @@ class AuthorActivity : AppCompatActivity() {
     }
 
     private fun normalizeLoopEdge() {
-        if (!inFeed || !noMore || playableWorks.size <= 1 || adjustingLoopEdge) return
+        if (!inFeed || !noMore || playableWorks.size <= 1 || adjustingLoopEdge || exiting) return
         val current = pager.currentItem
         val lastSentinel = feedAdapter.itemCount - 1
         val target = when (current) {
@@ -251,6 +258,7 @@ class AuthorActivity : AppCompatActivity() {
     }
 
     private fun openWork(item: VideoItem) {
+        if (exiting) return
         val realIndex = playableWorks.indexOfFirst { it.id == item.id }
         if (realIndex < 0) return
         inFeed = true
@@ -264,7 +272,7 @@ class AuthorActivity : AppCompatActivity() {
     }
 
     private fun showList() {
-        if (!inFeed) return
+        if (!inFeed || exiting) return
         feedAdapter.pauseAll()
         inFeed = false
         feedPage.visibility = View.GONE
@@ -272,14 +280,21 @@ class AuthorActivity : AppCompatActivity() {
     }
 
     private fun handleBack() {
-        if (inFeed) {
-            showList()
-        } else {
-            finishToMain()
-        }
+        if (exiting) return
+        if (inFeed) showList() else finishSafelyToMain()
+    }
+
+    private fun finishSafelyToMain() {
+        if (exiting) return
+        exiting = true
+        feedAdapter.pauseAll()
+        feedAdapter.releaseAll()
+        setResult(Activity.RESULT_OK, Intent().putExtra(EXTRA_RETURN_RECOMMEND, true))
+        finish()
     }
 
     private fun nextWork(position: Int) {
+        if (exiting) return
         if (position + 1 < feedAdapter.itemCount) {
             pager.setCurrentItem(position + 1, true)
         } else if (!noMore) {
@@ -298,7 +313,9 @@ class AuthorActivity : AppCompatActivity() {
         followButton.isEnabled = false
         val desired = !a.following
         api.followUser(a.id, desired) { result ->
+            if (isFinishing || isDestroyed || exiting) return@followUser
             runOnUiThread {
+                if (isFinishing || isDestroyed || exiting) return@runOnUiThread
                 followButton.isEnabled = true
                 result.onSuccess {
                     a.following = desired
@@ -319,11 +336,15 @@ class AuthorActivity : AppCompatActivity() {
         friendButton.isEnabled = false
         val remove = a.friendStatus == "pending" || a.friendStatus == "friends"
         api.setFriend(a.id, !remove) { result ->
+            if (isFinishing || isDestroyed || exiting) return@setFriend
             runOnUiThread {
+                if (isFinishing || isDestroyed || exiting) return@runOnUiThread
                 friendButton.isEnabled = true
                 result.onSuccess {
                     api.getFriendStatus(a.id) { refreshed ->
+                        if (isFinishing || isDestroyed || exiting) return@getFriendStatus
                         runOnUiThread {
+                            if (isFinishing || isDestroyed || exiting) return@runOnUiThread
                             a.friendStatus = refreshed.getOrDefault(if (remove) "none" else "pending")
                             a.friend = a.friendStatus == "friends"
                             refreshRelationUi()
@@ -379,19 +400,9 @@ class AuthorActivity : AppCompatActivity() {
         if (inFeed) showList()
     }
 
-    private fun finishToMain() {
-        // Release the author player before reviving MainActivity so there is never an overlap.
-        feedAdapter.pauseAll()
-        startActivity(Intent(this, MainActivityV3::class.java).apply {
-            addFlags(Intent.FLAG_ACTIVITY_CLEAR_TOP or Intent.FLAG_ACTIVITY_SINGLE_TOP)
-            putExtra("return_recommend", true)
-        })
-        finish()
-    }
-
     override fun onStart() {
         super.onStart()
-        if (inFeed) feedAdapter.resumeActive()
+        if (inFeed && !exiting) feedAdapter.resumeActive()
     }
 
     override fun onStop() {
@@ -412,5 +423,6 @@ class AuthorActivity : AppCompatActivity() {
         const val EXTRA_ID = "author_id"
         const val EXTRA_NAME = "author_name"
         const val EXTRA_USERNAME = "author_username"
+        const val EXTRA_RETURN_RECOMMEND = "return_recommend"
     }
 }

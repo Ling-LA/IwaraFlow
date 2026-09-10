@@ -5,7 +5,7 @@ import android.content.Context
 import android.database.sqlite.SQLiteDatabase
 import android.database.sqlite.SQLiteOpenHelper
 
-class HistoryStore(context: Context) : SQLiteOpenHelper(context, "iwaraflow.db", null, 2) {
+class HistoryStore(context: Context) : SQLiteOpenHelper(context, "iwaraflow.db", null, 3) {
     override fun onCreate(db: SQLiteDatabase) {
         db.execSQL(
             """CREATE TABLE history(
@@ -39,8 +39,16 @@ class HistoryStore(context: Context) : SQLiteOpenHelper(context, "iwaraflow.db",
                 created_at INTEGER NOT NULL
             )""".trimIndent()
         )
+        db.execSQL(
+            """CREATE TABLE seen_videos(
+                video_id TEXT PRIMARY KEY,
+                first_seen_at INTEGER NOT NULL,
+                last_seen_at INTEGER NOT NULL
+            )""".trimIndent()
+        )
         db.execSQL("CREATE INDEX idx_history_time ON history(watched_at DESC)")
         db.execSQL("CREATE INDEX idx_interactions_time ON interactions(created_at DESC)")
+        db.execSQL("CREATE INDEX idx_seen_last_time ON seen_videos(last_seen_at DESC)")
     }
 
     override fun onUpgrade(db: SQLiteDatabase, oldVersion: Int, newVersion: Int) {
@@ -49,10 +57,26 @@ class HistoryStore(context: Context) : SQLiteOpenHelper(context, "iwaraflow.db",
                 db.execSQL("ALTER TABLE history ADD COLUMN completed INTEGER NOT NULL DEFAULT 0")
             } catch (_: Throwable) { }
         }
+        if (oldVersion < 3) {
+            db.execSQL(
+                """CREATE TABLE IF NOT EXISTS seen_videos(
+                    video_id TEXT PRIMARY KEY,
+                    first_seen_at INTEGER NOT NULL,
+                    last_seen_at INTEGER NOT NULL
+                )""".trimIndent()
+            )
+            db.execSQL("CREATE INDEX IF NOT EXISTS idx_seen_last_time ON seen_videos(last_seen_at DESC)")
+            // Preserve all existing watch memory when upgrading from older versions.
+            db.execSQL(
+                """INSERT OR IGNORE INTO seen_videos(video_id, first_seen_at, last_seen_at)
+                   SELECT video_id, watched_at, watched_at FROM history""".trimIndent()
+            )
+        }
     }
 
     @Synchronized
     fun recordWatch(item: VideoItem, positionMs: Long, durationMs: Long, completed: Boolean) {
+        val now = System.currentTimeMillis()
         val values = ContentValues().apply {
             put("video_id", item.id)
             put("title", item.title)
@@ -60,14 +84,33 @@ class HistoryStore(context: Context) : SQLiteOpenHelper(context, "iwaraflow.db",
             put("tags", item.tags.joinToString("\u001F"))
             put("last_position", positionMs.coerceAtLeast(0))
             put("duration", durationMs.coerceAtLeast(0))
-            put("watched_at", System.currentTimeMillis())
+            put("watched_at", now)
             put("completed", if (completed) 1 else 0)
         }
         writableDatabase.insertWithOnConflict("history", null, values, SQLiteDatabase.CONFLICT_REPLACE)
+        markSeen(item.id, now)
+    }
+
+    @Synchronized
+    private fun markSeen(videoId: String, timestamp: Long) {
+        if (videoId.isBlank()) return
+        val db = writableDatabase
+        db.execSQL(
+            """INSERT INTO seen_videos(video_id, first_seen_at, last_seen_at)
+               VALUES(?, ?, ?)
+               ON CONFLICT(video_id) DO UPDATE SET last_seen_at=excluded.last_seen_at""".trimIndent(),
+            arrayOf(videoId, timestamp, timestamp)
+        )
     }
 
     @Synchronized
     fun isSeen(videoId: String): Boolean {
+        readableDatabase.query(
+            "seen_videos", arrayOf("video_id"), "video_id=?", arrayOf(videoId),
+            null, null, null, "1"
+        ).use { if (it.moveToFirst()) return true }
+
+        // Compatibility fallback for databases that have not yet completed migration.
         readableDatabase.query(
             "history", arrayOf("video_id"), "video_id=?", arrayOf(videoId),
             null, null, null, "1"
@@ -110,7 +153,6 @@ class HistoryStore(context: Context) : SQLiteOpenHelper(context, "iwaraflow.db",
             put("created_at", System.currentTimeMillis())
         }
         writableDatabase.insert("interactions", null, values)
-        // 防止长期使用无限增长。
         writableDatabase.execSQL(
             "DELETE FROM interactions WHERE id NOT IN (SELECT id FROM interactions ORDER BY created_at DESC LIMIT 1000)"
         )

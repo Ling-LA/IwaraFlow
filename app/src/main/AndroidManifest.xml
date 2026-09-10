@@ -24,6 +24,14 @@
         </provider>
 
         <activity
+            android:name=".SavedVideosActivity"
+            android:screenOrientation="portrait"
+            android:exported="false" />
+        <activity
+            android:name=".FollowingActivity"
+            android:screenOrientation="portrait"
+            android:exported="false" />
+        <activity
             android:name=".AuthorActivity"
             android:screenOrientation="portrait"
             android:enableOnBackInvokedCallback="false"

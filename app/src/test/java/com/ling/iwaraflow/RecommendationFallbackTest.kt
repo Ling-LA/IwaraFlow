@@ -70,11 +70,10 @@ class RecommendationFallbackTest {
             if (page == 0) (0 until 20).map { video("seen-$it") }
             else (0 until 14).map { video("new-page$page-$it") }
         }
-        try {
-            val feed = load(engine)
-            verify(api, atLeastOnce()).getVideosBlocking(anyString(), eq(1), anyInt())
-            assertTrue("翻页找到的新视频要排在前面", feed.first().id.startsWith("new"))
-        } finally { engine.close() }
+        val feed = load(engine)
+        engine.close()
+        verify(api, atLeastOnce()).getVideosBlocking(anyString(), eq(1), anyInt())
+        assertTrue("翻页找到的新视频要排在前面", feed.first().id.startsWith("new"))
     }
 
     @Test fun likedVideosAreTheLastResortNotTheFirstChoice() {

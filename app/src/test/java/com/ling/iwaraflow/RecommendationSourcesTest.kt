@@ -38,14 +38,15 @@ class RecommendationSourcesTest {
     @Test fun theSubscriptionFeedIsOneOfTheSources() {
         val api = mock(IwaraApi::class.java)
         `when`(api.isLoggedIn()).thenReturn(true)
+        // 关注列表在后台线程刷新；让它立刻结束，免得和下面的校验抢 Mockito。
+        `when`(api.getCurrentUserBlocking()).thenThrow(IllegalStateException("no session in test"))
         `when`(api.getVideosBlocking(anyString(), anyInt(), anyInt())).thenReturn(listOf(video("ranked-1")))
         `when`(api.getSubscribedVideosBlocking(anyInt(), anyInt())).thenReturn(listOf(video("subscribed-1")))
         val engine = RecommendationEngine(api, freshHistory())
-        try {
-            val feed = load(engine)
-            verify(api, atLeastOnce()).getSubscribedVideosBlocking(anyInt(), anyInt())
-            assertTrue("关注作者的更新必须进入候选", feed.any { it.id == "subscribed-1" })
-        } finally { engine.close() }
+        val feed = load(engine)
+        engine.close()
+        verify(api, timeout(5_000).atLeastOnce()).getSubscribedVideosBlocking(anyInt(), anyInt())
+        assertTrue("关注作者的更新必须进入候选", feed.any { it.id == "subscribed-1" })
     }
 
     @Test fun newUploadsAreAmongTheRankingsWeRead() {
@@ -54,22 +55,20 @@ class RecommendationSourcesTest {
             listOf(video("${invocation.getArgument<String>(0)}-1"))
         }
         val engine = RecommendationEngine(api, freshHistory())
-        try {
-            load(engine)
-            verify(api, atLeastOnce()).getVideosBlocking(eq("date"), anyInt(), anyInt())
-        } finally { engine.close() }
+        load(engine)
+        engine.close()
+        verify(api, atLeastOnce()).getVideosBlocking(eq("date"), anyInt(), anyInt())
     }
 
     @Test fun theAllTimeTopChartsAreNoLongerAskedFor() {
         val api = mock(IwaraApi::class.java)
         `when`(api.getVideosBlocking(anyString(), anyInt(), anyInt())).thenReturn(listOf(video("ranked-1")))
         val engine = RecommendationEngine(api, freshHistory())
-        try {
-            load(engine)
-            // 全站历史总榜每次都是同一批老视频，拉它们只是白费一次请求。
-            verify(api, never()).getVideosBlocking(eq("likes"), anyInt(), anyInt())
-            verify(api, never()).getVideosBlocking(eq("views"), anyInt(), anyInt())
-        } finally { engine.close() }
+        load(engine)
+        engine.close()
+        // 全站历史总榜每次都是同一批老视频，拉它们只是白费一次请求。
+        verify(api, never()).getVideosBlocking(eq("likes"), anyInt(), anyInt())
+        verify(api, never()).getVideosBlocking(eq("views"), anyInt(), anyInt())
     }
 
     @Test fun deepeningWalksTheTimeOrderedListsNotTheStaticCharts() {
@@ -85,11 +84,10 @@ class RecommendationSourcesTest {
             else (0 until 14).map { video("new-$sort-page$page-$it") }
         }
         val engine = RecommendationEngine(api, history)
-        try {
-            val feed = load(engine)
-            verify(api, atLeastOnce()).getVideosBlocking(eq("date"), eq(1), anyInt())
-            verify(api, never()).getVideosBlocking(eq("trending"), eq(1), anyInt())
-            assertTrue("翻页取到的新视频要进入结果", feed.any { it.id.startsWith("new-date") })
-        } finally { engine.close() }
+        val feed = load(engine)
+        engine.close()
+        verify(api, atLeastOnce()).getVideosBlocking(eq("date"), eq(1), anyInt())
+        verify(api, never()).getVideosBlocking(eq("trending"), eq(1), anyInt())
+        assertTrue("翻页取到的新视频要进入结果", feed.any { it.id.startsWith("new-date") })
     }
 }

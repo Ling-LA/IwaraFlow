@@ -44,8 +44,8 @@ jobs:
             adb shell input keyevent KEYCODE_WAKEUP
             adb shell wm dismiss-keyguard
             adb shell settings put system screen_off_timeout 1800000
-            gradle :app:connectedDebugAndroidTest --stacktrace --no-daemon
-            gradle :app:connectedDebugAndroidTest -Pandroid.testInstrumentationRunnerArguments.backMode=key --stacktrace --no-daemon
+            gradle :app:connectedDebugAndroidTest --no-daemon
+            gradle :app:connectedDebugAndroidTest -Pandroid.testInstrumentationRunnerArguments.backMode=key --no-daemon
       - name: Upload regression reports
         if: always()
         uses: actions/upload-artifact@v4

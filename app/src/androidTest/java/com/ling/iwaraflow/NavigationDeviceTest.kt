@@ -9,6 +9,7 @@ import android.os.ParcelFileDescriptor
 import android.view.KeyEvent
 import android.view.View
 import androidx.media3.common.MediaItem
+import androidx.media3.common.Player
 import androidx.media3.exoplayer.ExoPlayer
 import androidx.recyclerview.widget.RecyclerView
 import androidx.test.ext.junit.runners.AndroidJUnit4
@@ -107,13 +108,21 @@ class NavigationDeviceTest {
     private fun fixtureUri(mediaFile: File): String = android.net.Uri.fromFile(mediaFile).toString()
 
     private fun playFixture(activity: Activity, pagerId: Int, mediaFile: File) {
-        val player = awaitFixturePlayer(activity, pagerId)
-        main {
-            player.setMediaItem(MediaItem.fromUri(android.net.Uri.fromFile(mediaFile)))
-            player.prepare()
-            player.seekTo(1_500)
-            player.play()
+        // The card's player is owned by the app: a rebind releases it and the stall watchdog
+        // rebuilds it, and either leaves the instance this test grabbed sitting in IDLE forever.
+        // So re-take the card's current player and re-arm whenever that happens.
+        var player = awaitFixturePlayer(activity, pagerId)
+        var armedAt = 0L
+        fun arm() {
+            main {
+                player.setMediaItem(MediaItem.fromUri(android.net.Uri.fromFile(mediaFile)))
+                player.prepare()
+                player.seekTo(1_500)
+                player.play()
+            }
+            armedAt = SystemClock.uptimeMillis()
         }
+        arm()
         // The emulator decodes h264 in software. Playback is real once the timeline actually
         // advances past the seek; waiting for the decoder to also report a frame size on top of
         // that is what times out on a loaded runner, and it proves nothing extra about playback.
@@ -121,12 +130,18 @@ class NavigationDeviceTest {
         var lastState = ""
         while (SystemClock.uptimeMillis() < deadline) {
             var ready = false
+            var idle = false
             main {
                 ready = player.isPlaying && (player.videoSize.width > 0 || player.currentPosition > 1_700)
+                idle = player.playbackState == Player.STATE_IDLE
                 lastState = "playing=${player.isPlaying} state=${player.playbackState} " +
                     "position=${player.currentPosition} size=${player.videoSize.width}"
             }
             if (ready) return
+            if (idle && SystemClock.uptimeMillis() - armedAt > 2_000) {
+                player = awaitFixturePlayer(activity, pagerId)
+                arm()
+            }
             SystemClock.sleep(30)
         }
         throw AssertionError("Fixture video did not reach actual video playback: $lastState")

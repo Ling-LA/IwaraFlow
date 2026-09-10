@@ -31,6 +31,7 @@ data class VideoItem(
     var selectedQuality: String? = null,
     val authorId: String = "",
     val authorUsername: String = "",
+    var authorFollowing: Boolean = false,
     val isPrivate: Boolean = false,
     val status: String = "",
     val thumbnailUrl: String = "",

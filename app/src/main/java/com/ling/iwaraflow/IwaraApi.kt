@@ -471,7 +471,7 @@ class IwaraApi(context: Context, private val apiRoot: String = DEFAULT_API_ROOT)
     }
 }
 
-private object UriEncoder {
+internal object UriEncoder {
     fun encodePath(value: String): String = java.net.URLEncoder.encode(value, "UTF-8").replace("+", "%20")
     fun encodePathSegment(value: String): String = java.net.URLEncoder.encode(value, "UTF-8")
         .replace("+", "%20")

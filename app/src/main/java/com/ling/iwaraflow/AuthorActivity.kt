@@ -103,6 +103,7 @@ class AuthorActivity : AppCompatActivity() {
         })
 
         findViewById<View>(R.id.authorBack).setOnClickListener { handleBack() }
+        findViewById<View>(R.id.authorShare).setOnClickListener { shareAuthor() }
         findViewById<View>(R.id.feedBack).setOnClickListener { handleBack() }
         onBackPressedDispatcher.addCallback(this, object : OnBackPressedCallback(true) {
             override fun handleOnBackPressed() = handleBack()
@@ -287,7 +288,14 @@ class AuthorActivity : AppCompatActivity() {
         if (exiting) return
         exiting = true
         feedAdapter.pauseAll()
-        setResult(Activity.RESULT_OK, Intent().putExtra(EXTRA_RETURN_FROM_AUTHOR, true))
+        val data = Intent().putExtra(EXTRA_RETURN_FROM_AUTHOR, true)
+        // 把这一趟的关注状态带回去，调用方的关注按钮不用再查一次接口。
+        author?.let { loaded ->
+            data.putExtra(EXTRA_ID, loaded.id)
+                .putExtra(EXTRA_USERNAME, loaded.username)
+                .putExtra(EXTRA_FOLLOWING, loaded.following)
+        }
+        setResult(Activity.RESULT_OK, data)
         finish()
     }
 
@@ -296,6 +304,16 @@ class AuthorActivity : AppCompatActivity() {
         if (position + 1 < feedAdapter.itemCount) pager.setCurrentItem(position + 1, true)
         else if (!noMore) loadNextPage()
         else if (feedAdapter.itemCount > 0) pager.setCurrentItem(if (playableWorks.size > 1) 1 else 0, true)
+    }
+
+    /** 分享作者名片：资料还没回来时先用进入本页时带过来的名字和用户名。 */
+    private fun shareAuthor() {
+        val loaded = author
+        val fallbackName = intent.getStringExtra(EXTRA_NAME).orEmpty()
+        val fallbackUsername = intent.getStringExtra(EXTRA_USERNAME).orEmpty()
+        val card = loaded?.takeIf { it.username.isNotBlank() || it.name.isNotBlank() }
+            ?: IwaraAuthor(intent.getStringExtra(EXTRA_ID).orEmpty(), fallbackName, fallbackUsername)
+        VideoShare.shareAuthor(this, card)
     }
 
     private fun toggleFollow() {
@@ -397,10 +415,23 @@ class AuthorActivity : AppCompatActivity() {
         super.onDestroy()
     }
 
+    /** 作者页回传的关注状态。 */
+    data class FollowResult(val authorId: String, val username: String, val following: Boolean)
+
     companion object {
         const val EXTRA_ID = "author_id"
         const val EXTRA_NAME = "author_name"
         const val EXTRA_USERNAME = "author_username"
+        const val EXTRA_FOLLOWING = "author_following"
         const val EXTRA_RETURN_FROM_AUTHOR = "return_from_author"
+
+        fun readFollowResult(data: Intent?): FollowResult? {
+            data ?: return null
+            if (!data.hasExtra(EXTRA_FOLLOWING)) return null
+            val id = data.getStringExtra(EXTRA_ID).orEmpty()
+            val username = data.getStringExtra(EXTRA_USERNAME).orEmpty()
+            if (id.isBlank() && username.isBlank()) return null
+            return FollowResult(id, username, data.getBooleanExtra(EXTRA_FOLLOWING, false))
+        }
     }
 }

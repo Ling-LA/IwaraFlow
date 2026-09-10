@@ -91,8 +91,9 @@ class SearchActivity : AppCompatActivity() {
     private var exiting = false
     private val pageSize = 24
 
-    private val authorLauncher = registerForActivityResult(ActivityResultContracts.StartActivityForResult()) {
-        // 从作者页回来后停留在搜索结果，不自动恢复播放。
+    private val authorLauncher = registerForActivityResult(ActivityResultContracts.StartActivityForResult()) { result ->
+        // 从作者页回来后停留在搜索结果，不自动恢复播放；关注状态同步给结果里的视频。
+        AuthorActivity.readFollowResult(result.data)?.let { feedAdapter.applyFollowState(it) }
     }
 
     override fun onCreate(savedInstanceState: Bundle?) {

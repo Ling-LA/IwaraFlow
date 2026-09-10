@@ -1,0 +1,12 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- 转发箭头：右向箭头 + 从左下扫出的尾巴，和系统分享面板的图标一致。 -->
+<vector xmlns:android="http://schemas.android.com/apk/res/android"
+    android:width="22dp"
+    android:height="22dp"
+    android:viewportWidth="24"
+    android:viewportHeight="24">
+
+    <path
+        android:fillColor="#FFFFFFFF"
+        android:pathData="M14,8V4l8,8l-8,8v-4.1c-5,0 -8.5,1.6 -11,5.1c1,-5 4,-10 11,-11z" />
+</vector>

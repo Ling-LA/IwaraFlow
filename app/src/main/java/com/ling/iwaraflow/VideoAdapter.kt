@@ -12,6 +12,7 @@ import android.view.animation.DecelerateInterpolator
 import android.widget.TextView
 import android.widget.Toast
 import androidx.media3.common.Player
+import androidx.media3.exoplayer.DefaultLoadControl
 import androidx.media3.exoplayer.DefaultRenderersFactory
 import androidx.media3.exoplayer.ExoPlayer
 import androidx.media3.ui.PlayerView
@@ -124,7 +125,9 @@ class VideoAdapter(
                 it.bindingAdapterPosition == position && it.readyForIdlePreload()
             }
             if (!activeReady) return@Runnable
-            listOf(position + 1, position + 2).forEach { index ->
+            // 弱网/计量网络只预缓存下一条，别和正在播的视频抢带宽。
+            val ahead = NetworkProfile.prefetchCount(itemContext ?: return@Runnable)
+            (1..ahead).map { position + it }.forEach { index ->
                 val item = items.getOrNull(index) ?: return@forEach
                 val knownUrl = item.streamUrl
                 if (!knownUrl.isNullOrBlank()) {
@@ -297,7 +300,9 @@ class VideoAdapter(
             val bindGeneration = generation
             if (!active || !playbackEnabled || released || player != null) return
             val renderersFactory = DefaultRenderersFactory(itemView.context).setEnableDecoderFallback(true)
-            val p = ExoPlayer.Builder(itemView.context, renderersFactory).build().apply {
+            val p = ExoPlayer.Builder(itemView.context, renderersFactory)
+                .setLoadControl(feedLoadControl())
+                .build().apply {
                 repeatMode = Player.REPEAT_MODE_OFF
                 playWhenReady = false
                 volume = 0f
@@ -384,6 +389,13 @@ class VideoAdapter(
         }
 
         fun readyForIdlePreload(): Boolean = active && player?.playbackState == Player.STATE_READY
+
+        fun context(): android.content.Context = itemView.context
+
+        fun refreshFollowButton() {
+            val item = bound ?: return
+            itemView.findViewById<AuthorFollowButton>(R.id.authorFollow)?.render(item.authorFollowing)
+        }
 
         private fun stopSpeedBoost() {
             tapHandler.removeCallbacks(holdToSpeed)
@@ -574,7 +586,41 @@ class VideoAdapter(
         }
     }
 
+    /**
+     * 作者页关注/取关后同步到视频流：更新同一作者的所有条目，并刷新正在显示的关注按钮。
+     */
+    fun applyFollowState(result: AuthorActivity.FollowResult) {
+        val key = result.authorId.ifBlank { result.username }
+        if (key.isBlank()) return
+        items.forEach { item ->
+            val itemKey = item.authorId.ifBlank { item.authorUsername }
+            val matches = itemKey == key ||
+                (result.username.isNotBlank() && item.authorUsername == result.username) ||
+                (result.authorId.isNotBlank() && item.authorId == result.authorId)
+            if (matches) item.authorFollowing = result.following
+        }
+        holders.forEach { it.refreshFollowButton() }
+    }
+
+    /** 预缓存要判断网络状况，取任意一张已绑定卡片的 Context 就够。 */
+    private val itemContext: android.content.Context?
+        get() = holders.firstOrNull()?.context()
+
+    /**
+     * 竖滑流的缓冲策略：默认 50 秒的预读在划走时几乎全部作废，也会和当前播放抢带宽。
+     * 25 秒的余量足够扛住网络抖动，浪费和峰值带宽都少一半；画质不受影响，
+     * 码率由视频源本身决定。起播缓冲调小，弱网首帧更快。
+     */
+    private fun feedLoadControl(): DefaultLoadControl = DefaultLoadControl.Builder()
+        .setBufferDurationsMs(MIN_BUFFER_MS, MAX_BUFFER_MS, BUFFER_FOR_PLAYBACK_MS, BUFFER_AFTER_REBUFFER_MS)
+        .build()
+
     companion object {
+        const val MIN_BUFFER_MS = 12_000
+        const val MAX_BUFFER_MS = 25_000
+        const val BUFFER_FOR_PLAYBACK_MS = 1_200
+        const val BUFFER_AFTER_REBUFFER_MS = 2_500
+
         private val registryLock = Any()
         private var owner: WeakReference<VideoAdapter>? = null
 

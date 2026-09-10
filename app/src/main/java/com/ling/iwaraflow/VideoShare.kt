@@ -19,12 +19,39 @@ object VideoShare {
             Toast.makeText(context, "这个视频没有可分享的链接", Toast.LENGTH_SHORT).show()
             return
         }
+        send(context, shareText(item), item.title, "分享视频链接")
+    }
+
+    fun authorLinkFor(author: IwaraAuthor): String =
+        "https://www.iwara.tv/profile/${UriEncoder.encodePathSegment(author.username)}"
+
+    /** 作者名片：名字、用户名、简介和主页链接。 */
+    fun authorShareText(author: IwaraAuthor): String {
+        val name = author.name.trim().ifBlank { author.username }
+        val header = if (author.username.isBlank()) name else "$name（@${author.username}）"
+        val description = author.description.trim()
+        return buildString {
+            append(header)
+            if (description.isNotBlank()) append("\n").append(description)
+            if (author.username.isNotBlank()) append("\n").append(authorLinkFor(author))
+        }
+    }
+
+    fun shareAuthor(context: Context, author: IwaraAuthor) {
+        if (author.username.isBlank() && author.name.isBlank()) {
+            Toast.makeText(context, "这个作者没有可分享的资料", Toast.LENGTH_SHORT).show()
+            return
+        }
+        send(context, authorShareText(author), author.name, "分享作者主页")
+    }
+
+    private fun send(context: Context, text: String, subject: String, title: String) {
         val send = Intent(Intent.ACTION_SEND).apply {
             type = "text/plain"
-            putExtra(Intent.EXTRA_TEXT, shareText(item))
-            putExtra(Intent.EXTRA_SUBJECT, item.title)
+            putExtra(Intent.EXTRA_TEXT, text)
+            putExtra(Intent.EXTRA_SUBJECT, subject)
         }
-        val chooser = Intent.createChooser(send, "分享视频链接")
+        val chooser = Intent.createChooser(send, title)
         // 从 Activity 之外（例如 application context）拉起选择器时必须自带新任务标记。
         if (context !is android.app.Activity) chooser.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
         runCatching { context.startActivity(chooser) }

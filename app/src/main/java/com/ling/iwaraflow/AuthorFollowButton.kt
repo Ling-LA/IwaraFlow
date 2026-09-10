@@ -132,6 +132,12 @@ class AuthorFollowButton @JvmOverloads constructor(
         }
     }
 
+    /** 外部（例如从作者页返回）直接给出的关注状态。 */
+    fun render(following: Boolean) {
+        if (busy) return
+        showFollowing(following)
+    }
+
     private fun showFollowing(following: Boolean) {
         text = if (following) "已关注" else "关注"
         refreshStyle(following)

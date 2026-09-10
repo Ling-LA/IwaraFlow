@@ -78,8 +78,10 @@ class MainActivityV3 : AppCompatActivity() {
     private val recommendQueue = ArrayList<VideoItem>()
     private var recommendRefills = 0
 
-    private val authorLauncher = registerForActivityResult(ActivityResultContracts.StartActivityForResult()) {
+    private val authorLauncher = registerForActivityResult(ActivityResultContracts.StartActivityForResult()) { result ->
         resumeAfterInternalPage()
+        // 在作者页关注/取关后，回到视频流的关注按钮要跟着变。
+        AuthorActivity.readFollowResult(result.data)?.let { adapter.applyFollowState(it) }
     }
 
     private val followingLauncher = registerForActivityResult(ActivityResultContracts.StartActivityForResult()) {
@@ -281,8 +283,9 @@ class MainActivityV3 : AppCompatActivity() {
             recommender.load(prefs.skipSeen) { result ->
                 result.onSuccess { raw ->
                     note("推荐候选 ${raw.size} 条")
-                    val first = raw.take(recommendFirstPage)
-                    val rest = raw.drop(recommendFirstPage)
+                    val firstPage = minOf(recommendFirstPage, NetworkProfile.coldStartCandidates(this))
+                    val first = raw.take(firstPage)
+                    val rest = raw.drop(firstPage)
                     playableGate.filterPlayable(first, prefs.defaultQuality, maxItems = first.size, onFirstBatch = head) { playable ->
                         runOnUiThread {
                             if (requestId != requestSerial) return@runOnUiThread
@@ -306,7 +309,8 @@ class MainActivityV3 : AppCompatActivity() {
         }
 
         // 首屏只验证很小的窗口保证秒开；续页整页验证，避免每页只剩个位数视频。
-        val candidateWindow = if (reset) PlayableVideoGate.COLD_START_CANDIDATES else recommendPageSize
+        // 弱网上每个候选都是一次额外往返，窗口再收一点，先把首屏放出来。
+        val candidateWindow = if (reset) NetworkProfile.coldStartCandidates(this) else recommendPageSize
         val callback: (Result<List<VideoItem>>) -> Unit = { result ->
             result.onSuccess { raw ->
                 playableGate.filterPlayable(raw, prefs.defaultQuality, maxItems = pageSize, maxCandidates = candidateWindow, onFirstBatch = head) { playable ->

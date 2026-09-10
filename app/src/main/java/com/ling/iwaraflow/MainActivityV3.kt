@@ -58,7 +58,9 @@ class MainActivityV3 : AppCompatActivity() {
     private var pendingVideoId: String? = null
     private val pageSize = 28
     private val recommendFirstPage = 10
+    /** 续页一次验证多少条候选：翻页频率和单页请求量的折中。 */
     private val recommendPageSize = 20
+    private val maxRecommendRefills = 3
 
     private data class FeedSession(
         val items: List<VideoItem>,
@@ -72,7 +74,7 @@ class MainActivityV3 : AppCompatActivity() {
 
     /** 推荐算法一次产出的剩余候选，推荐流翻页从这里取，取完再重新生成。 */
     private val recommendQueue = ArrayList<VideoItem>()
-    private var recommendRefilled = false
+    private var recommendRefills = 0
 
     private val authorLauncher = registerForActivityResult(ActivityResultContracts.StartActivityForResult()) {
         resumeAfterInternalPage()
@@ -259,7 +261,7 @@ class MainActivityV3 : AppCompatActivity() {
     private fun loadFeed(reset: Boolean) {
         if (reset) {
             currentPage = 0
-            recommendRefilled = false
+            recommendRefills = 0
             invalidateRequests()
             loading.visibility = View.VISIBLE
             error.visibility = View.GONE
@@ -298,7 +300,7 @@ class MainActivityV3 : AppCompatActivity() {
         }
 
         // 首屏只验证很小的窗口保证秒开；续页整页验证，避免每页只剩个位数视频。
-        val candidateWindow = if (reset) PlayableVideoGate.COLD_START_CANDIDATES else pageSize
+        val candidateWindow = if (reset) PlayableVideoGate.COLD_START_CANDIDATES else recommendPageSize
         val callback: (Result<List<VideoItem>>) -> Unit = { result ->
             result.onSuccess { raw ->
                 playableGate.filterPlayable(raw, prefs.defaultQuality, maxItems = pageSize, maxCandidates = candidateWindow, onFirstBatch = head) { playable ->
@@ -388,10 +390,14 @@ class MainActivityV3 : AppCompatActivity() {
         }
     }
 
-    /** 作废还在飞行中的请求，同时解除首屏补齐期间的翻页保护。 */
+    /**
+     * 作废还在飞行中的请求。翻页状态一并清零：被作废的续页回调不会再回来
+     * 复位 loadingMore，否则新列表就再也翻不动了。
+     */
     private fun invalidateRequests() {
         requestSerial++
         awaitingFullFeed = false
+        loadingMore = false
     }
 
     private fun loadMore() {
@@ -429,11 +435,11 @@ class MainActivityV3 : AppCompatActivity() {
     }
 
     private fun refillRecommendQueue(requestId: Int) {
-        if (recommendRefilled) {
+        if (recommendRefills >= maxRecommendRefills) {
             loadMoreOfficialPage()
             return
         }
-        recommendRefilled = true
+        recommendRefills += 1
         recommender.load(prefs.skipSeen) { result ->
             runOnUiThread {
                 if (requestId != requestSerial) return@runOnUiThread

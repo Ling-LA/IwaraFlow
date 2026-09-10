@@ -11,6 +11,7 @@ import org.junit.Test
 import org.junit.runner.RunWith
 import org.mockito.Mockito.*
 import org.robolectric.RobolectricTestRunner
+import org.robolectric.RuntimeEnvironment
 import org.robolectric.annotation.Config
 import java.util.concurrent.CountDownLatch
 import java.util.concurrent.TimeUnit
@@ -135,8 +136,7 @@ class StartupFeedLatencyTest {
 
     @Test fun refreshingRecommendationsMarksIwaraLikesAsSeen() {
         val api = mock(IwaraApi::class.java)
-        val history = mock(HistoryStore::class.java)
-        `when`(history.preferenceProfile()).thenReturn(PreferenceProfile(emptyMap(), emptyMap()))
+        val history = HistoryStore(RuntimeEnvironment.getApplication())
         `when`(api.isLoggedIn()).thenReturn(true)
         `when`(api.getFavoriteVideosBlocking(anyInt(), anyInt()))
             .thenReturn(listOf(VideoItem("liked-1", "liked", "fixture", emptyList(), 1)))
@@ -148,9 +148,10 @@ class StartupFeedLatencyTest {
         try {
             engine.load(true) { delivered.countDown() }
             assertTrue("推荐列表没有返回", delivered.await(15, TimeUnit.SECONDS))
-            verify(history).markSeen(eq("liked-1"), anyLong())
+            assertTrue("Iwara 官方点赞没有计入已看", history.isSeen("liked-1"))
         } finally {
             engine.close()
+            history.close()
         }
     }
 

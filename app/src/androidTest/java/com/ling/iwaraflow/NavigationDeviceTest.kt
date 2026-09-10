@@ -43,7 +43,13 @@ class NavigationDeviceTest {
             }
             SystemClock.sleep(30)
         }
-        throw AssertionError("Expected ${type.simpleName}, got ${resumed?.javaClass?.simpleName}")
+        val context = instrumentation.targetContext
+        val keyguard = context.getSystemService(android.app.KeyguardManager::class.java)
+        val power = context.getSystemService(android.os.PowerManager::class.java)
+        var focused = false
+        main { focused = resumed?.hasWindowFocus() == true }
+        throw AssertionError("Expected focused ${type.simpleName}, got ${resumed?.javaClass?.simpleName}; " +
+            "focus=$focused interactive=${power.isInteractive} keyguard=${keyguard.isKeyguardLocked}")
     }
 
     private fun back(activity: Activity, buttonId: Int) {
@@ -113,6 +119,13 @@ class NavigationDeviceTest {
     }
 
     @Test fun returnPathsKeepCallerAndHomePlaybackSession() {
+        // A cold CI emulator can launch/resume an Activity behind its lock screen.
+        // Prepare the test device before checking focus or injecting any navigation input.
+        for (command in listOf("input keyevent KEYCODE_WAKEUP", "wm dismiss-keyguard")) {
+            ParcelFileDescriptor.AutoCloseInputStream(instrumentation.uiAutomation.executeShellCommand(command)).use {
+                it.readBytes()
+            }
+        }
         val app = instrumentation.targetContext.applicationContext as Application
         val session = SecureSessionStore(app)
         val originalRefresh = session.refreshToken

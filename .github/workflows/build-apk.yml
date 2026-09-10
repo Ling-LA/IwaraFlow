@@ -41,6 +41,9 @@ jobs:
           emulator-options: -no-window -gpu swiftshader -noaudio -no-boot-anim -camera-back none
           disable-animations: true
           script: |
+            adb shell input keyevent KEYCODE_WAKEUP
+            adb shell wm dismiss-keyguard
+            adb shell settings put system screen_off_timeout 1800000
             gradle :app:connectedDebugAndroidTest --stacktrace --no-daemon
             gradle :app:connectedDebugAndroidTest -Pandroid.testInstrumentationRunnerArguments.backMode=key --stacktrace --no-daemon
             adb shell cmd overlay enable --user 0 com.android.internal.systemui.navbar.gestural
@@ -53,6 +56,7 @@ jobs:
           path: |
             app/build/reports/tests/
             app/build/reports/androidTests/
+            app/build/outputs/androidTest-results/
 
   build:
     needs: navigation

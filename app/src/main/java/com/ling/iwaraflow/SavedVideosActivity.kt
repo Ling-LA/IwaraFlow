@@ -13,7 +13,7 @@ class SavedVideosActivity : AppCompatActivity() {
     private lateinit var api: IwaraApi
     private lateinit var history: HistoryStore
     private lateinit var listView: RecyclerView
-    private lateinit var adapter: AuthorVideoListAdapter
+    private lateinit var adapter: SavedVideoListAdapter
     private val items = mutableListOf<VideoItem>()
     private var closed = false
 
@@ -24,7 +24,7 @@ class SavedVideosActivity : AppCompatActivity() {
         api = IwaraApi(this)
         history = HistoryStore(this)
         listView = findViewById(R.id.savedVideos)
-        adapter = AuthorVideoListAdapter(items, ::openVideo)
+        adapter = SavedVideoListAdapter(items, ::openVideo)
         listView.layoutManager = LinearLayoutManager(this)
         listView.adapter = adapter
 

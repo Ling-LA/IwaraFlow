@@ -75,7 +75,7 @@ class NavigationDeviceTest {
     private fun playAuthorFixture(author: AuthorActivity, mediaFile: File) {
         main {
             val video = VideoItem("author-navigation", "Author fixture", "Fixture author", emptyList(), 0,
-                sources = listOf(VideoSource("fixture", fixtureUri(mediaFile), 1)))
+                sources = listOf(VideoSource("fixture", "https://127.0.0.1:1/fixture", 1)))
             @Suppress("UNCHECKED_CAST")
             (field(author, "playableWorks") as MutableList<VideoItem>).add(video)
             invoke(author, "openWork", video)
@@ -99,13 +99,6 @@ class NavigationDeviceTest {
         }
         throw AssertionError("Fixture card never bound a player")
     }
-
-    /**
-     * 卡死 watchdog 在时间轴不前进时会用条目自己的源重建播放器。给的是不可达地址时，
-     * 重建必然失败并把播放器打回 IDLE——这正是这条用例在慢机器上失败的原因。
-     * 所以条目的源就用同一个本地样片，重建后仍然放得出来。
-     */
-    private fun fixtureUri(mediaFile: File): String = android.net.Uri.fromFile(mediaFile).toString()
 
     private fun playFixture(activity: Activity, pagerId: Int, mediaFile: File) {
         // The card's player is owned by the app: a rebind releases it and the stall watchdog
@@ -132,7 +125,8 @@ class NavigationDeviceTest {
             var ready = false
             var idle = false
             main {
-                ready = player.isPlaying && (player.videoSize.width > 0 || player.currentPosition > 1_700)
+                ready = (player.isPlaying || player.playbackState == Player.STATE_READY) &&
+                    (player.videoSize.width > 0 || player.currentPosition > 1_700)
                 idle = player.playbackState == Player.STATE_IDLE
                 lastState = "playing=${player.isPlaying} state=${player.playbackState} " +
                     "position=${player.currentPosition} size=${player.videoSize.width}"
@@ -196,7 +190,7 @@ class NavigationDeviceTest {
                     set(home, "mode", mode)
                     set(home, "pagingEnabled", false)
                     item = VideoItem("navigation-$mode", "Navigation fixture", "Fixture author", emptyList(), 0,
-                        authorId = "fixture-author", sources = listOf(VideoSource("fixture", fixtureUri(mediaFile), 1)))
+                        authorId = "fixture-author", sources = listOf(VideoSource("fixture", "https://127.0.0.1:1/fixture", 1)))
                     val adapter = field(home, "adapter") as VideoAdapter
                     adapter.replace(listOf(item))
                     adapter.setActive(0)

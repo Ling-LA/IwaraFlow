@@ -5,7 +5,6 @@ import androidx.media3.common.MediaItem
 import androidx.media3.common.util.UnstableApi
 import androidx.media3.database.StandaloneDatabaseProvider
 import androidx.media3.datasource.DataSpec
-import androidx.media3.datasource.DefaultDataSource
 import androidx.media3.datasource.DefaultHttpDataSource
 import androidx.media3.datasource.cache.CacheDataSource
 import androidx.media3.datasource.cache.CacheWriter
@@ -103,14 +102,11 @@ class MediaPreloadCache(context: Context) {
                 LeastRecentlyUsedCacheEvictor(256L * 1024L * 1024L),
                 databaseProvider
             )
-            val httpFactory = DefaultHttpDataSource.Factory()
+            val upstreamFactory = DefaultHttpDataSource.Factory()
                 .setUserAgent("Mozilla/5.0 (Linux; Android 14) AppleWebKit/537.36 Chrome/152 Mobile Safari/537.36")
                 .setDefaultRequestProperties(mapOf("Referer" to "https://www.iwara.tv/"))
                 .setConnectTimeoutMs(10_000)
                 .setReadTimeoutMs(20_000)
-            // http(s) 仍然走上面的工厂，但同一个入口也能读 file:// 等本地源，
-            // 播放器重建播放源时不再受限于“只能是网络地址”。
-            val upstreamFactory = DefaultDataSource.Factory(context, httpFactory)
             val cacheFactory = CacheDataSource.Factory()
                 .setCache(cache)
                 .setUpstreamDataSourceFactory(upstreamFactory)

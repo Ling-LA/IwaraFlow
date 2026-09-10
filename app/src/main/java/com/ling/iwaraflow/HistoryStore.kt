@@ -66,7 +66,6 @@ class HistoryStore(context: Context) : SQLiteOpenHelper(context, "iwaraflow.db",
                 )""".trimIndent()
             )
             db.execSQL("CREATE INDEX IF NOT EXISTS idx_seen_last_time ON seen_videos(last_seen_at DESC)")
-            // Preserve all existing watch memory when upgrading from older versions.
             db.execSQL(
                 """INSERT OR IGNORE INTO seen_videos(video_id, first_seen_at, last_seen_at)
                    SELECT video_id, watched_at, watched_at FROM history""".trimIndent()
@@ -95,12 +94,14 @@ class HistoryStore(context: Context) : SQLiteOpenHelper(context, "iwaraflow.db",
     private fun markSeen(videoId: String, timestamp: Long) {
         if (videoId.isBlank()) return
         val db = writableDatabase
-        db.execSQL(
-            """INSERT INTO seen_videos(video_id, first_seen_at, last_seen_at)
-               VALUES(?, ?, ?)
-               ON CONFLICT(video_id) DO UPDATE SET last_seen_at=excluded.last_seen_at""".trimIndent(),
-            arrayOf(videoId, timestamp, timestamp)
-        )
+        val initial = ContentValues().apply {
+            put("video_id", videoId)
+            put("first_seen_at", timestamp)
+            put("last_seen_at", timestamp)
+        }
+        db.insertWithOnConflict("seen_videos", null, initial, SQLiteDatabase.CONFLICT_IGNORE)
+        val update = ContentValues().apply { put("last_seen_at", timestamp) }
+        db.update("seen_videos", update, "video_id=?", arrayOf(videoId))
     }
 
     @Synchronized
@@ -110,7 +111,6 @@ class HistoryStore(context: Context) : SQLiteOpenHelper(context, "iwaraflow.db",
             null, null, null, "1"
         ).use { if (it.moveToFirst()) return true }
 
-        // Compatibility fallback for databases that have not yet completed migration.
         readableDatabase.query(
             "history", arrayOf("video_id"), "video_id=?", arrayOf(videoId),
             null, null, null, "1"

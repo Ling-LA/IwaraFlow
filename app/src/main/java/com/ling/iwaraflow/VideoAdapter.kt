@@ -245,8 +245,8 @@ class VideoAdapter(
                     history.recordInteraction(item, "favorite", 1.4)
                     reactionBurst.playOn(favorite, ReactionBurstView.Kind.FAVORITE)
                 }
+                // 收藏有动画、取消有图标变化，不用再弹一层提示挡着视频。
                 updateLikeUi(item)
-                Toast.makeText(itemView.context, if (desired) "已收藏" else "已取消收藏", Toast.LENGTH_SHORT).show()
             }
             quality.setOnClickListener { showQualityChooser(item, false) }
             download.setOnClickListener { showQualityChooser(item, true) }

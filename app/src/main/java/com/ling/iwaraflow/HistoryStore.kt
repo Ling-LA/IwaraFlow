@@ -104,6 +104,30 @@ class HistoryStore(context: Context) : SQLiteOpenHelper(context, "iwaraflow.db",
         db.update("seen_videos", update, "video_id=?", arrayOf(videoId))
     }
 
+    /** 一次写入一批已看 ID：同步几百条官方点赞时按单条写会很慢。 */
+    @Synchronized
+    fun markSeen(videoIds: Collection<String>, timestamp: Long = System.currentTimeMillis()) {
+        val ids = videoIds.filter { it.isNotBlank() }
+        if (ids.isEmpty()) return
+        val db = writableDatabase
+        db.beginTransaction()
+        try {
+            ids.forEach { id ->
+                val initial = ContentValues().apply {
+                    put("video_id", id)
+                    put("first_seen_at", timestamp)
+                    put("last_seen_at", timestamp)
+                }
+                db.insertWithOnConflict("seen_videos", null, initial, SQLiteDatabase.CONFLICT_IGNORE)
+                db.update("seen_videos", ContentValues().apply { put("last_seen_at", timestamp) },
+                    "video_id=?", arrayOf(id))
+            }
+            db.setTransactionSuccessful()
+        } finally {
+            db.endTransaction()
+        }
+    }
+
     @Synchronized
     fun isSeen(videoId: String): Boolean {
         readableDatabase.query(

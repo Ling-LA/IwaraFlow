@@ -209,10 +209,15 @@ class IwaraApi(context: Context, private val apiRoot: String = DEFAULT_API_ROOT)
         enqueue(callback) { runCatching { getFavoriteVideosBlocking() } }
     }
 
-    fun getFavoriteVideosBlocking(page: Int = 0, limit: Int = 100): List<VideoItem> {
+    fun getFavoriteVideosBlocking(page: Int = 0, limit: Int = MAX_PAGE_LIMIT): List<VideoItem> =
+        getFavoritesPageBlocking(page, limit).videos
+
+    /** 官方点赞列表的一页。服务端同样把 limit 截断到 50，翻页要看它回报的总数。 */
+    fun getFavoritesPageBlocking(page: Int = 0, limit: Int = MAX_PAGE_LIMIT): FavoritesPage {
         if (!isLoggedIn()) throw IOException("请先登录 Iwara")
         val url = "$apiRoot/favorites/videos".toHttpUrl().newBuilder()
-            .addQueryParameter("page", page.toString()).addQueryParameter("limit", limit.toString()).build()
+            .addQueryParameter("page", page.toString())
+            .addQueryParameter("limit", limit.coerceAtMost(MAX_PAGE_LIMIT).toString()).build()
         val root = getJsonObject(url.toString(), requireAuth = true)
         val arr = root.optJSONArray("results") ?: JSONArray()
         val out = ArrayList<VideoItem>()
@@ -221,7 +226,7 @@ class IwaraApi(context: Context, private val apiRoot: String = DEFAULT_API_ROOT)
             val video = wrapper.optJSONObject("video") ?: wrapper
             parseVideo(video)?.let { out += it.copy(liked = true) }
         }
-        return out
+        return FavoritesPage(out, root.optInt("count", -1), hasMorePages(root, page, out.size))
     }
 
     fun likeVideo(videoId: String, liked: Boolean, callback: (Result<Unit>) -> Unit) = relationWrite("$apiRoot/video/$videoId/like", liked, callback)
@@ -287,12 +292,7 @@ class IwaraApi(context: Context, private val apiRoot: String = DEFAULT_API_ROOT)
                 add(parseAuthor(user).copy(following = true))
             }
         }
-        // 用服务端真实生效的 limit 和总数判断，而不是我们请求的 limit。
-        val served = root.optInt("limit", MAX_PAGE_LIMIT).coerceAtLeast(1)
-        val total = root.optInt("count", -1)
-        val hasMore = users.isNotEmpty() &&
-            if (total >= 0) (page + 1) * served < total else users.size >= served
-        return FollowingPage(users, total, hasMore)
+        return FollowingPage(users, root.optInt("count", -1), hasMorePages(root, page, users.size))
     }
 
     fun resolveSources(videoId: String, callback: (Result<List<VideoSource>>) -> Unit) {
@@ -440,6 +440,17 @@ class IwaraApi(context: Context, private val apiRoot: String = DEFAULT_API_ROOT)
         friend = user.optBoolean("friend", false),
         friendStatus = if (user.optBoolean("friend", false)) "friends" else "none"
     )
+
+    /**
+     * 还有没有下一整页。用服务端真实生效的 limit 和总数判断，而不是我们请求的 limit：
+     * 请求 100 也只会返回 50，按“返回条数 < 请求条数”判断会永远停在第一页。
+     */
+    private fun hasMorePages(root: JSONObject, page: Int, received: Int): Boolean {
+        if (received <= 0) return false
+        val served = root.optInt("limit", MAX_PAGE_LIMIT).coerceAtLeast(1)
+        val total = root.optInt("count", -1)
+        return if (total >= 0) (page + 1) * served < total else received >= served
+    }
 
     private fun buildAvatarUrl(user: JSONObject): String {
         val avatar = user.optJSONObject("avatar") ?: return ""

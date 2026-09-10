@@ -24,6 +24,13 @@ data class FollowingPage(
     val hasMore: Boolean
 )
 
+/** 官方点赞列表的一页；[total] 是服务端回报的点赞总数。 */
+data class FavoritesPage(
+    val videos: List<VideoItem>,
+    val total: Int,
+    val hasMore: Boolean
+)
+
 data class VideoItem(
     val id: String,
     val title: String,

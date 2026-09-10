@@ -39,6 +39,7 @@ class MainActivityV3 : AppCompatActivity() {
     private lateinit var playableGate: PlayableVideoGate
     private lateinit var mediaCache: MediaPreloadCache
     private lateinit var updates: UpdateManager
+    private lateinit var likedSync: LikedVideoSync
     private lateinit var pager: ViewPager2
     private lateinit var loading: ProgressBar
     private lateinit var error: TextView
@@ -116,6 +117,7 @@ class MainActivityV3 : AppCompatActivity() {
         playableGate = PlayableVideoGate(api)
         mediaCache = MediaPreloadCache(this)
         updates = UpdateManager(this)
+        likedSync = LikedVideoSync(api, history, prefs)
 
         pager = findViewById(R.id.pager)
         loading = findViewById(R.id.loading)
@@ -143,6 +145,8 @@ class MainActivityV3 : AppCompatActivity() {
 
         setupTopBar()
         if (intent.getBooleanExtra("return_recommend", false)) returnToRecommend() else loadFeed(reset = true)
+        // 官方点赞的完整同步放在首屏之后，避免和冷启动抢网络。
+        window.decorView.postDelayed({ if (!isFinishing && !isDestroyed) likedSync.syncIfStale() }, 2500L)
         // 兜底：即使首屏加载失败，也仍然会检查更新。正常情况下首屏出来后会更早触发。
         window.decorView.postDelayed({ runLaunchUpdateCheck() }, 9000L)
     }
@@ -581,20 +585,34 @@ class MainActivityV3 : AppCompatActivity() {
 
     private fun showMainMenu() {
         val account = if (api.isLoggedIn()) "退出 Iwara 登录" else "登录 Iwara"
-        val items = arrayOf(account, "浏览历史", "本地收藏", "已关注用户", "设置", "检查更新", "重新加载当前流", "诊断信息")
+        val items = arrayOf(account, "浏览历史", "本地收藏", "已关注用户", "同步点赞记录", "设置", "检查更新", "重新加载当前流", "诊断信息")
         val dialog = AlertDialog.Builder(this).setTitle("IwaraFlow").setItems(items) { _, which ->
             when (which) {
                 0 -> if (api.isLoggedIn()) { api.logout(); Toast.makeText(this, "已退出登录", Toast.LENGTH_SHORT).show(); loadFeed(reset = true) } else showLoginDialog()
                 1 -> openSavedVideos(SavedVideosActivity.KIND_HISTORY)
                 2 -> openSavedVideos(SavedVideosActivity.KIND_FAVORITES)
                 3 -> openFollowingPage()
-                4 -> showSettingsDialog()
-                5 -> updates.check(manual = true)
-                6 -> loadFeed(reset = true)
-                7 -> NavigationDiagnostics.show(this)
+                4 -> syncLikedVideos()
+                5 -> showSettingsDialog()
+                6 -> updates.check(manual = true)
+                7 -> loadFeed(reset = true)
+                8 -> NavigationDiagnostics.show(this)
             }
         }.create()
         dialog.setOnShowListener { styleDialogButtons(dialog) }; dialog.show()
+    }
+
+    /** 手动把官方点赞补进“已看”，方便点赞很多的账号立刻生效。 */
+    private fun syncLikedVideos() {
+        if (!api.isLoggedIn()) { showLoginDialog(); return }
+        Toast.makeText(this, "正在同步 Iwara 点赞记录…", Toast.LENGTH_SHORT).show()
+        likedSync.syncNow { marked ->
+            runOnUiThread {
+                if (isFinishing || isDestroyed) return@runOnUiThread
+                note("手动同步点赞记录 $marked 条")
+                Toast.makeText(this, "已同步 $marked 条点赞记录，刷新推荐即可生效", Toast.LENGTH_LONG).show()
+            }
+        }
     }
 
     private fun showLoginDialog() {
@@ -621,7 +639,13 @@ class MainActivityV3 : AppCompatActivity() {
                 confirm.isEnabled = false; confirm.text = "登录中…"
                 api.login(mail, pass) { result -> runOnUiThread {
                     confirm.isEnabled = true; confirm.text = "登录"; Toast.makeText(this, result.message, Toast.LENGTH_SHORT).show()
-                    if (result.success) { dialog.dismiss(); loadFeed(reset = true) }
+                    if (result.success) {
+                        dialog.dismiss()
+                        // 换账号后点赞记录要重新同步一次。
+                        prefs.likedSyncAt = 0L
+                        likedSync.syncIfStale()
+                        loadFeed(reset = true)
+                    }
                 } }
             }
         }
@@ -750,6 +774,7 @@ class MainActivityV3 : AppCompatActivity() {
 
     override fun onDestroy() {
         invalidateRequests()
-        adapter.releaseAll(); playableGate.close(); mediaCache.close(); recommender.close(); updates.close(); api.close(); history.close(); super.onDestroy()
+        adapter.releaseAll(); playableGate.close(); mediaCache.close(); recommender.close()
+        likedSync.close(); updates.close(); api.close(); history.close(); super.onDestroy()
     }
 }

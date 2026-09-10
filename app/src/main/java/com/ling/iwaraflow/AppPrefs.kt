@@ -17,6 +17,11 @@ class AppPrefs(context: Context) {
         get() = prefs.getBoolean("auto_next", true)
         set(value) = prefs.edit().putBoolean("auto_next", value).apply()
 
+    /** 上次把 Iwara 官方点赞完整同步到“已看”的时间。 */
+    var likedSyncAt: Long
+        get() = prefs.getLong("liked_sync_at", 0L)
+        set(value) = prefs.edit().putLong("liked_sync_at", value).apply()
+
     var autoPip: Boolean
         get() = prefs.getBoolean("auto_pip", true)
         set(value) = prefs.edit().putBoolean("auto_pip", value).apply()

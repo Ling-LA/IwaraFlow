@@ -22,6 +22,7 @@ import okhttp3.OkHttpClient
 import okhttp3.Request
 import org.json.JSONObject
 import java.io.File
+import java.net.URLEncoder
 import java.util.concurrent.Executors
 import java.util.concurrent.TimeUnit
 
@@ -58,11 +59,8 @@ class UpdateManager(private val activity: Activity) {
 
     init {
         val filter = IntentFilter(DownloadManager.ACTION_DOWNLOAD_COMPLETE)
-        if (Build.VERSION.SDK_INT >= 33) {
-            // ACTION_DOWNLOAD_COMPLETE is a system broadcast. The download id is still checked
-            // before any action is taken, so unrelated broadcasts cannot trigger an install.
-            activity.registerReceiver(receiver, filter, Context.RECEIVER_EXPORTED)
-        } else {
+        if (Build.VERSION.SDK_INT >= 33) activity.registerReceiver(receiver, filter, Context.RECEIVER_EXPORTED)
+        else {
             @Suppress("DEPRECATION")
             activity.registerReceiver(receiver, filter)
         }
@@ -80,16 +78,20 @@ class UpdateManager(private val activity: Activity) {
     fun check(manual: Boolean = true) {
         val waiting = if (manual) showCheckingDialog() else null
         executor.execute {
-            val result = runCatching { fetchLatestRelease() }
+            val current = currentVersionName()
+            val result = runCatching {
+                val release = fetchLatestRelease()
+                if (!isNewer(release.version, current)) release
+                else {
+                    val generated = fetchGeneratedNotes(current, release.version)
+                    if (generated.isBlank()) release else release.copy(notes = generated)
+                }
+            }
             activity.runOnUiThread {
                 waiting?.dismiss()
                 result.onSuccess { release ->
-                    val current = currentVersionName()
-                    if (isNewer(release.version, current)) {
-                        showUpdateDialog(release, current)
-                    } else if (manual) {
-                        Toast.makeText(activity, "当前已是最新版本 v$current", Toast.LENGTH_SHORT).show()
-                    }
+                    if (isNewer(release.version, current)) showUpdateDialog(release, current)
+                    else if (manual) Toast.makeText(activity, "当前已是最新版本 v$current", Toast.LENGTH_SHORT).show()
                 }.onFailure {
                     if (manual) Toast.makeText(activity, "检查更新失败：${it.message}", Toast.LENGTH_LONG).show()
                 }
@@ -98,43 +100,87 @@ class UpdateManager(private val activity: Activity) {
     }
 
     private fun fetchLatestRelease(): ReleaseInfo {
-        val request = Request.Builder()
-            .url(latestReleaseApi)
-            .header("Accept", "application/vnd.github+json")
-            .header("X-GitHub-Api-Version", "2022-11-28")
-            .header("User-Agent", "IwaraFlow-Android")
-            .build()
+        val request = githubRequest(latestReleaseApi)
         client.newCall(request).execute().use { response ->
             val raw = response.body?.string().orEmpty()
             if (!response.isSuccessful) throw IllegalStateException("GitHub HTTP ${response.code}")
             val json = JSONObject(raw)
             val version = normalizeVersion(json.optString("tag_name"))
             if (version.isBlank()) throw IllegalStateException("Release 缺少版本号")
-
             val assets = json.optJSONArray("assets")
             var apkUrl = ""
-            if (assets != null) {
-                for (i in 0 until assets.length()) {
-                    val asset = assets.optJSONObject(i) ?: continue
-                    val name = asset.optString("name")
-                    if (!name.endsWith(".apk", ignoreCase = true)) continue
-                    val candidate = asset.optString("browser_download_url")
-                    if (candidate.isBlank()) continue
-                    apkUrl = candidate
-                    if (name.contains("IwaraFlow", true) || name.contains("signed", true)) break
-                }
+            if (assets != null) for (i in 0 until assets.length()) {
+                val asset = assets.optJSONObject(i) ?: continue
+                val name = asset.optString("name")
+                if (!name.endsWith(".apk", ignoreCase = true)) continue
+                val candidate = asset.optString("browser_download_url")
+                if (candidate.isBlank()) continue
+                apkUrl = candidate
+                if (name.contains("IwaraFlow", true) || name.contains("signed", true)) break
             }
             if (apkUrl.isBlank()) throw IllegalStateException("最新 Release 中没有 APK")
-
             return ReleaseInfo(
                 version = version,
                 title = json.optString("name").ifBlank { "IwaraFlow v$version" },
-                notes = json.optString("body").ifBlank { "修复问题并改进使用体验。" },
+                notes = cleanReleaseNotes(json.optString("body")),
                 apkUrl = apkUrl,
                 publishedAt = json.optString("published_at")
             )
         }
     }
+
+    /** Build user-facing notes from commits between the installed and latest release tags. */
+    private fun fetchGeneratedNotes(current: String, remote: String): String {
+        val from = URLEncoder.encode("v${normalizeVersion(current)}", "UTF-8")
+        val to = URLEncoder.encode("v${normalizeVersion(remote)}", "UTF-8")
+        val url = "https://api.github.com/repos/Ling-LA/IwaraFlow/compare/$from...$to"
+        return runCatching {
+            client.newCall(githubRequest(url)).execute().use { response ->
+                if (!response.isSuccessful) return@use ""
+                val root = JSONObject(response.body?.string().orEmpty())
+                val commits = root.optJSONArray("commits") ?: return@use ""
+                val lines = ArrayList<String>()
+                for (i in 0 until commits.length()) {
+                    val message = commits.optJSONObject(i)
+                        ?.optJSONObject("commit")
+                        ?.optString("message")
+                        .orEmpty()
+                    val title = message.lineSequence().firstOrNull().orEmpty().trim()
+                    if (title.isBlank()) continue
+                    if (title.startsWith("chore: bump IwaraFlow", true)) continue
+                    if (title.startsWith("docs:", true)) continue
+                    if (lines.none { it.equals(title, true) }) lines += title
+                    if (lines.size >= 12) break
+                }
+                if (lines.isEmpty()) "" else lines.joinToString("\n") { "• ${humanizeCommit(it)}" }
+            }
+        }.getOrDefault("")
+    }
+
+    private fun humanizeCommit(message: String): String {
+        val cleaned = message.replace(Regex("^(feat|fix|ui|perf|ci|refactor|chore)(\\([^)]*\\))?:\\s*", RegexOption.IGNORE_CASE), "")
+        return cleaned.replaceFirstChar { if (it.isLowerCase()) it.titlecase() else it.toString() }
+    }
+
+    private fun cleanReleaseNotes(raw: String): String {
+        if (raw.isBlank()) return "修复问题并改进使用体验。"
+        val useful = raw.lineSequence()
+            .map { it.trim() }
+            .filter { it.isNotBlank() }
+            .filterNot { it.startsWith("IwaraFlow v", true) }
+            .filterNot { it.startsWith("此 Release 由", true) }
+            .filterNot { it.startsWith("App 内", true) }
+            .filterNot { it.startsWith("Commit:", true) }
+            .joinToString("\n")
+        return useful.ifBlank { "修复问题并改进使用体验。" }
+    }
+
+    private fun githubRequest(url: String): Request = Request.Builder()
+        .url(url)
+        .header("Accept", "application/vnd.github+json")
+        .header("X-GitHub-Api-Version", "2022-11-28")
+        .header("User-Agent", "IwaraFlow-Android")
+        .build()
 
     private fun showCheckingDialog(): AlertDialog {
         val row = LinearLayout(activity).apply {
@@ -181,10 +227,9 @@ class UpdateManager(private val activity: Activity) {
             textSize = 14f
             setTextColor(0xFF35566C.toInt())
             setLineSpacing(0f, 1.18f)
-            maxLines = 12
+            maxLines = 14
             setPadding(0, 0, 0, dp(6))
         })
-
         val dialog = AlertDialog.Builder(activity)
             .setTitle("发现新版本")
             .setView(panel)
@@ -206,7 +251,6 @@ class UpdateManager(private val activity: Activity) {
             val updateFile = updateApkFile()
             updateFile.parentFile?.mkdirs()
             if (updateFile.exists()) updateFile.delete()
-
             val request = DownloadManager.Request(Uri.parse(release.apkUrl))
                 .setTitle("IwaraFlow v${release.version}")
                 .setDescription("正在下载应用更新")
@@ -214,12 +258,7 @@ class UpdateManager(private val activity: Activity) {
                 .setNotificationVisibility(DownloadManager.Request.VISIBILITY_VISIBLE_NOTIFY_COMPLETED)
                 .setAllowedOverMetered(true)
                 .setAllowedOverRoaming(false)
-                .setDestinationInExternalFilesDir(
-                    activity,
-                    Environment.DIRECTORY_DOWNLOADS,
-                    "updates/$UPDATE_APK_NAME"
-                )
-
+                .setDestinationInExternalFilesDir(activity, Environment.DIRECTORY_DOWNLOADS, "updates/$UPDATE_APK_NAME")
             val dm = activity.getSystemService(Context.DOWNLOAD_SERVICE) as DownloadManager
             downloadId = dm.enqueue(request)
             downloadedUri = null
@@ -230,11 +269,6 @@ class UpdateManager(private val activity: Activity) {
         }
     }
 
-    /**
-     * Called whenever MainActivity becomes active again. This makes install triggering independent
-     * from the DownloadManager broadcast: if the Activity was recreated or the OEM dropped the
-     * broadcast, a completed download is discovered here and installation continues.
-     */
     fun tryContinueInstall() {
         downloadId = prefs.getLong(KEY_PENDING_DOWNLOAD_ID, downloadId)
         if (downloadId < 0) return
@@ -245,10 +279,8 @@ class UpdateManager(private val activity: Activity) {
         val id = prefs.getLong(KEY_PENDING_DOWNLOAD_ID, downloadId)
         if (id < 0) return
         downloadId = id
-
         val dm = activity.getSystemService(Context.DOWNLOAD_SERVICE) as DownloadManager
-        val query = DownloadManager.Query().setFilterById(id)
-        dm.query(query)?.use { cursor ->
+        dm.query(DownloadManager.Query().setFilterById(id))?.use { cursor ->
             if (!cursor.moveToFirst()) return
             val statusIndex = cursor.getColumnIndex(DownloadManager.COLUMN_STATUS)
             if (statusIndex < 0) return
@@ -260,11 +292,7 @@ class UpdateManager(private val activity: Activity) {
                         clearPendingDownload()
                         return
                     }
-                    downloadedUri = FileProvider.getUriForFile(
-                        activity,
-                        "${activity.packageName}.fileprovider",
-                        file
-                    )
+                    downloadedUri = FileProvider.getUriForFile(activity, "${activity.packageName}.fileprovider", file)
                     installDownloadedApk()
                 }
                 DownloadManager.STATUS_FAILED -> {
@@ -280,16 +308,10 @@ class UpdateManager(private val activity: Activity) {
         if (!canInstallPackages()) {
             Toast.makeText(activity, "请允许 IwaraFlow 安装未知应用，然后返回继续安装", Toast.LENGTH_LONG).show()
             if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
-                activity.startActivity(
-                    Intent(
-                        Settings.ACTION_MANAGE_UNKNOWN_APP_SOURCES,
-                        Uri.parse("package:${activity.packageName}")
-                    )
-                )
+                activity.startActivity(Intent(Settings.ACTION_MANAGE_UNKNOWN_APP_SOURCES, Uri.parse("package:${activity.packageName}")))
             }
             return
         }
-
         try {
             val install = Intent(Intent.ACTION_INSTALL_PACKAGE).apply {
                 data = uri
@@ -298,16 +320,12 @@ class UpdateManager(private val activity: Activity) {
                 putExtra(Intent.EXTRA_NOT_UNKNOWN_SOURCE, true)
                 putExtra(Intent.EXTRA_RETURN_RESULT, false)
             }
-            if (install.resolveActivity(activity.packageManager) != null) {
-                activity.startActivity(install)
-            } else {
-                val fallback = Intent(Intent.ACTION_VIEW).apply {
-                    setDataAndType(uri, APK_MIME)
-                    addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
-                    clipData = ClipData.newRawUri("IwaraFlow update", uri)
-                }
-                activity.startActivity(fallback)
-            }
+            if (install.resolveActivity(activity.packageManager) != null) activity.startActivity(install)
+            else activity.startActivity(Intent(Intent.ACTION_VIEW).apply {
+                setDataAndType(uri, APK_MIME)
+                addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
+                clipData = ClipData.newRawUri("IwaraFlow update", uri)
+            })
             clearPendingDownload()
         } catch (e: Exception) {
             Toast.makeText(activity, "无法打开安装程序：${e.message}", Toast.LENGTH_LONG).show()
@@ -315,8 +333,7 @@ class UpdateManager(private val activity: Activity) {
     }
 
     private fun updateApkFile(): File {
-        val downloads = activity.getExternalFilesDir(Environment.DIRECTORY_DOWNLOADS)
-            ?: activity.filesDir
+        val downloads = activity.getExternalFilesDir(Environment.DIRECTORY_DOWNLOADS) ?: activity.filesDir
         return File(downloads, "updates/$UPDATE_APK_NAME")
     }
 
@@ -326,16 +343,13 @@ class UpdateManager(private val activity: Activity) {
         downloadedUri = null
     }
 
-    private fun canInstallPackages(): Boolean {
-        return Build.VERSION.SDK_INT < Build.VERSION_CODES.O || activity.packageManager.canRequestPackageInstalls()
-    }
+    private fun canInstallPackages(): Boolean =
+        Build.VERSION.SDK_INT < Build.VERSION_CODES.O || activity.packageManager.canRequestPackageInstalls()
 
-    private fun currentVersionName(): String {
-        return try {
-            @Suppress("DEPRECATION")
-            activity.packageManager.getPackageInfo(activity.packageName, 0).versionName ?: "0.0.0"
-        } catch (_: Exception) { "0.0.0" }
-    }
+    private fun currentVersionName(): String = try {
+        @Suppress("DEPRECATION")
+        activity.packageManager.getPackageInfo(activity.packageName, 0).versionName ?: "0.0.0"
+    } catch (_: Exception) { "0.0.0" }
 
     private fun isNewer(remote: String, current: String): Boolean {
         val r = versionParts(remote)

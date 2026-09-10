@@ -40,9 +40,9 @@ class RecommendationEngine(
                     if (previous == null) {
                         merged[item.id] = item to sourceBoost
                     } else {
-                        // 同一视频同时进入多个热门榜时额外加分。
                         merged[item.id] = previous.first to (previous.second + sourceBoost * 0.55)
                         if (item.likes > previous.first.likes) previous.first.likes = item.likes
+                        if (item.liked) previous.first.liked = true
                     }
                 }
             }
@@ -52,7 +52,13 @@ class RecommendationEngine(
             val now = System.currentTimeMillis()
             return merged.values
                 .asSequence()
-                .filter { (item, _) -> !skipSeen || !history.isSeen(item.id) }
+                .filter { (item, _) ->
+                    if (!skipSeen) return@filter true
+                    val liked = item.liked
+                    val localFavorite = history.isLocalFavorite(item.id)
+                    if (liked || localFavorite) history.markSeen(item.id)
+                    !liked && !localFavorite && !history.isSeen(item.id)
+                }
                 .map { (item, sourceScore) ->
                     val likeScore = ln(item.likes + 1.0) * 0.72
                     val viewScore = ln(item.views + 1.0) * 0.24

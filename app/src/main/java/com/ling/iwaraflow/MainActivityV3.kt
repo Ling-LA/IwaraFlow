@@ -47,7 +47,6 @@ class MainActivityV3 : AppCompatActivity() {
 
     private var mode = "recommend"
     private var currentPage = 0
-    private var searchQuery: String? = null
     private var loadingMore = false
     private var pendingAdvanceAfterLoad = false
     private var pagingEnabled = true
@@ -81,6 +80,10 @@ class MainActivityV3 : AppCompatActivity() {
     }
 
     private val followingLauncher = registerForActivityResult(ActivityResultContracts.StartActivityForResult()) {
+        resumeAfterInternalPage()
+    }
+
+    private val searchLauncher = registerForActivityResult(ActivityResultContracts.StartActivityForResult()) {
         resumeAfterInternalPage()
     }
 
@@ -177,14 +180,13 @@ class MainActivityV3 : AppCompatActivity() {
         }
 
         fun select(newMode: String, selected: TextView) {
-            val sameHomeMode = searchQuery == null && mode == newMode && newMode in homeModes
+            val sameHomeMode = mode == newMode && newMode in homeModes
 
             if (sameHomeMode && newMode == "recommend") {
                 saveCurrentHomeSession()
                 homeFeedSessions.remove("recommend")
                 invalidateRequests()
                 mode = "recommend"
-                searchQuery = null
                 pagingEnabled = true
                 currentPage = 0
                 styleSelected(selected)
@@ -198,7 +200,6 @@ class MainActivityV3 : AppCompatActivity() {
             invalidateRequests()
             mode = newMode
             pagingEnabled = true
-            searchQuery = null
             styleSelected(selected)
 
             val saved = homeFeedSessions[newMode]
@@ -219,7 +220,7 @@ class MainActivityV3 : AppCompatActivity() {
     }
 
     private fun saveCurrentHomeSession() {
-        if (searchQuery != null || mode !in homeModes || adapter.items.isEmpty()) return
+        if (mode !in homeModes || adapter.items.isEmpty()) return
         adapter.savePlaybackPosition()
         val index = pager.currentItem.coerceIn(0, adapter.items.lastIndex)
         homeFeedSessions[mode] = FeedSession(
@@ -247,7 +248,6 @@ class MainActivityV3 : AppCompatActivity() {
     private fun returnToRecommend() {
         mode = "recommend"
         pagingEnabled = true
-        searchQuery = null
         currentPage = 0
         val selected = findViewById<TextView>(R.id.tabRecommend)
         listOf(R.id.tabRecommend, R.id.tabTrending, R.id.tabPopular, R.id.tabLatest).forEach { id ->
@@ -267,14 +267,14 @@ class MainActivityV3 : AppCompatActivity() {
             error.visibility = View.GONE
         }
         val requestId = requestSerial
-        val emptyMessage = if (mode == "recommend" && searchQuery == null) {
+        val emptyMessage = if (mode == "recommend") {
             "没有找到可播放的推荐视频。可以稍后刷新，或关闭“刷新推荐时排除已看视频”。"
         } else "这一页没有可播放视频"
         val head: ((List<VideoItem>) -> Unit)? = if (reset) {
             { batch: List<VideoItem> -> runOnUiThread { showFeedHead(requestId, batch) } }
         } else null
 
-        if (mode == "recommend" && searchQuery == null && currentPage == 0) {
+        if (mode == "recommend" && currentPage == 0) {
             recommender.load(prefs.skipSeen) { result ->
                 result.onSuccess { raw ->
                     val first = raw.take(recommendFirstPage)
@@ -326,9 +326,7 @@ class MainActivityV3 : AppCompatActivity() {
             }
         }
 
-        val query = searchQuery
-        if (!query.isNullOrBlank()) api.searchVideos(query, currentPage, pageSize, callback)
-        else api.getVideos(if (mode == "recommend") "trending" else mode, currentPage, pageSize, callback)
+        api.getVideos(if (mode == "recommend") "trending" else mode, currentPage, pageSize, callback)
     }
 
     /**
@@ -358,7 +356,7 @@ class MainActivityV3 : AppCompatActivity() {
         }
         if (list.isEmpty()) {
             // 首屏候选全都不可播放时，继续用剩下的推荐候选找，而不是直接报空。
-            if (mode == "recommend" && searchQuery == null && recommendQueue.isNotEmpty() && !loadingMore) {
+            if (mode == "recommend" && recommendQueue.isNotEmpty() && !loadingMore) {
                 loadingMore = true
                 loading.visibility = View.VISIBLE
                 loadMoreRecommend(requestId)
@@ -403,7 +401,7 @@ class MainActivityV3 : AppCompatActivity() {
     private fun loadMore() {
         if (loadingMore || awaitingFullFeed || adapter.itemCount == 0) return
         loadingMore = true
-        if (mode == "recommend" && searchQuery == null) loadMoreRecommend(requestSerial)
+        if (mode == "recommend") loadMoreRecommend(requestSerial)
         else loadMoreOfficialPage()
     }
 
@@ -495,6 +493,14 @@ class MainActivityV3 : AppCompatActivity() {
         savedVideosLauncher.launch(Intent(this, SavedVideosActivity::class.java).putExtra(SavedVideosActivity.EXTRA_KIND, kind))
     }
 
+    /** 搜索结果改成独立页面：视频名 / 角色名 / 作者名分别成列表，而不是直接顶掉首页视频流。 */
+    private fun openSearchPage(query: String) {
+        if (openingInternalPage || isFinishing || isDestroyed) return
+        openingInternalPage = true
+        adapter.pauseAll()
+        searchLauncher.launch(Intent(this, SearchActivity::class.java).putExtra(SearchActivity.EXTRA_QUERY, query))
+    }
+
     private fun openFollowingPage() {
         if (openingInternalPage || isFinishing || isDestroyed) return
         if (!api.isLoggedIn()) { showLoginDialog(); return }
@@ -517,15 +523,7 @@ class MainActivityV3 : AppCompatActivity() {
         val dialog = AlertDialog.Builder(this).setTitle("搜索 Iwara 视频").setView(panel)
             .setNegativeButton("取消", null).setPositiveButton("搜索") { _, _ ->
                 val q = input.text.toString().trim()
-                if (q.isNotBlank()) {
-                    saveCurrentHomeSession()
-                    invalidateRequests()
-                    searchQuery = q
-                    mode = "search"
-                    pagingEnabled = true
-                    currentPage = 0
-                    loadFeed(reset = true)
-                }
+                if (q.isNotBlank()) openSearchPage(q)
             }.create()
         dialog.setOnShowListener { styleDialogButtons(dialog) }; dialog.show()
     }
@@ -586,7 +584,7 @@ class MainActivityV3 : AppCompatActivity() {
             loading.visibility = View.GONE
             result.onSuccess { item ->
                 saveCurrentHomeSession()
-                item.localFavorite = history.isLocalFavorite(item.id); pagingEnabled = false; mode = "single"; searchQuery = null; invalidateRequests()
+                item.localFavorite = history.isLocalFavorite(item.id); pagingEnabled = false; mode = "single"; invalidateRequests()
                 adapter.replace(listOf(item)); pager.setCurrentItem(0, false); adapter.setActive(0)
             }.onFailure { Toast.makeText(this, it.message ?: "视频加载失败", Toast.LENGTH_LONG).show() }
             if (!openingInternalPage && lifecycle.currentState.isAtLeast(Lifecycle.State.RESUMED)) adapter.resumeActive()

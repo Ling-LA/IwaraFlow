@@ -17,6 +17,13 @@ data class IwaraAuthor(
     var friendStatus: String = "none"
 )
 
+/** 关注列表的一页；[total] 是服务端回报的关注总数，[hasMore] 表示后面还有整页数据。 */
+data class FollowingPage(
+    val users: List<IwaraAuthor>,
+    val total: Int,
+    val hasMore: Boolean
+)
+
 data class VideoItem(
     val id: String,
     val title: String,

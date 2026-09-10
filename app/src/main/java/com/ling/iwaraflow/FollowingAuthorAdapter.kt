@@ -11,7 +11,8 @@ import coil.transform.CircleCropTransformation
 
 class FollowingAuthorAdapter(
     private val items: List<IwaraAuthor>,
-    private val onClick: (IwaraAuthor) -> Unit
+    private val onClick: (IwaraAuthor) -> Unit,
+    private val emptyDescription: String = "已关注"
 ) : RecyclerView.Adapter<FollowingAuthorAdapter.Holder>() {
 
     override fun onCreateViewHolder(parent: ViewGroup, viewType: Int): Holder =
@@ -29,7 +30,7 @@ class FollowingAuthorAdapter(
         fun bind(item: IwaraAuthor) {
             name.text = item.name.ifBlank { item.username }
             username.text = if (item.username.isBlank()) "" else "@${item.username}"
-            description.text = item.description.replace('\n', ' ').trim().ifBlank { "已关注" }
+            description.text = item.description.replace('\n', ' ').trim().ifBlank { emptyDescription }
             avatar.setImageDrawable(null)
             if (item.avatarUrl.isNotBlank()) {
                 avatar.load(item.avatarUrl) {

@@ -15,8 +15,7 @@ import java.time.Instant
 import java.util.concurrent.Executors
 import java.util.concurrent.TimeUnit
 
-class IwaraApi(context: Context) {
-    private val apiRoot = "https://apiq.iwara.tv"
+class IwaraApi(context: Context, private val apiRoot: String = DEFAULT_API_ROOT) {
     private val siteRoot = "https://www.iwara.tv"
     private val imageRoot = "https://i.iwara.tv"
     private val session = SecureSessionStore(context.applicationContext)
@@ -172,6 +171,40 @@ class IwaraApi(context: Context) {
         return parseVideoPage(getJsonObject(url.toString(), optionalAuth = true))
     }
 
+    fun searchUsers(query: String, page: Int = 0, limit: Int = 24, callback: (Result<List<IwaraAuthor>>) -> Unit) {
+        enqueue(callback) { runCatching { searchUsersBlocking(query, page, limit) } }
+    }
+
+    fun searchUsersBlocking(query: String, page: Int = 0, limit: Int = 24): List<IwaraAuthor> {
+        val url = "$apiRoot/search".toHttpUrl().newBuilder()
+            .addQueryParameter("query", query).addQueryParameter("type", "users")
+            .addQueryParameter("page", page.toString())
+            .addQueryParameter("limit", limit.coerceAtMost(MAX_PAGE_LIMIT).toString()).build()
+        val results = getJsonObject(url.toString(), optionalAuth = true).optJSONArray("results") ?: JSONArray()
+        return buildList {
+            for (i in 0 until results.length()) {
+                val wrapper = results.optJSONObject(i) ?: continue
+                val user = wrapper.optJSONObject("user") ?: wrapper
+                val author = parseAuthor(user)
+                if (author.id.isNotBlank() || author.username.isNotBlank()) add(author)
+            }
+        }
+    }
+
+    /** 角色/标签检索：Iwara 的标签是视频列表接口的 tags 过滤，而不是关键字搜索。 */
+    fun getVideosByTag(tag: String, page: Int = 0, limit: Int = 24, callback: (Result<List<VideoItem>>) -> Unit) {
+        enqueue(callback) { runCatching { getVideosByTagBlocking(tag, page, limit) } }
+    }
+
+    fun getVideosByTagBlocking(tag: String, page: Int = 0, limit: Int = 24): List<VideoItem> {
+        val url = "$apiRoot/videos".toHttpUrl().newBuilder()
+            .addQueryParameter("tags", tag).addQueryParameter("rating", "all")
+            .addQueryParameter("sort", "date")
+            .addQueryParameter("page", page.toString())
+            .addQueryParameter("limit", limit.coerceAtMost(MAX_PAGE_LIMIT).toString()).build()
+        return parseVideoPage(getJsonObject(url.toString(), optionalAuth = true))
+    }
+
     fun getFavoriteVideos(callback: (Result<List<VideoItem>>) -> Unit) {
         enqueue(callback) { runCatching { getFavoriteVideosBlocking() } }
     }
@@ -235,20 +268,31 @@ class IwaraApi(context: Context) {
         } }
     }
 
-    fun getFollowingUsers(userId: String, page: Int = 0, limit: Int = 100, callback: (Result<List<IwaraAuthor>>) -> Unit) {
-        enqueue(callback) { runCatching {
-            val url = "$apiRoot/user/$userId/following".toHttpUrl().newBuilder()
-                .addQueryParameter("page", page.toString()).addQueryParameter("limit", limit.toString()).build()
-            val root = getJsonObject(url.toString(), requireAuth = true)
-            val arr = root.optJSONArray("results") ?: JSONArray()
-            buildList {
-                for (i in 0 until arr.length()) {
-                    val wrapper = arr.optJSONObject(i) ?: continue
-                    val user = wrapper.optJSONObject("user") ?: wrapper
-                    add(parseAuthor(user).copy(following = true))
-                }
+    fun getFollowingUsers(userId: String, page: Int = 0, callback: (Result<FollowingPage>) -> Unit) {
+        enqueue(callback) { runCatching { getFollowingPageBlocking(userId, page) } }
+    }
+
+    fun getFollowingPageBlocking(userId: String, page: Int = 0): FollowingPage {
+        // Iwara 会把列表 limit 截断到自己的上限，请求 100 也只会返回 50 条。
+        // 之前用“返回条数 < 请求条数”判断结尾，于是关注超过 50 位时永远停在第一页。
+        val url = "$apiRoot/user/$userId/following".toHttpUrl().newBuilder()
+            .addQueryParameter("page", page.toString())
+            .addQueryParameter("limit", MAX_PAGE_LIMIT.toString()).build()
+        val root = getJsonObject(url.toString(), requireAuth = true)
+        val arr = root.optJSONArray("results") ?: JSONArray()
+        val users = buildList {
+            for (i in 0 until arr.length()) {
+                val wrapper = arr.optJSONObject(i) ?: continue
+                val user = wrapper.optJSONObject("user") ?: wrapper
+                add(parseAuthor(user).copy(following = true))
             }
-        } }
+        }
+        // 用服务端真实生效的 limit 和总数判断，而不是我们请求的 limit。
+        val served = root.optInt("limit", MAX_PAGE_LIMIT).coerceAtLeast(1)
+        val total = root.optInt("count", -1)
+        val hasMore = users.isNotEmpty() &&
+            if (total >= 0) (page + 1) * served < total else users.size >= served
+        return FollowingPage(users, total, hasMore)
     }
 
     fun resolveSources(videoId: String, callback: (Result<List<VideoSource>>) -> Unit) {
@@ -391,10 +435,20 @@ class IwaraApi(context: Context) {
         name = user.optString("name").ifBlank { user.optString("username") },
         username = user.optString("username"),
         description = body,
+        avatarUrl = buildAvatarUrl(user),
         following = user.optBoolean("following", false),
         friend = user.optBoolean("friend", false),
         friendStatus = if (user.optBoolean("friend", false)) "friends" else "none"
     )
+
+    private fun buildAvatarUrl(user: JSONObject): String {
+        val avatar = user.optJSONObject("avatar") ?: return ""
+        val avatarId = avatar.optString("id")
+        val name = avatar.optString("name")
+        if (avatarId.isBlank() || name.isBlank()) return ""
+        val file = if (name.contains('.')) name else "$name.jpg"
+        return "$imageRoot/image/avatar/$avatarId/${UriEncoder.encodePathSegment(file)}"
+    }
 
     private fun extractMessage(raw: String, fallback: String): String {
         return try { JSONObject(raw).optString("message").takeIf { it.isNotBlank() } ?: fallback } catch (_: Exception) { fallback }
@@ -407,6 +461,13 @@ class IwaraApi(context: Context) {
             io.shutdownNow()
         }
         HttpClientCleanup.close(client)
+    }
+
+    companion object {
+        const val DEFAULT_API_ROOT = "https://apiq.iwara.tv"
+
+        /** Iwara 列表接口的服务端上限，请求更大的 limit 也只会返回这么多。 */
+        const val MAX_PAGE_LIMIT = 50
     }
 }
 

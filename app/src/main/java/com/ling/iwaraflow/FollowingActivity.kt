@@ -23,6 +23,7 @@ class FollowingActivity : AppCompatActivity() {
     private lateinit var status: TextView
     private lateinit var adapter: FollowingAuthorAdapter
     private val items = mutableListOf<IwaraAuthor>()
+    private val seenIds = mutableSetOf<String>()
     private val profilePool = Executors.newFixedThreadPool(4)
     private val profileClient = OkHttpClient.Builder()
         .connectTimeout(8, TimeUnit.SECONDS)
@@ -69,22 +70,30 @@ class FollowingActivity : AppCompatActivity() {
     }
 
     private fun loadFollowingPage(userId: String, page: Int) {
-        api.getFollowingUsers(userId, page, 100) { result ->
-            result.onSuccess { users ->
+        api.getFollowingUsers(userId, page) { result ->
+            result.onSuccess { followingPage ->
+                val more = followingPage.hasMore && page + 1 < MAX_PAGES
                 runOnUiThread {
                     if (closed) return@runOnUiThread
+                    // 同一位作者可能同时出现在相邻两页（关注顺序会随分页请求变化）。
+                    val fresh = followingPage.users.filter { author -> seenIds.add(author.id) }
                     val start = items.size
-                    items += users
-                    adapter.notifyItemRangeInserted(start, users.size)
-                    status.text = "已关注 ${items.size} 位作者" + if (users.size >= 100) " · 正在加载更多…" else ""
-                    users.forEachIndexed { offset, author -> enrichProfile(start + offset, author) }
+                    items += fresh
+                    adapter.notifyItemRangeInserted(start, fresh.size)
+                    status.text = statusText(followingPage.total, more)
+                    fresh.forEachIndexed { offset, author -> enrichProfile(start + offset, author) }
                 }
-                if (users.size >= 100) loadFollowingPage(userId, page + 1)
+                if (more) loadFollowingPage(userId, page + 1)
             }.onFailure { e -> runOnUiThread {
                 if (closed) return@runOnUiThread
                 status.text = if (items.isEmpty()) "关注列表加载失败：${e.message}" else "已关注 ${items.size} 位作者 · 后续加载失败"
             } }
         }
+    }
+
+    private fun statusText(total: Int, loadingMore: Boolean): String {
+        val progress = if (total > items.size) "${items.size} / $total" else "${items.size}"
+        return "已关注 $progress 位作者" + if (loadingMore) " · 正在加载更多…" else ""
     }
 
     private fun enrichProfile(index: Int, author: IwaraAuthor) {
@@ -146,5 +155,10 @@ class FollowingActivity : AppCompatActivity() {
         profilePool.shutdownNow()
         HttpClientCleanup.close(profileClient)
         super.onDestroy()
+    }
+
+    private companion object {
+        /** 安全上限：50 条一页，最多读到 2000 位关注，避免异常分页把请求打成死循环。 */
+        const val MAX_PAGES = 40
     }
 }

@@ -217,6 +217,16 @@ class NavigationDeviceTest {
                 assertEquals(mode, field(home, "mode"))
                 if (item.resumePositionMs < 1_500) positionFailures += "$mode/following: ${item.resumePositionMs} ms"
             }
+            // 搜索结果页和其它子页面走同一条返回路径，并且同样要拿走首页的播放权。
+            playFixture(home, R.id.pager, mediaFile)
+            main { invoke(home, "openSearchPage", "") }
+            val search = awaitActivity(SearchActivity::class.java)
+            main { assertFalse((field(home, "adapter") as VideoAdapter).isActivePlaying()) }
+            assertFalse(home.isFinishing)
+            back(search, R.id.searchBack)
+            assertSame(home, awaitActivity(MainActivityV3::class.java))
+            assertEquals("popularity", field(home, "mode"))
+
             assertTrue("Saved home position was lost: $positionFailures", positionFailures.isEmpty())
         } finally {
             main {

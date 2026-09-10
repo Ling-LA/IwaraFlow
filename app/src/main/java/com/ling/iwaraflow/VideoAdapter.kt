@@ -39,9 +39,6 @@ class VideoAdapter(
     private var released = false
 
     init {
-        // Opening another video surface (for example AuthorActivity) immediately revokes playback
-        // ownership from the previous adapter. This avoids MainActivity continuing underneath it,
-        // including the case where MainActivity attempted to auto-enter PiP during navigation.
         registerAndClaim(this)
     }
 
@@ -135,7 +132,6 @@ class VideoAdapter(
             }
         }
         preloadTask = task
-        // Current playback gets network priority. Only prefetch after it has been READY for a while.
         preloadHandler.postDelayed(task, 1800L)
     }
 
@@ -334,13 +330,13 @@ class VideoAdapter(
                 sources.firstOrNull { it.url == item.streamUrl } ?: api.chooseSource(sources, preferred)
             } else api.chooseSource(sources, preferred)
             source ?: return
-            val oldPosition = if (preservePosition) p.currentPosition else 0L
+            val oldPosition = if (preservePosition) p.currentPosition else item.resumePositionMs.coerceAtLeast(0L)
             val shouldPlay = active && (p.isPlaying || !preservePosition)
             item.streamUrl = source.url
             if (item.selectedQuality == null && preferred != "highest") item.selectedQuality = source.name
             quality.text = "画质\n" + (item.selectedQuality ?: if (preferred == "highest") "最高" else source.name)
             p.setMediaSource(mediaCache.createMediaSource(source.url))
-            if (oldPosition > 0) p.seekTo(oldPosition)
+            if (oldPosition > 0L) p.seekTo(oldPosition)
             p.prepare()
             p.volume = if (active) 1f else 0f
             p.playWhenReady = active && shouldPlay
@@ -355,7 +351,7 @@ class VideoAdapter(
                 else player?.apply { volume = 1f; playWhenReady = true; play() }
                 bound?.let { item ->
                     val p = player
-                    history.recordWatch(item, p?.currentPosition ?: 0L, (p?.duration ?: 0L).coerceAtLeast(0L), false)
+                    history.recordWatch(item, p?.currentPosition ?: item.resumePositionMs, (p?.duration ?: 0L).coerceAtLeast(0L), false)
                 }
                 startWatchdog()
             } else {
@@ -429,9 +425,11 @@ class VideoAdapter(
         private fun persistHistory(completed: Boolean) {
             val item = bound ?: return
             val p = player ?: return
+            val position = p.currentPosition.coerceAtLeast(0L)
             val duration = p.duration.coerceAtLeast(0L)
-            val completedByProgress = duration > 0 && p.currentPosition >= (duration * 0.9).toLong()
-            history.recordWatch(item, p.currentPosition, duration, completed || completedByProgress)
+            item.resumePositionMs = if (completed) 0L else position
+            val completedByProgress = duration > 0 && position >= (duration * 0.9).toLong()
+            history.recordWatch(item, position, duration, completed || completedByProgress)
         }
 
         private fun toggleRemoteLike(item: VideoItem, desired: Boolean, animate: Boolean) {

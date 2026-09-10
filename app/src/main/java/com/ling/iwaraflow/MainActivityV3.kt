@@ -25,6 +25,7 @@ import android.widget.ProgressBar
 import android.widget.Spinner
 import android.widget.TextView
 import android.widget.Toast
+import androidx.activity.result.contract.ActivityResultContracts
 import androidx.appcompat.app.AppCompatActivity
 import androidx.core.app.ActivityCompat
 import androidx.core.content.ContextCompat
@@ -51,7 +52,17 @@ class MainActivityV3 : AppCompatActivity() {
     private var pendingAdvanceAfterLoad = false
     private var pagingEnabled = true
     private var requestSerial = 0
+    private var openingInternalPage = false
     private val pageSize = 28
+
+    private val authorLauncher = registerForActivityResult(ActivityResultContracts.StartActivityForResult()) {
+        openingInternalPage = false
+        if (!isFinishing && !isDestroyed) {
+            // Returning from an author is an in-app navigation event, not leaving the app.
+            // Always restore the main recommendation surface and playback ownership explicitly.
+            returnToRecommend()
+        }
+    }
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
@@ -252,7 +263,11 @@ class MainActivityV3 : AppCompatActivity() {
         if (id.isBlank() && username.isBlank()) {
             Toast.makeText(this, "该视频没有作者资料", Toast.LENGTH_SHORT).show(); return
         }
-        startActivity(Intent(this, AuthorActivity::class.java).apply {
+        openingInternalPage = true
+        // Stop the main player before launching the in-app author screen. This also prevents the
+        // transition from being interpreted as a background/PiP transition.
+        adapter.pauseAll()
+        authorLauncher.launch(Intent(this, AuthorActivity::class.java).apply {
             putExtra(AuthorActivity.EXTRA_ID, id)
             putExtra(AuthorActivity.EXTRA_NAME, name)
             putExtra(AuthorActivity.EXTRA_USERNAME, username)
@@ -460,6 +475,10 @@ class MainActivityV3 : AppCompatActivity() {
 
     override fun onUserLeaveHint() {
         super.onUserLeaveHint()
+        // startActivity(AuthorActivity) also triggers onUserLeaveHint on some devices. It is an
+        // in-app transition and must never enter PiP, otherwise the main task can be collapsed when
+        // AuthorActivity finishes and the app appears to close immediately after flashing main.
+        if (openingInternalPage) return
         if (prefs.autoPip && adapter.isActivePlaying() && !isInPictureInPictureMode) enterPip()
     }
 
@@ -472,10 +491,14 @@ class MainActivityV3 : AppCompatActivity() {
     override fun onStart() {
         super.onStart()
         updates.tryContinueInstall()
-        if (!isInPictureInPictureMode) adapter.resumeActive()
+        if (!openingInternalPage && !isInPictureInPictureMode) adapter.resumeActive()
     }
 
-    override fun onStop() { if (!isInPictureInPictureMode) adapter.pauseAll(); super.onStop() }
+    override fun onStop() {
+        if (openingInternalPage || !isInPictureInPictureMode) adapter.pauseAll()
+        super.onStop()
+    }
+
     private fun showError(message: String) { error.text = message; error.visibility = View.VISIBLE }
 
     override fun onDestroy() {

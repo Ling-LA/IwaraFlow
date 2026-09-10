@@ -107,15 +107,22 @@ class NavigationDeviceTest {
             player.seekTo(1_500)
             player.play()
         }
-        // The emulator decodes h264 in software, so the first frame can take a while.
-        val deadline = SystemClock.uptimeMillis() + 30_000
+        // The emulator decodes h264 in software. Playback is real once the timeline actually
+        // advances past the seek; waiting for the decoder to also report a frame size on top of
+        // that is what times out on a loaded runner, and it proves nothing extra about playback.
+        val deadline = SystemClock.uptimeMillis() + 45_000
+        var lastState = ""
         while (SystemClock.uptimeMillis() < deadline) {
             var ready = false
-            main { ready = player.isPlaying && player.videoSize.width > 0 }
+            main {
+                ready = player.isPlaying && (player.videoSize.width > 0 || player.currentPosition > 1_700)
+                lastState = "playing=${player.isPlaying} state=${player.playbackState} " +
+                    "position=${player.currentPosition} size=${player.videoSize.width}"
+            }
             if (ready) return
             SystemClock.sleep(30)
         }
-        throw AssertionError("Fixture video did not reach actual video playback")
+        throw AssertionError("Fixture video did not reach actual video playback: $lastState")
     }
 
     private fun awaitAuthorList(author: AuthorActivity) {

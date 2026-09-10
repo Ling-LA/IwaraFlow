@@ -161,7 +161,7 @@ class StartupFeedLatencyTest {
         `when`(history.preferenceProfile()).thenReturn(PreferenceProfile(emptyMap(), emptyMap()))
         `when`(api.getVideosBlocking(anyString(), anyInt(), anyInt())).thenAnswer { invocation ->
             val sort = invocation.getArgument<String>(0)
-            if (sort == "views") Thread.sleep(6_000L)
+            if (sort == "popularity") Thread.sleep(6_000L)
             listOf(VideoItem("$sort-1", sort, "fixture", emptyList(), 1))
         }
         val engine = RecommendationEngine(api, history, listBudgetMs = 600L)
@@ -178,7 +178,7 @@ class StartupFeedLatencyTest {
             val videos = result.get().getOrNull()
             assertNotNull("推荐列表不应该整体失败", videos)
             assertTrue("其它榜单的候选必须保留", videos!!.isNotEmpty())
-            assertTrue("超时榜单不应该进入结果", videos.none { it.id == "views-1" })
+            assertTrue("超时榜单不应该进入结果", videos.none { it.id == "popularity-1" })
             assertTrue("慢榜单拖住了冷启动：${elapsedMs}ms", elapsedMs < 3_000L)
         } finally {
             engine.close()

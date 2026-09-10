@@ -143,6 +143,20 @@ class IwaraApi(context: Context, private val apiRoot: String = DEFAULT_API_ROOT)
         return parseVideoPage(getJsonObject(url.toString(), optionalAuth = true))
     }
 
+    /**
+     * 关注作者的最新作品。Iwara 的订阅流就是视频列表接口加 `subscribed=true`；
+     * 万一服务端忽略这个参数，拿回来的也是按时间排序的新视频，不会更差。
+     */
+    fun getSubscribedVideosBlocking(page: Int = 0, limit: Int = 36): List<VideoItem> {
+        if (!isLoggedIn()) return emptyList()
+        val url = "$apiRoot/videos".toHttpUrl().newBuilder()
+            .addQueryParameter("subscribed", "true").addQueryParameter("sort", "date")
+            .addQueryParameter("rating", "all")
+            .addQueryParameter("page", page.toString())
+            .addQueryParameter("limit", limit.coerceAtMost(MAX_PAGE_LIMIT).toString()).build()
+        return parseVideoPage(getJsonObject(url.toString(), requireAuth = true))
+    }
+
     fun getAuthorVideos(userId: String, page: Int = 0, limit: Int = 36, callback: (Result<List<VideoItem>>) -> Unit) {
         enqueue(callback) { runCatching { getAuthorVideosBlocking(userId, page, limit) } }
     }
@@ -265,12 +279,14 @@ class IwaraApi(context: Context, private val apiRoot: String = DEFAULT_API_ROOT)
     }
 
     fun getCurrentUser(callback: (Result<IwaraAuthor>) -> Unit) {
-        enqueue(callback) { runCatching {
-            if (!isLoggedIn()) throw IOException("请先登录 Iwara")
-            val root = getJsonObject("$apiRoot/user", requireAuth = true)
-            val user = root.optJSONObject("user") ?: throw IOException("无法读取当前账号")
-            parseAuthor(user, root.optJSONObject("profile")?.optString("body").orEmpty())
-        } }
+        enqueue(callback) { runCatching { getCurrentUserBlocking() } }
+    }
+
+    fun getCurrentUserBlocking(): IwaraAuthor {
+        if (!isLoggedIn()) throw IOException("请先登录 Iwara")
+        val root = getJsonObject("$apiRoot/user", requireAuth = true)
+        val user = root.optJSONObject("user") ?: throw IOException("无法读取当前账号")
+        return parseAuthor(user, root.optJSONObject("profile")?.optString("body").orEmpty())
     }
 
     fun getFollowingUsers(userId: String, page: Int = 0, callback: (Result<FollowingPage>) -> Unit) {

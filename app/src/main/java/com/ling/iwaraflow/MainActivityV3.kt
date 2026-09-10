@@ -393,18 +393,17 @@ class MainActivityV3 : AppCompatActivity() {
 
     private fun showMainMenu() {
         val account = if (api.isLoggedIn()) "退出 Iwara 登录" else "登录 Iwara"
-        val items = arrayOf(account, "浏览历史", "本地收藏", "Iwara 点赞记录", "已关注用户", "设置", "检查更新", "重新加载当前流", "诊断信息")
+        val items = arrayOf(account, "浏览历史", "本地收藏", "已关注用户", "设置", "检查更新", "重新加载当前流", "诊断信息")
         val dialog = AlertDialog.Builder(this).setTitle("IwaraFlow").setItems(items) { _, which ->
             when (which) {
                 0 -> if (api.isLoggedIn()) { api.logout(); Toast.makeText(this, "已退出登录", Toast.LENGTH_SHORT).show(); loadFeed(reset = true) } else showLoginDialog()
                 1 -> openSavedVideos(SavedVideosActivity.KIND_HISTORY)
                 2 -> openSavedVideos(SavedVideosActivity.KIND_FAVORITES)
-                3 -> showRemoteLikes()
-                4 -> openFollowingPage()
-                5 -> showSettingsDialog()
-                6 -> updates.check(manual = true)
-                7 -> loadFeed(reset = true)
-                8 -> NavigationDiagnostics.show(this)
+                3 -> openFollowingPage()
+                4 -> showSettingsDialog()
+                5 -> updates.check(manual = true)
+                6 -> loadFeed(reset = true)
+                7 -> NavigationDiagnostics.show(this)
             }
         }.create()
         dialog.setOnShowListener { styleDialogButtons(dialog) }; dialog.show()
@@ -439,23 +438,6 @@ class MainActivityV3 : AppCompatActivity() {
             }
         }
         dialog.show()
-    }
-
-    private fun showRemoteLikes() {
-        if (!api.isLoggedIn()) { showLoginDialog(); return }
-        loading.visibility = View.VISIBLE
-        api.getFavoriteVideos { result -> runOnUiThread {
-            loading.visibility = View.GONE
-            result.onSuccess { list ->
-                val decorated = decorate(list)
-                if (decorated.isEmpty()) Toast.makeText(this, "Iwara 点赞记录为空", Toast.LENGTH_SHORT).show()
-                else {
-                    saveCurrentHomeSession()
-                    mode = "likes"; pagingEnabled = false; searchQuery = null; requestSerial++
-                    adapter.replace(decorated); pager.setCurrentItem(0, false); adapter.setActive(0)
-                }
-            }.onFailure { Toast.makeText(this, it.message ?: "点赞记录加载失败", Toast.LENGTH_LONG).show() }
-        } }
     }
 
     private fun openSingleVideo(videoId: String) {

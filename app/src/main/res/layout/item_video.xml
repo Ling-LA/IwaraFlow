@@ -15,6 +15,19 @@
         app:use_controller="false" />
 
     <TextView
+        android:id="@+id/pauseIndicator"
+        android:layout_width="78dp"
+        android:layout_height="78dp"
+        android:layout_gravity="center"
+        android:background="@drawable/bg_pause_indicator"
+        android:gravity="center"
+        android:paddingStart="6dp"
+        android:text="▶"
+        android:textColor="#FFFFFFFF"
+        android:textSize="34sp"
+        android:visibility="gone" />
+
+    <TextView
         android:id="@+id/likeBurst"
         android:layout_width="160dp"
         android:layout_height="160dp"

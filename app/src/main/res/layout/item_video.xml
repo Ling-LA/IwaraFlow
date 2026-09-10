@@ -27,6 +27,13 @@
         android:textSize="34sp"
         android:visibility="gone" />
 
+    <com.ling.iwaraflow.PauseSeekBar
+        android:id="@+id/pauseSeekBar"
+        android:layout_width="match_parent"
+        android:layout_height="28dp"
+        android:layout_gravity="top|start"
+        android:visibility="gone" />
+
     <TextView
         android:id="@+id/likeBurst"
         android:layout_width="160dp"

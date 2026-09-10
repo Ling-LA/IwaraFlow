@@ -3,8 +3,10 @@ package com.ling.iwaraflow
 import android.view.LayoutInflater
 import android.view.View
 import android.view.ViewGroup
+import android.widget.ImageView
 import android.widget.TextView
 import androidx.recyclerview.widget.RecyclerView
+import coil.load
 
 class AuthorVideoListAdapter(
     private val items: List<VideoItem>,
@@ -25,21 +27,33 @@ class AuthorVideoListAdapter(
         private val tags = view.findViewById<TextView>(R.id.videoTags)
         private val issue = view.findViewById<TextView>(R.id.playbackIssue)
         private val icon = view.findViewById<TextView>(R.id.videoIcon)
+        private val thumbnail = view.findViewById<ImageView>(R.id.videoThumbnail)
 
         fun bind(item: VideoItem) {
             title.text = item.title
             meta.text = "${formatCount(item.views)} 播放  ·  ${formatCount(item.likes)} 赞"
             tags.text = item.tags.take(5).joinToString("  ") { "#$it" }
+
+            icon.visibility = View.VISIBLE
+            thumbnail.setImageDrawable(null)
+            if (item.thumbnailUrl.isNotBlank()) {
+                thumbnail.load(item.thumbnailUrl) {
+                    crossfade(true)
+                    listener(
+                        onSuccess = { _, _ -> icon.visibility = View.GONE },
+                        onError = { _, _ -> icon.visibility = View.VISIBLE }
+                    )
+                }
+            }
+
             val reason = item.playbackIssue
             if (reason.isNullOrBlank()) {
                 issue.visibility = View.GONE
-                icon.alpha = 1f
                 itemView.alpha = 1f
                 itemView.setOnClickListener { onClick(item) }
             } else {
                 issue.text = reason
                 issue.visibility = View.VISIBLE
-                icon.alpha = 0.35f
                 itemView.alpha = 0.9f
                 itemView.setOnClickListener(null)
             }

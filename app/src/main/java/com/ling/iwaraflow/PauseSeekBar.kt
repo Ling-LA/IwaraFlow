@@ -100,7 +100,7 @@ class PauseSeekBar @JvmOverloads constructor(
                 .roundToInt().coerceIn(0, max)
         }
         val overlapsChrome = placeAtVideoBottom(p)
-        if (overlapsChrome) hideChromeForSeek() else restoreChromeIfNeeded()
+        if (overlapsChrome || chromeHiddenBySeek) hideChromeForSeek() else restoreChromeIfNeeded()
     }
 
     private fun findPlayer(): Player? {
@@ -145,6 +145,7 @@ class PauseSeekBar @JvmOverloads constructor(
         }
         translationY = bottom - height / 2f
 
+        if (chromeHiddenBySeek) return true
         val seekTop = bottom - height / 2f
         val seekBottom = bottom + height / 2f
         val info = container.findViewById<View>(R.id.infoPanel)

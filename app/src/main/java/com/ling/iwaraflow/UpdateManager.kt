@@ -376,8 +376,7 @@ class UpdateManager(private val activity: Activity) {
             receiverRegistered = false
         }
         executor.shutdownNow()
-        client.dispatcher.executorService.shutdown()
-        client.connectionPool.evictAll()
+        HttpClientCleanup.close(client)
     }
 
     companion object {

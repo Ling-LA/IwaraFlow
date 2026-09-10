@@ -9,6 +9,8 @@ import java.util.concurrent.TimeUnit
 class PlayableVideoGate(private val api: IwaraApi) {
     private val coordinator = Executors.newSingleThreadExecutor()
     private val probes = Executors.newFixedThreadPool(8)
+    private val lifecycleLock = Any()
+    @Volatile private var closed = false
     private val client = OkHttpClient.Builder()
         .connectTimeout(3, TimeUnit.SECONDS)
         .readTimeout(4, TimeUnit.SECONDS)
@@ -21,38 +23,45 @@ class PlayableVideoGate(private val api: IwaraApi) {
         maxItems: Int = items.size,
         callback: (List<VideoItem>) -> Unit
     ) {
-        coordinator.execute {
+        enqueue {
             // Cold start used to wait for up to 16 CDN/source validations before showing the
             // first frame. Ten parallel candidates are enough to seed a swipe feed while keeping
             // the invariant that every item shown has already passed a real media-byte probe.
             val candidateCount = minOf(items.size, minOf(maxItems + 2, 10))
             val candidates = items.take(candidateCount)
-            val futures: List<Future<Pair<Int, VideoItem>>> = candidates.mapIndexed { index, item ->
-                probes.submit<Pair<Int, VideoItem>> { Pair(index, inspectOne(item, quality)) }
-            }
+            val futures = inspectAsync(candidates, quality)
             val accepted: List<VideoItem> = futures
                 .mapNotNull { future -> runCatching { future.get() }.getOrNull() }
                 .sortedBy { pair -> pair.first }
                 .map { pair -> pair.second }
                 .filter { item -> item.playbackIssue == null }
                 .take(maxItems)
-            callback(accepted)
+            if (!closed) callback(accepted)
         }
     }
 
     /** Author pages keep every item so unavailable works can show the server/resource reason. */
     fun inspectAll(items: List<VideoItem>, quality: String, callback: (List<VideoItem>) -> Unit) {
-        coordinator.execute {
-            val futures: List<Future<Pair<Int, VideoItem>>> = items.mapIndexed { index, item ->
-                probes.submit<Pair<Int, VideoItem>> { Pair(index, inspectOne(item, quality)) }
-            }
+        enqueue {
+            val futures = inspectAsync(items, quality)
             val inspected: List<VideoItem> = futures
                 .mapNotNull { future -> runCatching { future.get() }.getOrNull() }
                 .sortedBy { pair -> pair.first }
                 .map { pair -> pair.second }
-            callback(inspected)
+            if (!closed) callback(inspected)
         }
     }
+
+    private fun enqueue(task: () -> Unit) = synchronized(lifecycleLock) {
+        if (!closed) coordinator.execute { if (!closed) task() }
+    }
+
+    private fun inspectAsync(items: List<VideoItem>, quality: String): List<Future<Pair<Int, VideoItem>>> =
+        items.mapIndexedNotNull { index, item ->
+            synchronized(lifecycleLock) {
+                if (closed) null else probes.submit<Pair<Int, VideoItem>> { Pair(index, inspectOne(item, quality)) }
+            }
+        }
 
     private fun inspectOne(item: VideoItem, quality: String): VideoItem {
         item.playbackIssue = null
@@ -104,9 +113,12 @@ class PlayableVideoGate(private val api: IwaraApi) {
     }
 
     fun close() {
-        coordinator.shutdownNow()
-        probes.shutdownNow()
-        client.dispatcher.executorService.shutdown()
-        client.connectionPool.evictAll()
+        synchronized(lifecycleLock) {
+            if (closed) return
+            closed = true
+            coordinator.shutdownNow()
+            probes.shutdownNow()
+        }
+        HttpClientCleanup.close(client)
     }
 }

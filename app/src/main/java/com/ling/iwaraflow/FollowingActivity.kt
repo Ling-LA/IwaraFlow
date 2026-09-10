@@ -144,8 +144,7 @@ class FollowingActivity : AppCompatActivity() {
         closed = true
         api.close()
         profilePool.shutdownNow()
-        profileClient.dispatcher.executorService.shutdown()
-        profileClient.connectionPool.evictAll()
+        HttpClientCleanup.close(profileClient)
         super.onDestroy()
     }
 }

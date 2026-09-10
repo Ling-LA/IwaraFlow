@@ -400,9 +400,7 @@ class IwaraApi(context: Context) {
             closed = true
             io.shutdownNow()
         }
-        client.dispatcher.cancelAll()
-        client.dispatcher.executorService.shutdown()
-        client.connectionPool.evictAll()
+        HttpClientCleanup.close(client)
     }
 }
 

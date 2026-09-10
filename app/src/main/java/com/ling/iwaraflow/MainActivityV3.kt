@@ -20,7 +20,6 @@ import android.widget.ArrayAdapter
 import android.widget.CheckBox
 import android.widget.EditText
 import android.widget.LinearLayout
-import android.widget.ListView
 import android.widget.ProgressBar
 import android.widget.Spinner
 import android.widget.TextView
@@ -66,10 +65,31 @@ class MainActivityV3 : AppCompatActivity() {
     private val homeModes = setOf("recommend", "date", "trending", "popularity")
 
     private val authorLauncher = registerForActivityResult(ActivityResultContracts.StartActivityForResult()) {
+        resumeAfterInternalPage()
+    }
+
+    private val followingLauncher = registerForActivityResult(ActivityResultContracts.StartActivityForResult()) {
+        resumeAfterInternalPage()
+    }
+
+    private val savedVideosLauncher = registerForActivityResult(ActivityResultContracts.StartActivityForResult()) { result ->
+        openingInternalPage = false
+        val videoId = result.data?.getStringExtra(SavedVideosActivity.EXTRA_VIDEO_ID).orEmpty()
+        if (!isFinishing && !isDestroyed) {
+            hideStatusBar()
+            if (videoId.isNotBlank()) openSingleVideo(videoId)
+            else window.decorView.postDelayed({ if (!isFinishing && !isDestroyed) adapter.resumeActive() }, 90L)
+        }
+    }
+
+    private fun resumeAfterInternalPage() {
         openingInternalPage = false
         if (!isFinishing && !isDestroyed) {
             hideStatusBar()
-            adapter.resumeActive()
+            // Let the child Activity complete onDestroy before reclaiming Media3/cache playback ownership.
+            window.decorView.postDelayed({
+                if (!isFinishing && !isDestroyed && !openingInternalPage) adapter.resumeActive()
+            }, 90L)
         }
     }
 
@@ -336,6 +356,19 @@ class MainActivityV3 : AppCompatActivity() {
         })
     }
 
+    private fun openSavedVideos(kind: String) {
+        openingInternalPage = true
+        adapter.pauseAll()
+        savedVideosLauncher.launch(Intent(this, SavedVideosActivity::class.java).putExtra(SavedVideosActivity.EXTRA_KIND, kind))
+    }
+
+    private fun openFollowingPage() {
+        if (!api.isLoggedIn()) { showLoginDialog(); return }
+        openingInternalPage = true
+        adapter.pauseAll()
+        followingLauncher.launch(Intent(this, FollowingActivity::class.java))
+    }
+
     private fun showSearchDialog() {
         val panel = LinearLayout(this).apply { orientation = LinearLayout.VERTICAL; setPadding(dp(24), dp(8), dp(24), dp(2)) }
         panel.addView(TextView(this).apply {
@@ -369,39 +402,16 @@ class MainActivityV3 : AppCompatActivity() {
         val dialog = AlertDialog.Builder(this).setTitle("IwaraFlow").setItems(items) { _, which ->
             when (which) {
                 0 -> if (api.isLoggedIn()) { api.logout(); Toast.makeText(this, "已退出登录", Toast.LENGTH_SHORT).show(); loadFeed(reset = true) } else showLoginDialog()
-                1 -> showHistoryDialog()
-                2 -> showLocalFavorites()
+                1 -> openSavedVideos(SavedVideosActivity.KIND_HISTORY)
+                2 -> openSavedVideos(SavedVideosActivity.KIND_FAVORITES)
                 3 -> showRemoteLikes()
-                4 -> showFollowingUsers()
+                4 -> openFollowingPage()
                 5 -> showSettingsDialog()
                 6 -> updates.check(manual = true)
                 7 -> loadFeed(reset = true)
             }
         }.create()
         dialog.setOnShowListener { styleDialogButtons(dialog) }; dialog.show()
-    }
-
-    private fun showFollowingUsers() {
-        if (!api.isLoggedIn()) { showLoginDialog(); return }
-        loading.visibility = View.VISIBLE
-        api.getCurrentUser { meResult ->
-            meResult.onSuccess { me ->
-                api.getFollowingUsers(me.id) { result ->
-                    runOnUiThread {
-                        loading.visibility = View.GONE
-                        result.onSuccess { users ->
-                            if (users.isEmpty()) Toast.makeText(this, "还没有关注任何用户", Toast.LENGTH_SHORT).show()
-                            else {
-                                val labels = users.map { "${it.name}\n@${it.username}" }.toTypedArray()
-                                AlertDialog.Builder(this).setTitle("已关注用户").setItems(labels) { _, index ->
-                                    val a = users[index]; openAuthor(a.id, a.name, a.username)
-                                }.setNegativeButton("关闭", null).show()
-                            }
-                        }.onFailure { Toast.makeText(this, it.message ?: "关注列表加载失败", Toast.LENGTH_LONG).show() }
-                    }
-                }
-            }.onFailure { runOnUiThread { loading.visibility = View.GONE; Toast.makeText(this, it.message ?: "账号资料读取失败", Toast.LENGTH_LONG).show() } }
-        }
     }
 
     private fun showLoginDialog() {
@@ -433,28 +443,6 @@ class MainActivityV3 : AppCompatActivity() {
             }
         }
         dialog.show()
-    }
-
-    private fun showHistoryDialog() {
-        val list = history.recentHistory(100)
-        if (list.isEmpty()) { Toast.makeText(this, "还没有浏览历史", Toast.LENGTH_SHORT).show(); return }
-        showVideoListDialog("浏览历史", "最近观看的 ${list.size} 条视频", list)
-    }
-
-    private fun showLocalFavorites() {
-        val list = history.localFavorites(200)
-        if (list.isEmpty()) { Toast.makeText(this, "还没有本地收藏", Toast.LENGTH_SHORT).show(); return }
-        showVideoListDialog("本地收藏", "仅保存在本机，不会同步到 Iwara", list)
-    }
-
-    private fun showVideoListDialog(title: String, subtitle: String, list: List<VideoItem>) {
-        val panel = LinearLayout(this).apply { orientation = LinearLayout.VERTICAL; setPadding(0, 0, 0, dp(8)) }
-        panel.addView(TextView(this).apply { text = subtitle; setTextColor(0xFF607D93.toInt()); textSize = 12f; setPadding(dp(24), dp(4), dp(24), dp(8)) })
-        val listView = ListView(this).apply { dividerHeight = 0; adapter = HistoryListAdapter(this@MainActivityV3, list); setPadding(0, 0, 0, dp(8)) }
-        panel.addView(listView, LinearLayout.LayoutParams(LinearLayout.LayoutParams.MATCH_PARENT, dp(460)))
-        val dialog = AlertDialog.Builder(this).setTitle(title).setView(panel).setNegativeButton("关闭", null).create()
-        listView.setOnItemClickListener { _, _, position, _ -> dialog.dismiss(); openSingleVideo(list[position].id) }
-        dialog.setOnShowListener { styleDialogButtons(dialog) }; dialog.show()
     }
 
     private fun showRemoteLikes() {

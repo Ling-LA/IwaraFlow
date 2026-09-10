@@ -28,17 +28,6 @@
         android:visibility="gone" />
 
     <TextView
-        android:id="@+id/likeBurst"
-        android:layout_width="160dp"
-        android:layout_height="160dp"
-        android:layout_gravity="center"
-        android:gravity="center"
-        android:text="♥"
-        android:textColor="#FFFF365D"
-        android:textSize="118sp"
-        android:visibility="gone" />
-
-    <TextView
         android:id="@+id/speedIndicator"
         android:layout_width="wrap_content"
         android:layout_height="wrap_content"
@@ -122,14 +111,14 @@
         android:orientation="vertical"
         android:paddingBottom="28dp">
 
-        <TextView
+        <ImageView
             android:id="@+id/like"
             android:layout_width="match_parent"
             android:layout_height="54dp"
-            android:gravity="center"
-            android:text="♡"
-            android:textColor="#FFFFFFFF"
-            android:textSize="36sp" />
+            android:contentDescription="点赞"
+            android:padding="9dp"
+            android:scaleType="fitCenter"
+            android:src="@drawable/ic_heart_rounded_outline" />
 
         <TextView
             android:id="@+id/likeCount"
@@ -139,14 +128,14 @@
             android:textColor="#FFFFFFFF"
             android:textSize="12sp" />
 
-        <TextView
+        <ImageView
             android:id="@+id/favorite"
             android:layout_width="match_parent"
             android:layout_height="50dp"
-            android:gravity="center"
-            android:text="☆"
-            android:textColor="#FFFFFFFF"
-            android:textSize="32sp" />
+            android:contentDescription="收藏"
+            android:padding="9dp"
+            android:scaleType="fitCenter"
+            android:src="@drawable/ic_star_rounded_outline" />
 
         <TextView
             android:id="@+id/quality"
@@ -199,5 +188,15 @@
         android:layout_gravity="top|start"
         android:layout_marginStart="16dp"
         android:layout_marginEnd="16dp"
+        android:visibility="gone" />
+
+    <!-- 排在最后：动画要盖在操作栏上面，否则在按钮位置播就被按钮挡住了。
+         它不可点击，触摸事件照常穿过去。 -->
+    <com.ling.iwaraflow.ReactionBurstView
+        android:id="@+id/reactionBurst"
+        android:layout_width="match_parent"
+        android:layout_height="match_parent"
+        android:clickable="false"
+        android:focusable="false"
         android:visibility="gone" />
 </FrameLayout>

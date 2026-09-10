@@ -1,6 +1,7 @@
 package com.ling.iwaraflow
 
 import android.app.AlertDialog
+import android.content.res.ColorStateList
 import android.os.Handler
 import android.os.Looper
 import android.view.LayoutInflater
@@ -8,7 +9,7 @@ import android.view.MotionEvent
 import android.view.View
 import android.view.ViewConfiguration
 import android.view.ViewGroup
-import android.view.animation.DecelerateInterpolator
+import android.widget.ImageView
 import android.widget.TextView
 import android.widget.Toast
 import androidx.media3.common.PlaybackException
@@ -179,14 +180,14 @@ class VideoAdapter(
         private val author = view.findViewById<TextView>(R.id.author)
         private val title = view.findViewById<TextView>(R.id.title)
         private val tags = view.findViewById<TextView>(R.id.tags)
-        private val like = view.findViewById<TextView>(R.id.like)
+        private val like = view.findViewById<ImageView>(R.id.like)
         private val likeCount = view.findViewById<TextView>(R.id.likeCount)
-        private val favorite = view.findViewById<TextView>(R.id.favorite)
+        private val favorite = view.findViewById<ImageView>(R.id.favorite)
         private val quality = view.findViewById<TextView>(R.id.quality)
         private val download = view.findViewById<TextView>(R.id.download)
         private val pip = view.findViewById<TextView>(R.id.pip)
         private val share = view.findViewById<TextView>(R.id.share)
-        private val likeBurst = view.findViewById<TextView>(R.id.likeBurst)
+        private val reactionBurst = view.findViewById<ReactionBurstView>(R.id.reactionBurst)
         private val speedIndicator = view.findViewById<TextView>(R.id.speedIndicator)
 
         private var player: ExoPlayer? = null
@@ -230,11 +231,20 @@ class VideoAdapter(
             updateLikeUi(item)
             quality.text = displayQuality(item)
 
-            like.setOnClickListener { toggleRemoteLike(item, !item.liked, animate = false) }
+            like.setOnClickListener {
+                val desired = !item.liked
+                // 动画播在按钮自己身上，而不是屏幕正中央。
+                toggleRemoteLike(item, desired) {
+                    reactionBurst.playOn(like, ReactionBurstView.Kind.LIKE)
+                }
+            }
             favorite.setOnClickListener {
                 val desired = !item.localFavorite
                 history.setLocalFavorite(item, desired)
-                if (desired) history.recordInteraction(item, "favorite", 1.4)
+                if (desired) {
+                    history.recordInteraction(item, "favorite", 1.4)
+                    reactionBurst.playOn(favorite, ReactionBurstView.Kind.FAVORITE)
+                }
                 updateLikeUi(item)
                 Toast.makeText(itemView.context, if (desired) "已收藏" else "已取消收藏", Toast.LENGTH_SHORT).show()
             }
@@ -249,8 +259,9 @@ class VideoAdapter(
                     pendingSingleTap?.let { tapHandler.removeCallbacks(it) }
                     pendingSingleTap = null
                     lastTap = 0L
-                    showLikeBurst()
-                    if (!item.liked) toggleRemoteLike(item, true, animate = false)
+                    // 双击点赞：动画播在手指按下的位置。
+                    reactionBurst.playAt(downX, downY, ReactionBurstView.Kind.LIKE)
+                    if (!item.liked) toggleRemoteLike(item, true)
                 } else {
                     lastTap = now
                     val action = Runnable {
@@ -504,11 +515,15 @@ class VideoAdapter(
 
         fun savePlaybackPosition() = persistHistory(completed = false)
 
-        private fun toggleRemoteLike(item: VideoItem, desired: Boolean, animate: Boolean) {
+        /**
+         * [onAccepted] 在请求真正发出去时调用一次——登录检查和防抖都通过了才算数，
+         * 所以不会出现“动画播完却弹出登录框”。
+         */
+        private fun toggleRemoteLike(item: VideoItem, desired: Boolean, onAccepted: (() -> Unit)? = null) {
             if (likeBusy) return
             if (!api.isLoggedIn()) { onNeedLogin(); return }
             likeBusy = true
-            if (animate) showLikeBurst()
+            if (desired) onAccepted?.invoke()
             api.likeVideo(item.id, desired) { result ->
                 itemView.post {
                     likeBusy = false
@@ -530,26 +545,19 @@ class VideoAdapter(
         }
 
         private fun updateLikeUi(item: VideoItem) {
-            like.text = if (item.liked) "♥" else "♡"
-            like.setTextColor(if (item.liked) 0xFFFF365D.toInt() else 0xFFFFFFFF.toInt())
-            favorite.text = if (item.localFavorite) "★" else "☆"
-            favorite.setTextColor(if (item.localFavorite) 0xFFFFD54F.toInt() else 0xFFFFFFFF.toInt())
+            like.setImageResource(
+                if (item.liked) R.drawable.ic_heart_rounded else R.drawable.ic_heart_rounded_outline
+            )
+            like.imageTintList = ColorStateList.valueOf(
+                if (item.liked) 0xFFFF365D.toInt() else 0xFFFFFFFF.toInt()
+            )
+            favorite.setImageResource(
+                if (item.localFavorite) R.drawable.ic_star_rounded else R.drawable.ic_star_rounded_outline
+            )
+            favorite.imageTintList = ColorStateList.valueOf(
+                if (item.localFavorite) 0xFFFFD54F.toInt() else 0xFFFFFFFF.toInt()
+            )
             likeCount.text = formatCount(item.likes)
-        }
-
-        private fun showLikeBurst() {
-            likeBurst.visibility = View.VISIBLE
-            likeBurst.alpha = 0f
-            likeBurst.scaleX = 0.35f
-            likeBurst.scaleY = 0.35f
-            likeBurst.animate().cancel()
-            likeBurst.animate().alpha(1f).scaleX(1.18f).scaleY(1.18f)
-                .setDuration(160L).setInterpolator(DecelerateInterpolator())
-                .withEndAction {
-                    likeBurst.animate().alpha(0f).scaleX(0.85f).scaleY(0.85f)
-                        .setStartDelay(180L).setDuration(240L)
-                        .withEndAction { likeBurst.visibility = View.GONE }.start()
-                }.start()
         }
 
         private fun showQualityChooser(item: VideoItem, forDownload: Boolean) {
@@ -597,6 +605,8 @@ class VideoAdapter(
             bound = null
             pendingSingleTap?.let { tapHandler.removeCallbacks(it) }
             pendingSingleTap = null
+            // 卡片被回收去放别的视频了，上一条的点赞动画不能跟着漂过去。
+            reactionBurst.cancelBurst()
             releasePlayerOnly()
         }
 

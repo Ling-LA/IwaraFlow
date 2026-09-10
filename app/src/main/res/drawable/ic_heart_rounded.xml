@@ -1,0 +1,11 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- 圆润的爱心（实心）。宽的两瓣、圆钝的底尖，比 ♥ 字符饱满。 -->
+<vector xmlns:android="http://schemas.android.com/apk/res/android"
+    android:width="24dp"
+    android:height="24dp"
+    android:viewportWidth="48"
+    android:viewportHeight="48">
+    <path
+        android:fillColor="#FFFFFFFF"
+        android:pathData="M24.00,41.40 C20.40,38.60 5.00,28.40 5.00,17.60 C5.00,10.90 10.20,6.20 16.20,6.20 C19.90,6.20 22.70,8.20 24.00,11.20 C25.30,8.20 28.10,6.20 31.80,6.20 C37.80,6.20 43.00,10.90 43.00,17.60 C43.00,28.40 27.60,38.60 24.00,41.40 Z" />
+</vector>

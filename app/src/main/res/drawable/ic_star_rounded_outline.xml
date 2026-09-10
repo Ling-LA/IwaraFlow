@@ -1,0 +1,15 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- 圆润的五角星（描边），未收藏时用。 -->
+<vector xmlns:android="http://schemas.android.com/apk/res/android"
+    android:width="24dp"
+    android:height="24dp"
+    android:viewportWidth="48"
+    android:viewportHeight="48">
+    <path
+        android:fillColor="#00000000"
+        android:strokeColor="#FFFFFFFF"
+        android:strokeWidth="3.4"
+        android:strokeLineCap="round"
+        android:strokeLineJoin="round"
+        android:pathData="M22.50,8.05 Q24.00,5.00 25.50,8.05 L28.68,14.48 Q29.76,16.67 32.18,17.02 L39.28,18.05 Q42.64,18.54 40.21,20.92 L35.07,25.92 Q33.32,27.63 33.73,30.04 L34.95,37.11 Q35.52,40.46 32.51,38.87 L26.17,35.54 Q24.00,34.40 21.83,35.54 L15.49,38.87 Q12.48,40.46 13.05,37.11 L14.27,30.04 Q14.68,27.63 12.93,25.92 L7.79,20.92 Q5.36,18.54 8.72,18.05 L15.82,17.02 Q18.24,16.67 19.32,14.48 L22.50,8.05 Z" />
+</vector>

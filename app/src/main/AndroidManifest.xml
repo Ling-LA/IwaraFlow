@@ -42,6 +42,8 @@
             android:supportsPictureInPicture="true"
             android:resizeableActivity="true"
             android:configChanges="screenSize|smallestScreenSize|screenLayout|orientation"
+            android:launchMode="singleTask"
+            android:alwaysRetainTaskState="true"
             android:exported="true">
             <intent-filter>
                 <action android:name="android.intent.action.MAIN" />

@@ -2,6 +2,7 @@ package com.ling.iwaraflow
 
 import android.app.DownloadManager
 import android.content.Context
+import android.content.Intent
 import android.net.Uri
 import android.os.Bundle
 import android.os.Environment
@@ -278,9 +279,18 @@ class AuthorActivity : AppCompatActivity() {
     private fun finishSafely() {
         if (exiting) return
         exiting = true
-        // Do not tear down Media3/SQLite during the system back animation. Android owns the
-        // transition; resources are released from onDestroy after the Activity is detached.
         feedAdapter.pauseAll()
+
+        // Some OEM/gesture-navigation combinations collapse the whole task when this Activity is
+        // simply finished. Move the already-existing main Activity to the front first. REORDER_TO_FRONT
+        // keeps its adapter, selected tab, current item and resumePositionMs intact; unlike CLEAR_TOP
+        // it does not destroy/recreate the main feed.
+        runCatching {
+            startActivity(Intent(this, MainActivityV3::class.java).apply {
+                addFlags(Intent.FLAG_ACTIVITY_REORDER_TO_FRONT or Intent.FLAG_ACTIVITY_SINGLE_TOP)
+                putExtra(EXTRA_RETURN_FROM_AUTHOR, true)
+            })
+        }
         finish()
     }
 
@@ -355,7 +365,7 @@ class AuthorActivity : AppCompatActivity() {
 
     private fun download(item: VideoItem, source: VideoSource) {
         try {
-            val fileName = item.title.replace(Regex("[\\\\/:*?\"<>|]"), "_").take(80) + "_${source.name}.mp4"
+            val fileName = item.title.replace(Regex("[\\/:*?\"<>|]"), "_").take(80) + "_${source.name}.mp4"
             val request = DownloadManager.Request(Uri.parse(source.url))
                 .setTitle(item.title).setMimeType("video/mp4")
                 .addRequestHeader("Referer", "https://www.iwara.tv/")
@@ -394,5 +404,6 @@ class AuthorActivity : AppCompatActivity() {
         const val EXTRA_ID = "author_id"
         const val EXTRA_NAME = "author_name"
         const val EXTRA_USERNAME = "author_username"
+        const val EXTRA_RETURN_FROM_AUTHOR = "return_from_author"
     }
 }

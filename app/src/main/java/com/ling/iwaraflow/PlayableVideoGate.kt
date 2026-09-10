@@ -3,6 +3,7 @@ package com.ling.iwaraflow
 import okhttp3.OkHttpClient
 import okhttp3.Request
 import java.util.concurrent.Executors
+import java.util.concurrent.Future
 import java.util.concurrent.TimeUnit
 
 class PlayableVideoGate(private val api: IwaraApi) {
@@ -14,11 +15,22 @@ class PlayableVideoGate(private val api: IwaraApi) {
         .followRedirects(true)
         .build()
 
-    fun filterPlayable(items: List<VideoItem>, quality: String, maxItems: Int = items.size, callback: (List<VideoItem>) -> Unit) {
+    fun filterPlayable(
+        items: List<VideoItem>,
+        quality: String,
+        maxItems: Int = items.size,
+        callback: (List<VideoItem>) -> Unit
+    ) {
         coordinator.execute {
-            val futures = items.mapIndexed { index, item -> probes.submit { index to inspectOne(item, quality) } }
-            val accepted = futures.mapNotNull { runCatching { it.get() }.getOrNull() }
-                .sortedBy { it.first }.map { it.second }.filter { it.playbackIssue == null }.take(maxItems)
+            val futures: List<Future<Pair<Int, VideoItem>>> = items.mapIndexed { index, item ->
+                probes.submit<Pair<Int, VideoItem>> { Pair(index, inspectOne(item, quality)) }
+            }
+            val accepted: List<VideoItem> = futures
+                .mapNotNull { future -> runCatching { future.get() }.getOrNull() }
+                .sortedBy { pair -> pair.first }
+                .map { pair -> pair.second }
+                .filter { item -> item.playbackIssue == null }
+                .take(maxItems)
             callback(accepted)
         }
     }
@@ -26,8 +38,14 @@ class PlayableVideoGate(private val api: IwaraApi) {
     /** Author pages keep every item so unavailable works can show the server/resource reason. */
     fun inspectAll(items: List<VideoItem>, quality: String, callback: (List<VideoItem>) -> Unit) {
         coordinator.execute {
-            val futures = items.mapIndexed { index, item -> probes.submit { index to inspectOne(item, quality) } }
-            callback(futures.mapNotNull { runCatching { it.get() }.getOrNull() }.sortedBy { it.first }.map { it.second })
+            val futures: List<Future<Pair<Int, VideoItem>>> = items.mapIndexed { index, item ->
+                probes.submit<Pair<Int, VideoItem>> { Pair(index, inspectOne(item, quality)) }
+            }
+            val inspected: List<VideoItem> = futures
+                .mapNotNull { future -> runCatching { future.get() }.getOrNull() }
+                .sortedBy { pair -> pair.first }
+                .map { pair -> pair.second }
+            callback(inspected)
         }
     }
 
@@ -38,9 +56,9 @@ class PlayableVideoGate(private val api: IwaraApi) {
             val preferred = api.chooseSource(sources, item.selectedQuality ?: quality)
             val ordered = buildList {
                 if (preferred != null) add(preferred)
-                sources.forEach { if (it.url != preferred?.url) add(it) }
+                sources.forEach { source -> if (source.url != preferred?.url) add(source) }
             }
-            val working = ordered.firstOrNull { probe(it.url) }
+            val working = ordered.firstOrNull { source -> probe(source.url) }
             if (working == null) {
                 item.playbackIssue = "视频资源无法连接"
             } else {
@@ -64,11 +82,14 @@ class PlayableVideoGate(private val api: IwaraApi) {
     }
 
     private fun probe(url: String): Boolean {
-        val request = Request.Builder().url(url)
-            .header("Range", "bytes=0-65535").header("Accept", "*/*")
+        val request = Request.Builder()
+            .url(url)
+            .header("Range", "bytes=0-65535")
+            .header("Accept", "*/*")
             .header("Referer", "https://www.iwara.tv/")
             .header("User-Agent", "Mozilla/5.0 (Linux; Android 14) AppleWebKit/537.36 Chrome/152 Mobile Safari/537.36")
-            .get().build()
+            .get()
+            .build()
         return runCatching {
             client.newCall(request).execute().use { response ->
                 if (response.code != 200 && response.code != 206) return@use false
@@ -78,7 +99,9 @@ class PlayableVideoGate(private val api: IwaraApi) {
     }
 
     fun close() {
-        coordinator.shutdownNow(); probes.shutdownNow()
-        client.dispatcher.executorService.shutdown(); client.connectionPool.evictAll()
+        coordinator.shutdownNow()
+        probes.shutdownNow()
+        client.dispatcher.executorService.shutdown()
+        client.connectionPool.evictAll()
     }
 }

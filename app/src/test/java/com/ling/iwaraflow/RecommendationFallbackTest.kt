@@ -72,7 +72,7 @@ class RecommendationFallbackTest {
         }
         val feed = load(engine)
         engine.close()
-        verify(api, atLeastOnce()).getVideosBlocking(anyString(), eq(1), anyInt())
+        assertTrue("必须往后翻页才找得到没看过的视频", feed.any { it.id.startsWith("new-page") })
         assertTrue("翻页找到的新视频要排在前面", feed.first().id.startsWith("new"))
     }
 

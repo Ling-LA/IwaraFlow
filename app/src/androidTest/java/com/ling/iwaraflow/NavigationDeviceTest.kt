@@ -83,12 +83,25 @@ class NavigationDeviceTest {
         playFixture(author, R.id.authorPager, mediaFile)
     }
 
+    /** ViewPager2 binds the first card on a later frame, so idle alone does not guarantee a holder. */
+    private fun awaitFixturePlayer(activity: Activity, pagerId: Int): ExoPlayer {
+        val deadline = SystemClock.uptimeMillis() + 5_000
+        while (SystemClock.uptimeMillis() < deadline) {
+            var bound: ExoPlayer? = null
+            main {
+                val recycler = activity.findViewById<ViewPager2>(pagerId).getChildAt(0) as RecyclerView
+                val holder = recycler.findViewHolderForAdapterPosition(0)
+                if (holder != null) bound = field(holder, "player") as? ExoPlayer
+            }
+            bound?.let { return it }
+            SystemClock.sleep(30)
+        }
+        throw AssertionError("Fixture card never bound a player")
+    }
+
     private fun playFixture(activity: Activity, pagerId: Int, mediaFile: File) {
-        lateinit var player: ExoPlayer
+        val player = awaitFixturePlayer(activity, pagerId)
         main {
-            val recycler = activity.findViewById<ViewPager2>(pagerId).getChildAt(0) as RecyclerView
-            val holder = recycler.findViewHolderForAdapterPosition(0) ?: error("Missing fixture holder")
-            player = field(holder, "player") as ExoPlayer
             player.setMediaItem(MediaItem.fromUri(android.net.Uri.fromFile(mediaFile)))
             player.prepare()
             player.seekTo(1_500)

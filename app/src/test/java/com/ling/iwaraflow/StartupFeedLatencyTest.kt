@@ -99,6 +99,61 @@ class StartupFeedLatencyTest {
         }
     }
 
+    @Test fun coldStartKeepsTheSmallCandidateWindow() {
+        val gate = PlayableVideoGate(mock(IwaraApi::class.java))
+        val items = (0 until 20).map { index -> item("cold$index") }
+        val delivered = CountDownLatch(1)
+        val ids = AtomicReference<List<String>>(emptyList())
+        try {
+            gate.filterPlayable(items, "highest", maxItems = 30) { playable ->
+                ids.set(playable.map { it.id })
+                delivered.countDown()
+            }
+            assertTrue("首屏批次没有送达", delivered.await(20, TimeUnit.SECONDS))
+            assertEquals(PlayableVideoGate.COLD_START_CANDIDATES, ids.get().size)
+        } finally {
+            gate.close()
+        }
+    }
+
+    @Test fun laterPagesValidateTheWholePage() {
+        val gate = PlayableVideoGate(mock(IwaraApi::class.java))
+        val items = (0 until 20).map { index -> item("page$index") }
+        val delivered = CountDownLatch(1)
+        val ids = AtomicReference<List<String>>(emptyList())
+        try {
+            gate.filterPlayable(items, "highest", maxItems = items.size, maxCandidates = items.size) { playable ->
+                ids.set(playable.map { it.id })
+                delivered.countDown()
+            }
+            assertTrue("续页批次没有送达", delivered.await(20, TimeUnit.SECONDS))
+            assertEquals(items.map { it.id }, ids.get())
+        } finally {
+            gate.close()
+        }
+    }
+
+    @Test fun refreshingRecommendationsMarksIwaraLikesAsSeen() {
+        val api = mock(IwaraApi::class.java)
+        val history = mock(HistoryStore::class.java)
+        `when`(history.preferenceProfile()).thenReturn(PreferenceProfile(emptyMap(), emptyMap()))
+        `when`(api.isLoggedIn()).thenReturn(true)
+        `when`(api.getFavoriteVideosBlocking(anyInt(), anyInt()))
+            .thenReturn(listOf(VideoItem("liked-1", "liked", "fixture", emptyList(), 1)))
+        `when`(api.getVideosBlocking(anyString(), anyInt(), anyInt())).thenAnswer { invocation ->
+            listOf(VideoItem("${invocation.getArgument<String>(0)}-1", "t", "fixture", emptyList(), 1))
+        }
+        val engine = RecommendationEngine(api, history)
+        val delivered = CountDownLatch(1)
+        try {
+            engine.load(true) { delivered.countDown() }
+            assertTrue("推荐列表没有返回", delivered.await(15, TimeUnit.SECONDS))
+            verify(history).markSeen(eq("liked-1"), anyLong())
+        } finally {
+            engine.close()
+        }
+    }
+
     @Test fun stalledRankingListDoesNotHoldTheRecommendationFeed() {
         val api = mock(IwaraApi::class.java)
         val history = mock(HistoryStore::class.java)

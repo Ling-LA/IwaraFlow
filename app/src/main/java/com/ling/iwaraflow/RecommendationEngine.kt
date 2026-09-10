@@ -24,13 +24,18 @@ class RecommendationEngine(
             "likes" to 2.1,
             "views" to 1.6
         )
-        val pool = Executors.newFixedThreadPool(sorts.size)
+        val pool = Executors.newFixedThreadPool(sorts.size + 1)
         try {
             val futures = sorts.map { (sort, baseWeight) ->
                 pool.submit<Pair<Double, List<VideoItem>>> {
                     baseWeight to api.getVideosBlocking(sort, page = 0, limit = 36)
                 }
             }
+            // Iwara 官方点赞只存在服务端，列表接口不一定回传 liked，
+            // 所以刷新推荐时顺带同步一次点赞记录，让它们真正算作已看。
+            val likedFuture = if (skipSeen && api.isLoggedIn()) {
+                pool.submit<List<VideoItem>> { api.getFavoriteVideosBlocking() }
+            } else null
             val merged = LinkedHashMap<String, Pair<VideoItem, Double>>()
             // One stalled ranking endpoint used to hold the whole cold start; a request that
             // misses the budget is treated like the failures this merge already tolerates.
@@ -54,6 +59,13 @@ class RecommendationEngine(
                 }
             }
             if (merged.isEmpty()) throw IllegalStateException("所有推荐榜单请求均失败")
+
+            likedFuture?.let { f ->
+                val remaining = deadline - System.nanoTime()
+                val liked = if (remaining <= 0L) null
+                else runCatching { f.get(remaining, TimeUnit.NANOSECONDS) }.getOrNull()
+                liked?.forEach { item -> history.markSeen(item.id) }
+            }
 
             val profile = history.preferenceProfile()
             val now = System.currentTimeMillis()

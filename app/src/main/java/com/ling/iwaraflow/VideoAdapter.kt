@@ -461,7 +461,11 @@ class VideoAdapter(
                     result.onSuccess {
                         if (item.liked != desired) item.likes = (item.likes + if (desired) 1 else -1).coerceAtLeast(0)
                         item.liked = desired
-                        if (desired) history.recordInteraction(item, "like", 2.0)
+                        // 点赞等同于已看：下次生成推荐时要能被“排除已看视频”过滤掉。
+                        if (desired) {
+                            history.recordInteraction(item, "like", 2.0)
+                            history.markSeen(item.id)
+                        }
                         updateLikeUi(item)
                     }.onFailure {
                         Toast.makeText(itemView.context, it.message ?: "点赞同步失败", Toast.LENGTH_SHORT).show()

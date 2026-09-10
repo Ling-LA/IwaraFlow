@@ -57,6 +57,8 @@ class MainActivityV3 : AppCompatActivity() {
     private var openingInternalPage = false
     private var pendingVideoId: String? = null
     private val pageSize = 28
+    private val recommendFirstPage = 10
+    private val recommendPageSize = 20
 
     private data class FeedSession(
         val items: List<VideoItem>,
@@ -67,6 +69,10 @@ class MainActivityV3 : AppCompatActivity() {
 
     private val homeFeedSessions = mutableMapOf<String, FeedSession>()
     private val homeModes = setOf("recommend", "date", "trending", "popularity")
+
+    /** 推荐算法一次产出的剩余候选，推荐流翻页从这里取，取完再重新生成。 */
+    private val recommendQueue = ArrayList<VideoItem>()
+    private var recommendRefilled = false
 
     private val authorLauncher = registerForActivityResult(ActivityResultContracts.StartActivityForResult()) {
         resumeAfterInternalPage()
@@ -253,6 +259,7 @@ class MainActivityV3 : AppCompatActivity() {
     private fun loadFeed(reset: Boolean) {
         if (reset) {
             currentPage = 0
+            recommendRefilled = false
             invalidateRequests()
             loading.visibility = View.VISIBLE
             error.visibility = View.GONE
@@ -268,8 +275,15 @@ class MainActivityV3 : AppCompatActivity() {
         if (mode == "recommend" && searchQuery == null && currentPage == 0) {
             recommender.load(prefs.skipSeen) { result ->
                 result.onSuccess { raw ->
-                    playableGate.filterPlayable(raw.take(48), prefs.defaultQuality, maxItems = 30, onFirstBatch = head) { playable ->
-                        runOnUiThread { showFeedReset(requestId, playable, emptyMessage) }
+                    val first = raw.take(recommendFirstPage)
+                    val rest = raw.drop(recommendFirstPage)
+                    playableGate.filterPlayable(first, prefs.defaultQuality, maxItems = first.size, onFirstBatch = head) { playable ->
+                        runOnUiThread {
+                            if (requestId != requestSerial) return@runOnUiThread
+                            recommendQueue.clear()
+                            recommendQueue.addAll(rest)
+                            showFeedReset(requestId, playable, emptyMessage)
+                        }
                     }
                 }.onFailure {
                     runOnUiThread {
@@ -283,9 +297,11 @@ class MainActivityV3 : AppCompatActivity() {
             return
         }
 
+        // 首屏只验证很小的窗口保证秒开；续页整页验证，避免每页只剩个位数视频。
+        val candidateWindow = if (reset) PlayableVideoGate.COLD_START_CANDIDATES else pageSize
         val callback: (Result<List<VideoItem>>) -> Unit = { result ->
             result.onSuccess { raw ->
-                playableGate.filterPlayable(raw, prefs.defaultQuality, maxItems = pageSize, onFirstBatch = head) { playable ->
+                playableGate.filterPlayable(raw, prefs.defaultQuality, maxItems = pageSize, maxCandidates = candidateWindow, onFirstBatch = head) { playable ->
                     runOnUiThread {
                         if (requestId != requestSerial) return@runOnUiThread
                         loadingMore = false
@@ -293,6 +309,7 @@ class MainActivityV3 : AppCompatActivity() {
                         else {
                             loading.visibility = View.GONE
                             appendFeed(decorate(playable))
+                            if (adapter.itemCount == 0) showError(emptyMessage)
                         }
                     }
                 }
@@ -337,8 +354,16 @@ class MainActivityV3 : AppCompatActivity() {
             appendFeed(list)
             return
         }
-        if (list.isEmpty()) showError(emptyMessage)
-        else {
+        if (list.isEmpty()) {
+            // 首屏候选全都不可播放时，继续用剩下的推荐候选找，而不是直接报空。
+            if (mode == "recommend" && searchQuery == null && recommendQueue.isNotEmpty() && !loadingMore) {
+                loadingMore = true
+                loading.visibility = View.VISIBLE
+                loadMoreRecommend(requestId)
+                return
+            }
+            showError(emptyMessage)
+        } else {
             error.visibility = View.GONE
             adapter.replace(list)
             pager.setCurrentItem(0, false)
@@ -349,6 +374,14 @@ class MainActivityV3 : AppCompatActivity() {
     private fun appendFeed(list: List<VideoItem>) {
         val before = adapter.itemCount
         adapter.append(list)
+        if (adapter.itemCount == 0) return
+        if (before == 0) {
+            pendingAdvanceAfterLoad = false
+            error.visibility = View.GONE
+            pager.setCurrentItem(0, false)
+            adapter.setActive(0)
+            return
+        }
         if (pendingAdvanceAfterLoad && adapter.itemCount > before) {
             pendingAdvanceAfterLoad = false
             pager.setCurrentItem(before, true)
@@ -363,6 +396,60 @@ class MainActivityV3 : AppCompatActivity() {
 
     private fun loadMore() {
         if (loadingMore || awaitingFullFeed || adapter.itemCount == 0) return
+        loadingMore = true
+        if (mode == "recommend" && searchQuery == null) loadMoreRecommend(requestSerial)
+        else loadMoreOfficialPage()
+    }
+
+    /**
+     * 推荐流翻页继续走推荐算法：先用本次生成的剩余候选，用完再重新生成一批
+     * （重新生成时同样会排除已看视频），实在没有新内容才回退到官方榜单分页。
+     */
+    private fun loadMoreRecommend(requestId: Int) {
+        if (recommendQueue.isEmpty()) {
+            refillRecommendQueue(requestId)
+            return
+        }
+        val chunk = ArrayList<VideoItem>(recommendPageSize)
+        while (recommendQueue.isNotEmpty() && chunk.size < recommendPageSize) chunk += recommendQueue.removeAt(0)
+        playableGate.filterPlayable(chunk, prefs.defaultQuality, maxItems = chunk.size, maxCandidates = chunk.size) { playable ->
+            runOnUiThread {
+                if (requestId != requestSerial) return@runOnUiThread
+                val list = decorate(playable)
+                if (list.isEmpty()) {
+                    // 这一批全不可播放，直接继续下一批；队列见底时会重新生成或回退官方榜单。
+                    loadMoreRecommend(requestId)
+                    return@runOnUiThread
+                }
+                loadingMore = false
+                loading.visibility = View.GONE
+                appendFeed(list)
+            }
+        }
+    }
+
+    private fun refillRecommendQueue(requestId: Int) {
+        if (recommendRefilled) {
+            loadMoreOfficialPage()
+            return
+        }
+        recommendRefilled = true
+        recommender.load(prefs.skipSeen) { result ->
+            runOnUiThread {
+                if (requestId != requestSerial) return@runOnUiThread
+                val known = adapter.items.mapTo(HashSet<String>()) { it.id }
+                val fresh = result.getOrNull().orEmpty().filter { known.add(it.id) }
+                if (fresh.isEmpty()) {
+                    loadMoreOfficialPage()
+                    return@runOnUiThread
+                }
+                recommendQueue.addAll(fresh)
+                loadMoreRecommend(requestId)
+            }
+        }
+    }
+
+    private fun loadMoreOfficialPage() {
         loadingMore = true
         currentPage += 1
         loadFeed(reset = false)

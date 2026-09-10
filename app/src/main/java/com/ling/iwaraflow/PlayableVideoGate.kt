@@ -11,7 +11,7 @@ class PlayableVideoGate(
     private val batchBudgetMs: Long = DEFAULT_BATCH_BUDGET_MS
 ) {
     private val coordinator = Executors.newSingleThreadExecutor()
-    private val probes = Executors.newFixedThreadPool(MAX_CANDIDATES)
+    private val probes = Executors.newFixedThreadPool(PROBE_THREADS)
     private val lifecycleLock = Any()
     @Volatile private var closed = false
     private val client = OkHttpClient.Builder()
@@ -24,14 +24,15 @@ class PlayableVideoGate(
         items: List<VideoItem>,
         quality: String,
         maxItems: Int = items.size,
+        maxCandidates: Int = COLD_START_CANDIDATES,
         onFirstBatch: ((List<VideoItem>) -> Unit)? = null,
         callback: (List<VideoItem>) -> Unit
     ) {
         enqueue {
-            // Cold start used to wait for up to 16 CDN/source validations before showing the
-            // first frame. Ten parallel candidates are enough to seed a swipe feed while keeping
-            // the invariant that every item shown has already passed a real media-byte probe.
-            val candidateCount = minOf(items.size, minOf(maxItems + 2, MAX_CANDIDATES))
+            // 冷启动只验证很小的候选窗口，先让首屏出来；用户已经在看视频时
+            // （续页）传入更大的窗口，把整页候选都验证完，避免每页只剩几条。
+            val window = minOf(maxItems + 2, minOf(maxCandidates, MAX_CANDIDATES))
+            val candidateCount = minOf(items.size, window)
             val candidates = items.take(candidateCount)
             val futures = inspectAsync(candidates, quality)
             val deadline = System.nanoTime() + TimeUnit.MILLISECONDS.toNanos(batchBudgetMs)
@@ -154,7 +155,11 @@ class PlayableVideoGate(
     }
 
     companion object {
-        private const val MAX_CANDIDATES = 10
+        /** 冷启动/首屏默认候选窗口。续页由调用方放大到整页。 */
+        const val COLD_START_CANDIDATES = 10
+        /** 单批最多验证多少条候选，以及并发探测线程数。 */
+        private const val MAX_CANDIDATES = 32
+        private const val PROBE_THREADS = 12
         private const val FIRST_BATCH = 3
         /** A straggling candidate is dropped from the batch instead of holding the feed forever. */
         private const val DEFAULT_BATCH_BUDGET_MS = 12_000L

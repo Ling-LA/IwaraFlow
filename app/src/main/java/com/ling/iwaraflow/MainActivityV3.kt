@@ -58,9 +58,10 @@ class MainActivityV3 : AppCompatActivity() {
     private val authorLauncher = registerForActivityResult(ActivityResultContracts.StartActivityForResult()) {
         openingInternalPage = false
         if (!isFinishing && !isDestroyed) {
-            // Returning from an author is an in-app navigation event, not leaving the app.
-            // Always restore the main recommendation surface and playback ownership explicitly.
-            returnToRecommend()
+            // Never reload or change mode here. The existing adapter still owns the exact feed,
+            // current item and its saved resume position from before AuthorActivity was opened.
+            hideStatusBar()
+            adapter.resumeActive()
         }
     }
 
@@ -264,8 +265,6 @@ class MainActivityV3 : AppCompatActivity() {
             Toast.makeText(this, "该视频没有作者资料", Toast.LENGTH_SHORT).show(); return
         }
         openingInternalPage = true
-        // Stop the main player before launching the in-app author screen. This also prevents the
-        // transition from being interpreted as a background/PiP transition.
         adapter.pauseAll()
         authorLauncher.launch(Intent(this, AuthorActivity::class.java).apply {
             putExtra(AuthorActivity.EXTRA_ID, id)
@@ -475,9 +474,6 @@ class MainActivityV3 : AppCompatActivity() {
 
     override fun onUserLeaveHint() {
         super.onUserLeaveHint()
-        // startActivity(AuthorActivity) also triggers onUserLeaveHint on some devices. It is an
-        // in-app transition and must never enter PiP, otherwise the main task can be collapsed when
-        // AuthorActivity finishes and the app appears to close immediately after flashing main.
         if (openingInternalPage) return
         if (prefs.autoPip && adapter.isActivePlaying() && !isInPictureInPictureMode) enterPip()
     }

@@ -14,7 +14,7 @@
         app:resize_mode="fit"
         app:use_controller="false" />
 
-    <TextView
+    <com.ling.iwaraflow.PauseIndicatorView
         android:id="@+id/pauseIndicator"
         android:layout_width="78dp"
         android:layout_height="78dp"

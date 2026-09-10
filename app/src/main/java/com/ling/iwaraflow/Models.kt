@@ -33,6 +33,7 @@ data class VideoItem(
     val authorUsername: String = "",
     val isPrivate: Boolean = false,
     val status: String = "",
+    val thumbnailUrl: String = "",
     var playbackIssue: String? = null
 )
 

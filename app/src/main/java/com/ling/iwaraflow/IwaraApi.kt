@@ -18,6 +18,7 @@ import java.util.concurrent.TimeUnit
 class IwaraApi(context: Context) {
     private val apiRoot = "https://apiq.iwara.tv"
     private val siteRoot = "https://www.iwara.tv"
+    private val imageRoot = "https://i.iwara.tv"
     private val session = SecureSessionStore(context.applicationContext)
     private val io = Executors.newCachedThreadPool()
     private val jsonType = "application/json; charset=utf-8".toMediaType()
@@ -321,14 +322,20 @@ class IwaraApi(context: Context) {
         val tags = mutableListOf<String>()
         if (tagsJson != null) for (j in 0 until tagsJson.length()) {
             val tagObj = tagsJson.optJSONObject(j)
-            val tag = tagObj?.optString("id")?.takeIf { it.isNotBlank() } ?: tagObj?.optString("name")?.takeIf { it.isNotBlank() }
+            val tag = tagObj?.optString("id")?.takeIf { it.isNotBlank() }
+                ?: tagObj?.optString("name")?.takeIf { it.isNotBlank() }
             if (tag != null) tags += tag
         }
-        val created = try { o.optString("createdAt").takeIf { it.isNotBlank() }?.let { Instant.parse(it).toEpochMilli() } ?: 0L } catch (_: Exception) { 0L }
+        val created = try {
+            o.optString("createdAt").takeIf { it.isNotBlank() }?.let { Instant.parse(it).toEpochMilli() } ?: 0L
+        } catch (_: Exception) { 0L }
+        val thumbnailUrl = buildThumbnailUrl(o)
         return VideoItem(
             id = id,
             title = o.optString("title", "Untitled"),
-            author = user?.optString("name")?.takeIf { it.isNotBlank() } ?: user?.optString("username")?.takeIf { it.isNotBlank() } ?: "Iwara",
+            author = user?.optString("name")?.takeIf { it.isNotBlank() }
+                ?: user?.optString("username")?.takeIf { it.isNotBlank() }
+                ?: "Iwara",
             tags = tags,
             likes = o.optInt("numLikes", 0),
             views = o.optInt("numViews", 0),
@@ -337,8 +344,25 @@ class IwaraApi(context: Context) {
             authorId = user?.optString("id").orEmpty(),
             authorUsername = user?.optString("username").orEmpty(),
             isPrivate = o.optBoolean("private", false),
-            status = o.optString("status")
+            status = o.optString("status"),
+            thumbnailUrl = thumbnailUrl
         )
+    }
+
+    private fun buildThumbnailUrl(video: JSONObject): String {
+        val custom = video.optJSONObject("customThumbnail")
+        if (custom != null) {
+            val customId = custom.optString("id")
+            val customName = custom.optString("name")
+            if (customId.isNotBlank() && customName.isNotBlank()) {
+                return "$imageRoot/image/thumbnail/$customId/${UriEncoder.encodePathSegment(customName)}"
+            }
+        }
+        val file = video.optJSONObject("file")
+        val fileId = file?.optString("id").orEmpty()
+        if (fileId.isBlank()) return ""
+        val frame = video.optInt("thumbnail", 0).coerceAtLeast(0).toString().padStart(2, '0')
+        return "$imageRoot/image/thumbnail/$fileId/thumbnail-$frame.jpg"
     }
 
     private fun parseAuthor(user: JSONObject, body: String = ""): IwaraAuthor = IwaraAuthor(
@@ -364,4 +388,7 @@ class IwaraApi(context: Context) {
 
 private object UriEncoder {
     fun encodePath(value: String): String = java.net.URLEncoder.encode(value, "UTF-8").replace("+", "%20")
+    fun encodePathSegment(value: String): String = java.net.URLEncoder.encode(value, "UTF-8")
+        .replace("+", "%20")
+        .replace("%2F", "/")
 }

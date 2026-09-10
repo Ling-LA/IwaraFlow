@@ -55,11 +55,19 @@ class MainActivityV3 : AppCompatActivity() {
     private var openingInternalPage = false
     private val pageSize = 28
 
+    private data class FeedSession(
+        val items: List<VideoItem>,
+        val currentIndex: Int,
+        val currentPage: Int,
+        val pagingEnabled: Boolean
+    )
+
+    private val homeFeedSessions = mutableMapOf<String, FeedSession>()
+    private val homeModes = setOf("recommend", "date", "trending", "popularity")
+
     private val authorLauncher = registerForActivityResult(ActivityResultContracts.StartActivityForResult()) {
         openingInternalPage = false
         if (!isFinishing && !isDestroyed) {
-            // Never reload or change mode here. The existing adapter still owns the exact feed,
-            // current item and its saved resume position from before AuthorActivity was opened.
             hideStatusBar()
             adapter.resumeActive()
         }
@@ -130,16 +138,45 @@ class MainActivityV3 : AppCompatActivity() {
         val menu = findViewById<TextView>(R.id.btnMenu)
         val tabs = listOf(recommend, trending, popular, latest)
 
-        fun select(newMode: String, selected: TextView) {
-            mode = newMode
-            pagingEnabled = true
-            searchQuery = null
-            currentPage = 0
+        fun styleSelected(selected: TextView) {
             tabs.forEach { tab ->
                 tab.setTextColor(if (tab === selected) 0xFFFFFFFF.toInt() else 0x99FFFFFF.toInt())
                 tab.setTypeface(null, if (tab === selected) android.graphics.Typeface.BOLD else android.graphics.Typeface.NORMAL)
             }
-            loadFeed(reset = true)
+        }
+
+        fun select(newMode: String, selected: TextView) {
+            val sameHomeMode = searchQuery == null && mode == newMode && newMode in homeModes
+
+            if (sameHomeMode && newMode == "recommend") {
+                saveCurrentHomeSession()
+                homeFeedSessions.remove("recommend")
+                requestSerial++
+                mode = "recommend"
+                searchQuery = null
+                pagingEnabled = true
+                currentPage = 0
+                styleSelected(selected)
+                loadFeed(reset = true)
+                return
+            }
+
+            if (sameHomeMode) return
+
+            saveCurrentHomeSession()
+            requestSerial++
+            mode = newMode
+            pagingEnabled = true
+            searchQuery = null
+            styleSelected(selected)
+
+            val saved = homeFeedSessions[newMode]
+            if (saved != null && saved.items.isNotEmpty()) {
+                restoreHomeSession(saved)
+            } else {
+                currentPage = 0
+                loadFeed(reset = true)
+            }
         }
 
         recommend.setOnClickListener { select("recommend", recommend) }
@@ -148,6 +185,32 @@ class MainActivityV3 : AppCompatActivity() {
         latest.setOnClickListener { select("date", latest) }
         search.setOnClickListener { showSearchDialog() }
         menu.setOnClickListener { showMainMenu() }
+    }
+
+    private fun saveCurrentHomeSession() {
+        if (searchQuery != null || mode !in homeModes || adapter.items.isEmpty()) return
+        adapter.pauseAll()
+        val index = pager.currentItem.coerceIn(0, adapter.items.lastIndex)
+        homeFeedSessions[mode] = FeedSession(
+            items = adapter.items.toList(),
+            currentIndex = index,
+            currentPage = currentPage,
+            pagingEnabled = pagingEnabled
+        )
+    }
+
+    private fun restoreHomeSession(session: FeedSession) {
+        loading.visibility = View.GONE
+        error.visibility = View.GONE
+        loadingMore = false
+        pendingAdvanceAfterLoad = false
+        currentPage = session.currentPage
+        pagingEnabled = session.pagingEnabled
+        adapter.replace(session.items)
+        if (adapter.itemCount == 0) return
+        val index = session.currentIndex.coerceIn(0, adapter.itemCount - 1)
+        pager.setCurrentItem(index, false)
+        adapter.setActive(index)
     }
 
     private fun returnToRecommend() {
@@ -287,7 +350,15 @@ class MainActivityV3 : AppCompatActivity() {
         val dialog = AlertDialog.Builder(this).setTitle("搜索 Iwara 视频").setView(panel)
             .setNegativeButton("取消", null).setPositiveButton("搜索") { _, _ ->
                 val q = input.text.toString().trim()
-                if (q.isNotBlank()) { searchQuery = q; mode = "search"; pagingEnabled = true; currentPage = 0; loadFeed(reset = true) }
+                if (q.isNotBlank()) {
+                    saveCurrentHomeSession()
+                    requestSerial++
+                    searchQuery = q
+                    mode = "search"
+                    pagingEnabled = true
+                    currentPage = 0
+                    loadFeed(reset = true)
+                }
             }.create()
         dialog.setOnShowListener { styleDialogButtons(dialog) }; dialog.show()
     }
@@ -394,7 +465,11 @@ class MainActivityV3 : AppCompatActivity() {
             result.onSuccess { list ->
                 val decorated = decorate(list)
                 if (decorated.isEmpty()) Toast.makeText(this, "Iwara 点赞记录为空", Toast.LENGTH_SHORT).show()
-                else { mode = "likes"; pagingEnabled = false; searchQuery = null; requestSerial++; adapter.replace(decorated); pager.setCurrentItem(0, false); adapter.setActive(0) }
+                else {
+                    saveCurrentHomeSession()
+                    mode = "likes"; pagingEnabled = false; searchQuery = null; requestSerial++
+                    adapter.replace(decorated); pager.setCurrentItem(0, false); adapter.setActive(0)
+                }
             }.onFailure { Toast.makeText(this, it.message ?: "点赞记录加载失败", Toast.LENGTH_LONG).show() }
         } }
     }
@@ -404,6 +479,7 @@ class MainActivityV3 : AppCompatActivity() {
         api.getVideo(videoId) { result -> runOnUiThread {
             loading.visibility = View.GONE
             result.onSuccess { item ->
+                saveCurrentHomeSession()
                 item.localFavorite = history.isLocalFavorite(item.id); pagingEnabled = false; mode = "single"; searchQuery = null; requestSerial++
                 adapter.replace(listOf(item)); pager.setCurrentItem(0, false); adapter.setActive(0)
             }.onFailure { Toast.makeText(this, it.message ?: "视频加载失败", Toast.LENGTH_LONG).show() }

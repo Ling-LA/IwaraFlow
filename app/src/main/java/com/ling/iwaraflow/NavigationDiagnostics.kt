@@ -48,6 +48,12 @@ object NavigationDiagnostics {
         })
     }
 
+    /**
+     * 记录一条加载过程的线索。只写条数和失败原因，不写账号、视频 ID 或标题，
+     * 这样“视频加载不出来”的设备可以直接从诊断信息看出是接口失败还是预检失败。
+     */
+    fun note(context: Context, event: String) = record(context.applicationContext, event)
+
     private fun record(context: Context, event: String) {
         runCatching {
             synchronized(lock) {

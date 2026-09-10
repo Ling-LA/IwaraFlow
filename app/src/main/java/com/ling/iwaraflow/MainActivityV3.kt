@@ -71,6 +71,9 @@ class MainActivityV3 : AppCompatActivity() {
     private val homeFeedSessions = mutableMapOf<String, FeedSession>()
     private val homeModes = setOf("recommend", "date", "trending", "popularity")
 
+    /** 预检给出的确定性不可播放原因；这些视频直接播放同样放不了。 */
+    private val permanentIssues = setOf("仅限好友观看", "视频仍在处理中", "视频已删除或不存在", "没有观看权限")
+
     /** 推荐算法一次产出的剩余候选，推荐流翻页从这里取，取完再重新生成。 */
     private val recommendQueue = ArrayList<VideoItem>()
     private var recommendRefills = 0
@@ -277,14 +280,16 @@ class MainActivityV3 : AppCompatActivity() {
         if (mode == "recommend" && currentPage == 0) {
             recommender.load(prefs.skipSeen) { result ->
                 result.onSuccess { raw ->
+                    note("推荐候选 ${raw.size} 条")
                     val first = raw.take(recommendFirstPage)
                     val rest = raw.drop(recommendFirstPage)
                     playableGate.filterPlayable(first, prefs.defaultQuality, maxItems = first.size, onFirstBatch = head) { playable ->
                         runOnUiThread {
                             if (requestId != requestSerial) return@runOnUiThread
+                            noteGateResult("推荐首屏", first, playable)
                             recommendQueue.clear()
                             recommendQueue.addAll(rest)
-                            showFeedReset(requestId, playable, emptyMessage)
+                            showFeedReset(requestId, playable, emptyMessage, first)
                         }
                     }
                 }.onFailure {
@@ -292,6 +297,7 @@ class MainActivityV3 : AppCompatActivity() {
                         if (requestId != requestSerial) return@runOnUiThread
                         awaitingFullFeed = false
                         loading.visibility = View.GONE
+                        note("推荐加载失败：${it.message?.take(80)}")
                         showError("推荐加载失败\n${it.message}")
                     }
                 }
@@ -307,7 +313,8 @@ class MainActivityV3 : AppCompatActivity() {
                     runOnUiThread {
                         if (requestId != requestSerial) return@runOnUiThread
                         loadingMore = false
-                        if (reset) showFeedReset(requestId, playable, emptyMessage)
+                        noteGateResult("$mode 第 $currentPage 页", raw.take(candidateWindow), playable)
+                        if (reset) showFeedReset(requestId, playable, emptyMessage, raw.take(candidateWindow))
                         else {
                             loading.visibility = View.GONE
                             appendFeed(decorate(playable))
@@ -321,6 +328,7 @@ class MainActivityV3 : AppCompatActivity() {
                     awaitingFullFeed = false
                     loading.visibility = View.GONE
                     loadingMore = false
+                    note("$mode 第 $currentPage 页加载失败：${it.message?.take(80)}")
                     if (reset) showError("Iwara 数据加载失败\n${it.message}\n\n请确认网络可以访问 iwara.tv")
                 }
             }
@@ -344,7 +352,12 @@ class MainActivityV3 : AppCompatActivity() {
         window.decorView.postDelayed({ runLaunchUpdateCheck() }, 1500L)
     }
 
-    private fun showFeedReset(requestId: Int, playable: List<VideoItem>, emptyMessage: String) {
+    private fun showFeedReset(
+        requestId: Int,
+        playable: List<VideoItem>,
+        emptyMessage: String,
+        candidates: List<VideoItem> = emptyList()
+    ) {
         if (requestId != requestSerial) return
         val filling = awaitingFullFeed
         awaitingFullFeed = false
@@ -355,11 +368,24 @@ class MainActivityV3 : AppCompatActivity() {
             return
         }
         if (list.isEmpty()) {
+            val unreachable = unreachableCandidates(candidates)
+            // 整批候选都连不上视频源（而不是个别视频失效）说明这台设备根本做不了预检，
+            // 再换一批候选也是同样结果，直接跳过重试。
+            val cannotProbe = candidates.isNotEmpty() && unreachable.size == candidates.size
             // 首屏候选全都不可播放时，继续用剩下的推荐候选找，而不是直接报空。
-            if (mode == "recommend" && recommendQueue.isNotEmpty() && !loadingMore) {
+            if (!cannotProbe && mode == "recommend" && recommendQueue.isNotEmpty() && !loadingMore) {
                 loadingMore = true
                 loading.visibility = View.VISIBLE
                 loadMoreRecommend(requestId)
+                return
+            }
+            if (unreachable.isNotEmpty()) {
+                note("预检全部失败，回退显示 ${unreachable.size} 条未验证视频")
+                error.visibility = View.GONE
+                adapter.replace(decorate(unreachable))
+                pager.setCurrentItem(0, false)
+                adapter.setActive(0)
+                Toast.makeText(this, "无法预检视频源，已直接显示未验证的视频", Toast.LENGTH_LONG).show()
                 return
             }
             showError(emptyMessage)
@@ -460,6 +486,27 @@ class MainActivityV3 : AppCompatActivity() {
     }
 
     private fun decorate(raw: List<VideoItem>): List<VideoItem> = raw.onEach { it.localFavorite = history.isLocalFavorite(it.id) }
+
+    private fun note(event: String) = NavigationDiagnostics.note(this, event)
+
+    private fun noteGateResult(label: String, candidates: List<VideoItem>, playable: List<VideoItem>) {
+        if (playable.isNotEmpty()) {
+            note("$label 验证 ${candidates.size} 条 → ${playable.size} 条可播放")
+            return
+        }
+        val reasons = candidates.mapNotNull { it.playbackIssue }
+            .groupingBy { it }.eachCount().entries
+            .sortedByDescending { it.value }
+            .take(3).joinToString("，") { "${it.key} ×${it.value}" }
+        note("$label 验证 ${candidates.size} 条 → 0 条可播放" + if (reasons.isBlank()) "" else "（$reasons）")
+    }
+
+    /**
+     * 预检失败但看起来只是连不上视频源的候选。仅限好友、已删除、无权限等确定性原因
+     * 不在其中：那些视频即使直接播放也放不了。
+     */
+    private fun unreachableCandidates(candidates: List<VideoItem>): List<VideoItem> =
+        candidates.filter { it.playbackIssue !in permanentIssues }.onEach { it.playbackIssue = null }
 
     private fun onVideoEnded(position: Int) {
         if (position + 1 < adapter.itemCount) pager.setCurrentItem(position + 1, true)

@@ -11,9 +11,16 @@
     android:padding="12dp">
 
     <FrameLayout
-        android:layout_width="92dp"
+        android:layout_width="108dp"
         android:layout_height="72dp"
         android:background="#E5F3FC">
+
+        <ImageView
+            android:id="@+id/videoThumbnail"
+            android:layout_width="match_parent"
+            android:layout_height="match_parent"
+            android:contentDescription="视频缩略图"
+            android:scaleType="centerCrop" />
 
         <TextView
             android:id="@+id/videoIcon"

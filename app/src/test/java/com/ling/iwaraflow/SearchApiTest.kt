@@ -15,7 +15,7 @@ import org.robolectric.RobolectricTestRunner
 import org.robolectric.RuntimeEnvironment
 import org.robolectric.annotation.Config
 
-/** 搜索结果页要的三种结果：视频名、角色名（标签）和作者名各自走不同的 Iwara 接口。 */
+/** 搜索结果页要的三种结果：视频名、标签和作者名各自走不同的 Iwara 接口。 */
 @RunWith(RobolectricTestRunner::class)
 @Config(sdk = [36])
 class SearchApiTest {
@@ -71,7 +71,7 @@ class SearchApiTest {
         } finally { api.close() }
     }
 
-    @Test fun characterSearchGoesThroughTheTagFilter() {
+    @Test fun tagSearchGoesThroughTheTagFilter() {
         val api = api()
         try {
             val videos = api.getVideosByTagBlocking("ganyu", 0, 24)

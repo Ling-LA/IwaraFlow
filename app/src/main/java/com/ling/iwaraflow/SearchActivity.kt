@@ -23,7 +23,7 @@ import androidx.viewpager2.widget.ViewPager2
 
 /**
  * 搜索结果页。搜索不再直接把首页视频流换成搜索结果（那样只能看到一个视频），
- * 而是用和作者主页一样的浅蓝卡片列表分别展示视频名、角色名（标签）和作者名的结果。
+ * 而是用和作者主页一样的浅蓝卡片列表分别展示视频名、标签和作者名的结果。
  */
 class SearchActivity : AppCompatActivity() {
     private enum class Tab { VIDEOS, TAGS, AUTHORS }
@@ -162,7 +162,7 @@ class SearchActivity : AppCompatActivity() {
 
         val initial = intent.getStringExtra(EXTRA_QUERY).orEmpty()
         input.setText(initial)
-        if (initial.isNotBlank()) runSearch(initial) else statusView.text = "输入关键词后搜索视频名、角色名或作者名"
+        if (initial.isNotBlank()) runSearch(initial) else statusView.text = "输入关键词后搜索视频名、标签或作者名"
     }
 
     private fun runSearch(raw: String) {
@@ -234,23 +234,27 @@ class SearchActivity : AppCompatActivity() {
         if (tab == Tab.AUTHORS) loadAuthorPage() else loadVideoPage(tab)
     }
 
-    /**
-     * 角色名在 Iwara 是视频标签，标签 ID 只有小写形式；输入里的空格既可能是下划线
-     * 也可能整个连写，所以第一页为空时按顺序换一种写法再试。
-     */
-    private fun tagCandidates(): List<String> {
-        val lower = query.lowercase()
-        return listOf(lower.replace(' ', '_'), lower.replace(" ", ""), lower).distinct()
-    }
+    private fun tagCandidates(): List<String> = TagQuery.candidates(query)
+
+    /** 标签页当前真正在用的标签写法。 */
+    private fun activeTags(): String =
+        tagCandidates().getOrNull(tagTab.attempt)?.let { TagQuery.display(it) }.orEmpty()
 
     private fun loadVideoPage(tab: Tab) {
         val state = videoState(tab) ?: return
         if (state.loading || state.noMore) return
+        val candidates = tagCandidates()
+        // 只输了分隔符时没有标签可搜，直接收尾而不是拿空列表去取下标。
+        if (tab == Tab.TAGS && candidates.getOrNull(state.attempt) == null) {
+            state.started = true
+            state.noMore = true
+            updateStatus()
+            return
+        }
         state.loading = true
         state.started = true
         state.failure = null
         val serial = querySerial
-        val candidates = tagCandidates()
         val handler: (Result<List<VideoItem>>) -> Unit = { result ->
             if (!isStale(serial)) result.onSuccess { raw ->
                 if (raw.isEmpty()) {
@@ -338,7 +342,7 @@ class SearchActivity : AppCompatActivity() {
         if (query.isBlank()) return
         val label = when (currentTab) {
             Tab.VIDEOS -> "视频名"
-            Tab.TAGS -> "角色名"
+            Tab.TAGS -> "标签"
             Tab.AUTHORS -> "作者名"
         }
         val loading = when (currentTab) {
@@ -357,13 +361,14 @@ class SearchActivity : AppCompatActivity() {
             Tab.AUTHORS -> authorTab.noMore
         }
         val count = currentCount()
+        val subject = if (currentTab == Tab.TAGS) activeTags().ifBlank { query } else "“$query”"
         statusView.text = buildString {
-            append("“$query” · $label")
+            append("$subject · $label")
             when {
                 failure != null && count == 0 -> append("  ·  加载失败：$failure")
                 failure != null -> append("  ·  $count 条 · 后续加载失败")
                 loading && count == 0 -> append("  ·  正在搜索…")
-                count == 0 && noMore -> append(if (currentTab == Tab.TAGS) "  ·  没有找到使用该角色标签的视频" else "  ·  没有找到结果")
+                count == 0 && noMore -> append(if (currentTab == Tab.TAGS) "  ·  没有找到带这个标签的视频" else "  ·  没有找到结果")
                 count == 0 -> append("  ·  正在搜索…")
                 else -> {
                     append("  ·  $count 条")

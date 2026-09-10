@@ -51,7 +51,7 @@
                     android:layout_height="46dp"
                     android:layout_weight="1"
                     android:background="@drawable/bg_input"
-                    android:hint="视频名 / 角色名 / 作者名"
+                    android:hint="视频名 / 标签 / 作者名"
                     android:imeOptions="actionSearch"
                     android:inputType="text"
                     android:paddingStart="14dp"
@@ -96,7 +96,7 @@
                     android:layout_height="38dp"
                     android:layout_weight="1"
                     android:gravity="center"
-                    android:text="角色名"
+                    android:text="标签"
                     android:textColor="#607D93"
                     android:textSize="15sp" />
 

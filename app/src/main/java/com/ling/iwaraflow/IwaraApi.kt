@@ -191,7 +191,7 @@ class IwaraApi(context: Context, private val apiRoot: String = DEFAULT_API_ROOT)
         }
     }
 
-    /** 角色/标签检索：Iwara 的标签是视频列表接口的 tags 过滤，而不是关键字搜索。 */
+    /** 标签检索：Iwara 的标签是视频列表接口的 tags 过滤，多个标签用逗号连接表示同时命中。 */
     fun getVideosByTag(tag: String, page: Int = 0, limit: Int = 24, callback: (Result<List<VideoItem>>) -> Unit) {
         enqueue(callback) { runCatching { getVideosByTagBlocking(tag, page, limit) } }
     }

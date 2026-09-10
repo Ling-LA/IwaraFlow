@@ -540,7 +540,7 @@ class MainActivityV3 : AppCompatActivity() {
         savedVideosLauncher.launch(Intent(this, SavedVideosActivity::class.java).putExtra(SavedVideosActivity.EXTRA_KIND, kind))
     }
 
-    /** 搜索结果改成独立页面：视频名 / 角色名 / 作者名分别成列表，而不是直接顶掉首页视频流。 */
+    /** 搜索结果改成独立页面：视频名 / 标签 / 作者名分别成列表，而不是直接顶掉首页视频流。 */
     private fun openSearchPage(query: String) {
         if (openingInternalPage || isFinishing || isDestroyed) return
         openingInternalPage = true
@@ -562,7 +562,7 @@ class MainActivityV3 : AppCompatActivity() {
             text = "搜索标题、标签或作者"; setTextColor(0xFF607D93.toInt()); textSize = 13f; setPadding(0, 0, 0, dp(10))
         })
         val input = EditText(this).apply {
-            hint = "例如 MMD、角色名、作者名"; setSingleLine(true); setTextColor(0xFF17324A.toInt())
+            hint = "例如 MMD、标签、作者名"; setSingleLine(true); setTextColor(0xFF17324A.toInt())
             setHintTextColor(0x99607D93.toInt()); background = ContextCompat.getDrawable(this@MainActivityV3, R.drawable.bg_input)
             setPadding(dp(16), dp(12), dp(16), dp(12))
         }

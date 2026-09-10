@@ -6,7 +6,7 @@ class AppPrefs(context: Context) {
     private val prefs = context.getSharedPreferences("iwara_flow_prefs", Context.MODE_PRIVATE)
 
     var skipSeen: Boolean
-        get() = prefs.getBoolean("skip_seen", false)
+        get() = prefs.getBoolean("skip_seen", true)
         set(value) = prefs.edit().putBoolean("skip_seen", value).apply()
 
     var defaultQuality: String

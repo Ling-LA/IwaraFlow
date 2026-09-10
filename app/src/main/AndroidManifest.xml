@@ -26,6 +26,7 @@
         <activity
             android:name=".AuthorActivity"
             android:screenOrientation="portrait"
+            android:enableOnBackInvokedCallback="false"
             android:exported="false" />
         <activity
             android:name=".MainActivityV3"

@@ -41,6 +41,7 @@ class AuthorActivity : AppCompatActivity() {
     private var loadingPage = false
     private var noMore = false
     private var inFeed = false
+    private var adjustingLoopEdge = false
     private val pageSize = 36
 
     override fun onCreate(savedInstanceState: Bundle?) {
@@ -88,8 +89,12 @@ class AuthorActivity : AppCompatActivity() {
         pager.offscreenPageLimit = 1
         pager.registerOnPageChangeCallback(object : ViewPager2.OnPageChangeCallback() {
             override fun onPageSelected(position: Int) {
-                feedAdapter.setActive(position)
-                if (!noMore && !loadingPage && position >= playableWorks.size - 5) loadNextPage()
+                if (!adjustingLoopEdge) feedAdapter.setActive(position)
+                if (!noMore && !loadingPage && position >= feedAdapter.itemCount - 5) loadNextPage()
+            }
+
+            override fun onPageScrollStateChanged(state: Int) {
+                if (state == ViewPager2.SCROLL_STATE_IDLE) normalizeLoopEdge()
             }
         })
 
@@ -127,7 +132,10 @@ class AuthorActivity : AppCompatActivity() {
                     if (api.isLoggedIn()) {
                         api.getFriendStatus(loaded.id) { statusResult ->
                             runOnUiThread {
-                                statusResult.onSuccess { loaded.friendStatus = it; loaded.friend = it == "friends" }
+                                statusResult.onSuccess {
+                                    loaded.friendStatus = it
+                                    loaded.friend = it == "friends"
+                                }
                                 refreshRelationUi()
                             }
                         }
@@ -148,23 +156,25 @@ class AuthorActivity : AppCompatActivity() {
         api.getAuthorVideos(a.id, page, pageSize) { result ->
             result.onSuccess { raw ->
                 if (raw.isEmpty()) {
-                    runOnUiThread { loadingPage = false; noMore = true; updateStatus() }
+                    runOnUiThread {
+                        loadingPage = false
+                        noMore = true
+                        if (inFeed) rebuildFeedKeepingCurrent()
+                        updateStatus()
+                    }
                     return@onSuccess
                 }
                 gate.inspectAll(raw, prefs.defaultQuality) { checked ->
                     runOnUiThread {
+                        val currentId = if (inFeed) feedAdapter.items.getOrNull(pager.currentItem)?.id else null
                         val start = works.size
                         works += checked
                         playableWorks += checked.filter { it.playbackIssue == null }
                         listAdapter.notifyItemRangeInserted(start, checked.size)
-                        if (inFeed) feedAdapter.replace(playableWorks.toList()).also {
-                            val keep = pager.currentItem.coerceAtMost((playableWorks.size - 1).coerceAtLeast(0))
-                            pager.setCurrentItem(keep, false)
-                            feedAdapter.setActive(keep)
-                        }
                         page++
                         noMore = raw.size < pageSize
                         loadingPage = false
+                        if (inFeed) rebuildFeed(currentId)
                         updateStatus()
                     }
                 }
@@ -186,13 +196,60 @@ class AuthorActivity : AppCompatActivity() {
         }
     }
 
+    private fun buildFeedItems(): List<VideoItem> {
+        if (!noMore || playableWorks.size <= 1) return playableWorks.toList()
+        return buildList {
+            add(playableWorks.last())
+            addAll(playableWorks)
+            add(playableWorks.first())
+        }
+    }
+
+    private fun realAdapterPosition(videoId: String): Int {
+        val realIndex = playableWorks.indexOfFirst { it.id == videoId }
+        if (realIndex < 0) return 0
+        return if (noMore && playableWorks.size > 1) realIndex + 1 else realIndex
+    }
+
+    private fun rebuildFeed(currentId: String?) {
+        val list = buildFeedItems()
+        feedAdapter.replace(list)
+        if (list.isEmpty()) return
+        val desiredId = currentId ?: playableWorks.firstOrNull()?.id.orEmpty()
+        val position = realAdapterPosition(desiredId).coerceIn(0, list.lastIndex)
+        pager.setCurrentItem(position, false)
+        feedAdapter.setActive(position)
+    }
+
+    private fun rebuildFeedKeepingCurrent() {
+        val currentId = feedAdapter.items.getOrNull(pager.currentItem)?.id
+        rebuildFeed(currentId)
+    }
+
+    private fun normalizeLoopEdge() {
+        if (!inFeed || !noMore || playableWorks.size <= 1 || adjustingLoopEdge) return
+        val current = pager.currentItem
+        val lastSentinel = feedAdapter.itemCount - 1
+        val target = when (current) {
+            0 -> playableWorks.size
+            lastSentinel -> 1
+            else -> return
+        }
+        adjustingLoopEdge = true
+        pager.setCurrentItem(target, false)
+        feedAdapter.setActive(target)
+        adjustingLoopEdge = false
+    }
+
     private fun openWork(item: VideoItem) {
-        val index = playableWorks.indexOfFirst { it.id == item.id }
-        if (index < 0) return
+        val realIndex = playableWorks.indexOfFirst { it.id == item.id }
+        if (realIndex < 0) return
         inFeed = true
         listPage.visibility = View.GONE
         feedPage.visibility = View.VISIBLE
-        feedAdapter.replace(playableWorks.toList())
+        val feed = buildFeedItems()
+        feedAdapter.replace(feed)
+        val index = if (noMore && playableWorks.size > 1) realIndex + 1 else realIndex
         pager.setCurrentItem(index, false)
         feedAdapter.setActive(index)
     }
@@ -206,28 +263,42 @@ class AuthorActivity : AppCompatActivity() {
     }
 
     private fun nextWork(position: Int) {
-        if (position + 1 < feedAdapter.itemCount) pager.setCurrentItem(position + 1, true)
-        else if (!noMore) loadNextPage()
-        else if (feedAdapter.itemCount > 0) pager.setCurrentItem(0, true)
+        if (position + 1 < feedAdapter.itemCount) {
+            pager.setCurrentItem(position + 1, true)
+        } else if (!noMore) {
+            loadNextPage()
+        } else if (feedAdapter.itemCount > 0) {
+            pager.setCurrentItem(if (playableWorks.size > 1) 1 else 0, true)
+        }
     }
 
     private fun toggleFollow() {
         val a = author ?: return
-        if (!api.isLoggedIn()) { Toast.makeText(this, "请先登录 Iwara", Toast.LENGTH_SHORT).show(); return }
+        if (!api.isLoggedIn()) {
+            Toast.makeText(this, "请先登录 Iwara", Toast.LENGTH_SHORT).show()
+            return
+        }
         followButton.isEnabled = false
         val desired = !a.following
         api.followUser(a.id, desired) { result ->
             runOnUiThread {
                 followButton.isEnabled = true
-                result.onSuccess { a.following = desired; refreshRelationUi() }
-                    .onFailure { Toast.makeText(this, it.message ?: "关注操作失败", Toast.LENGTH_SHORT).show() }
+                result.onSuccess {
+                    a.following = desired
+                    refreshRelationUi()
+                }.onFailure {
+                    Toast.makeText(this, it.message ?: "关注操作失败", Toast.LENGTH_SHORT).show()
+                }
             }
         }
     }
 
     private fun toggleFriend() {
         val a = author ?: return
-        if (!api.isLoggedIn()) { Toast.makeText(this, "请先登录 Iwara", Toast.LENGTH_SHORT).show(); return }
+        if (!api.isLoggedIn()) {
+            Toast.makeText(this, "请先登录 Iwara", Toast.LENGTH_SHORT).show()
+            return
+        }
         friendButton.isEnabled = false
         val remove = a.friendStatus == "pending" || a.friendStatus == "friends"
         api.setFriend(a.id, !remove) { result ->
@@ -242,15 +313,21 @@ class AuthorActivity : AppCompatActivity() {
                             if (a.friend) refreshWorksAfterRelationshipChange()
                         }
                     }
-                }.onFailure { Toast.makeText(this, it.message ?: "好友操作失败", Toast.LENGTH_SHORT).show() }
+                }.onFailure {
+                    Toast.makeText(this, it.message ?: "好友操作失败", Toast.LENGTH_SHORT).show()
+                }
             }
         }
     }
 
     private fun refreshWorksAfterRelationshipChange() {
-        works.clear(); playableWorks.clear(); listAdapter.notifyDataSetChanged()
+        works.clear()
+        playableWorks.clear()
+        listAdapter.notifyDataSetChanged()
         feedAdapter.replace(emptyList())
-        page = 0; noMore = false; loadingPage = false
+        page = 0
+        noMore = false
+        loadingPage = false
         loadNextPage()
     }
 
@@ -268,7 +345,8 @@ class AuthorActivity : AppCompatActivity() {
         try {
             val fileName = item.title.replace(Regex("[\\\\/:*?\"<>|]"), "_").take(80) + "_${source.name}.mp4"
             val request = DownloadManager.Request(Uri.parse(source.url))
-                .setTitle(item.title).setMimeType("video/mp4")
+                .setTitle(item.title)
+                .setMimeType("video/mp4")
                 .addRequestHeader("Referer", "https://www.iwara.tv/")
                 .setNotificationVisibility(DownloadManager.Request.VISIBILITY_VISIBLE_NOTIFY_COMPLETED)
                 .setDestinationInExternalPublicDir(Environment.DIRECTORY_DOWNLOADS, "IwaraFlow/$fileName")
@@ -280,7 +358,9 @@ class AuthorActivity : AppCompatActivity() {
     }
 
     @Suppress("UNUSED_PARAMETER")
-    fun openAuthorProfile(view: View) { if (inFeed) showList() }
+    fun openAuthorProfile(view: View) {
+        if (inFeed) showList()
+    }
 
     private fun finishToMain() {
         startActivity(Intent(this, MainActivityV3::class.java).apply {
@@ -295,10 +375,22 @@ class AuthorActivity : AppCompatActivity() {
         if (inFeed) showList() else finishToMain()
     }
 
-    override fun onStart() { super.onStart(); if (inFeed) feedAdapter.resumeActive() }
-    override fun onStop() { if (inFeed) feedAdapter.pauseAll(); super.onStop() }
+    override fun onStart() {
+        super.onStart()
+        if (inFeed) feedAdapter.resumeActive()
+    }
+
+    override fun onStop() {
+        if (inFeed) feedAdapter.pauseAll()
+        super.onStop()
+    }
+
     override fun onDestroy() {
-        feedAdapter.releaseAll(); gate.close(); mediaCache.close(); api.close(); history.close()
+        feedAdapter.releaseAll()
+        gate.close()
+        mediaCache.close()
+        api.close()
+        history.close()
         super.onDestroy()
     }
 

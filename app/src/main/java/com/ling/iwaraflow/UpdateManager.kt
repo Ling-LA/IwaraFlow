@@ -4,20 +4,24 @@ import android.app.Activity
 import android.app.AlertDialog
 import android.app.DownloadManager
 import android.content.BroadcastReceiver
+import android.content.ClipData
 import android.content.Context
 import android.content.Intent
 import android.content.IntentFilter
 import android.net.Uri
 import android.os.Build
+import android.os.Environment
 import android.provider.Settings
 import android.view.Gravity
 import android.widget.LinearLayout
 import android.widget.ProgressBar
 import android.widget.TextView
 import android.widget.Toast
+import androidx.core.content.FileProvider
 import okhttp3.OkHttpClient
 import okhttp3.Request
 import org.json.JSONObject
+import java.io.File
 import java.util.concurrent.Executors
 import java.util.concurrent.TimeUnit
 
@@ -31,7 +35,7 @@ class UpdateManager(private val activity: Activity) {
         .followRedirects(true)
         .build()
 
-    private var downloadId = -1L
+    private var downloadId = prefs.getLong(KEY_PENDING_DOWNLOAD_ID, -1L)
     private var downloadedUri: Uri? = null
     private var receiverRegistered = false
 
@@ -47,21 +51,17 @@ class UpdateManager(private val activity: Activity) {
         override fun onReceive(context: Context?, intent: Intent?) {
             if (intent?.action != DownloadManager.ACTION_DOWNLOAD_COMPLETE) return
             val id = intent.getLongExtra(DownloadManager.EXTRA_DOWNLOAD_ID, -1L)
-            if (id != downloadId || id < 0) return
-            val dm = activity.getSystemService(Context.DOWNLOAD_SERVICE) as DownloadManager
-            downloadedUri = dm.getUriForDownloadedFile(id)
-            if (downloadedUri == null) {
-                Toast.makeText(activity, "更新包下载失败，请重新检查更新", Toast.LENGTH_LONG).show()
-                return
-            }
-            installDownloadedApk()
+            if (id < 0 || id != downloadId) return
+            handlePendingDownload(showFailure = true)
         }
     }
 
     init {
         val filter = IntentFilter(DownloadManager.ACTION_DOWNLOAD_COMPLETE)
         if (Build.VERSION.SDK_INT >= 33) {
-            activity.registerReceiver(receiver, filter, Context.RECEIVER_NOT_EXPORTED)
+            // ACTION_DOWNLOAD_COMPLETE is a system broadcast. The download id is still checked
+            // before any action is taken, so unrelated broadcasts cannot trigger an install.
+            activity.registerReceiver(receiver, filter, Context.RECEIVER_EXPORTED)
         } else {
             @Suppress("DEPRECATION")
             activity.registerReceiver(receiver, filter)
@@ -203,23 +203,76 @@ class UpdateManager(private val activity: Activity) {
 
     private fun downloadRelease(release: ReleaseInfo) {
         try {
+            val updateFile = updateApkFile()
+            updateFile.parentFile?.mkdirs()
+            if (updateFile.exists()) updateFile.delete()
+
             val request = DownloadManager.Request(Uri.parse(release.apkUrl))
                 .setTitle("IwaraFlow v${release.version}")
                 .setDescription("正在下载应用更新")
-                .setMimeType("application/vnd.android.package-archive")
+                .setMimeType(APK_MIME)
                 .setNotificationVisibility(DownloadManager.Request.VISIBILITY_VISIBLE_NOTIFY_COMPLETED)
                 .setAllowedOverMetered(true)
                 .setAllowedOverRoaming(false)
+                .setDestinationInExternalFilesDir(
+                    activity,
+                    Environment.DIRECTORY_DOWNLOADS,
+                    "updates/$UPDATE_APK_NAME"
+                )
+
             val dm = activity.getSystemService(Context.DOWNLOAD_SERVICE) as DownloadManager
             downloadId = dm.enqueue(request)
+            downloadedUri = null
+            prefs.edit().putLong(KEY_PENDING_DOWNLOAD_ID, downloadId).apply()
             Toast.makeText(activity, "更新包开始下载，完成后会自动打开安装界面", Toast.LENGTH_LONG).show()
         } catch (e: Exception) {
             Toast.makeText(activity, "更新下载失败：${e.message}", Toast.LENGTH_LONG).show()
         }
     }
 
+    /**
+     * Called whenever MainActivity becomes active again. This makes install triggering independent
+     * from the DownloadManager broadcast: if the Activity was recreated or the OEM dropped the
+     * broadcast, a completed download is discovered here and installation continues.
+     */
     fun tryContinueInstall() {
-        if (downloadedUri != null && canInstallPackages()) installDownloadedApk()
+        downloadId = prefs.getLong(KEY_PENDING_DOWNLOAD_ID, downloadId)
+        if (downloadId < 0) return
+        handlePendingDownload(showFailure = false)
+    }
+
+    private fun handlePendingDownload(showFailure: Boolean) {
+        val id = prefs.getLong(KEY_PENDING_DOWNLOAD_ID, downloadId)
+        if (id < 0) return
+        downloadId = id
+
+        val dm = activity.getSystemService(Context.DOWNLOAD_SERVICE) as DownloadManager
+        val query = DownloadManager.Query().setFilterById(id)
+        dm.query(query)?.use { cursor ->
+            if (!cursor.moveToFirst()) return
+            val statusIndex = cursor.getColumnIndex(DownloadManager.COLUMN_STATUS)
+            if (statusIndex < 0) return
+            when (cursor.getInt(statusIndex)) {
+                DownloadManager.STATUS_SUCCESSFUL -> {
+                    val file = updateApkFile()
+                    if (!file.exists() || file.length() <= 0L) {
+                        if (showFailure) Toast.makeText(activity, "更新包下载完成，但 APK 文件不存在", Toast.LENGTH_LONG).show()
+                        clearPendingDownload()
+                        return
+                    }
+                    downloadedUri = FileProvider.getUriForFile(
+                        activity,
+                        "${activity.packageName}.fileprovider",
+                        file
+                    )
+                    installDownloadedApk()
+                }
+                DownloadManager.STATUS_FAILED -> {
+                    if (showFailure) Toast.makeText(activity, "更新包下载失败，请重新检查更新", Toast.LENGTH_LONG).show()
+                    clearPendingDownload()
+                }
+            }
+        }
     }
 
     private fun installDownloadedApk() {
@@ -227,19 +280,50 @@ class UpdateManager(private val activity: Activity) {
         if (!canInstallPackages()) {
             Toast.makeText(activity, "请允许 IwaraFlow 安装未知应用，然后返回继续安装", Toast.LENGTH_LONG).show()
             if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
-                activity.startActivity(Intent(Settings.ACTION_MANAGE_UNKNOWN_APP_SOURCES, Uri.parse("package:${activity.packageName}")))
+                activity.startActivity(
+                    Intent(
+                        Settings.ACTION_MANAGE_UNKNOWN_APP_SOURCES,
+                        Uri.parse("package:${activity.packageName}")
+                    )
+                )
             }
             return
         }
+
         try {
-            val intent = Intent(Intent.ACTION_VIEW).apply {
-                setDataAndType(uri, "application/vnd.android.package-archive")
-                addFlags(Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_GRANT_READ_URI_PERMISSION)
+            val install = Intent(Intent.ACTION_INSTALL_PACKAGE).apply {
+                data = uri
+                addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
+                clipData = ClipData.newRawUri("IwaraFlow update", uri)
+                putExtra(Intent.EXTRA_NOT_UNKNOWN_SOURCE, true)
+                putExtra(Intent.EXTRA_RETURN_RESULT, false)
             }
-            activity.startActivity(intent)
+            if (install.resolveActivity(activity.packageManager) != null) {
+                activity.startActivity(install)
+            } else {
+                val fallback = Intent(Intent.ACTION_VIEW).apply {
+                    setDataAndType(uri, APK_MIME)
+                    addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
+                    clipData = ClipData.newRawUri("IwaraFlow update", uri)
+                }
+                activity.startActivity(fallback)
+            }
+            clearPendingDownload()
         } catch (e: Exception) {
             Toast.makeText(activity, "无法打开安装程序：${e.message}", Toast.LENGTH_LONG).show()
         }
+    }
+
+    private fun updateApkFile(): File {
+        val downloads = activity.getExternalFilesDir(Environment.DIRECTORY_DOWNLOADS)
+            ?: activity.filesDir
+        return File(downloads, "updates/$UPDATE_APK_NAME")
+    }
+
+    private fun clearPendingDownload() {
+        prefs.edit().remove(KEY_PENDING_DOWNLOAD_ID).apply()
+        downloadId = -1L
+        downloadedUri = null
     }
 
     private fun canInstallPackages(): Boolean {
@@ -284,5 +368,8 @@ class UpdateManager(private val activity: Activity) {
 
     companion object {
         private const val AUTO_CHECK_INTERVAL_MS = 6 * 60 * 60 * 1000L
+        private const val KEY_PENDING_DOWNLOAD_ID = "pending_download_id"
+        private const val UPDATE_APK_NAME = "IwaraFlow-update.apk"
+        private const val APK_MIME = "application/vnd.android.package-archive"
     }
 }

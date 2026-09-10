@@ -11,8 +11,8 @@ android {
         applicationId = "com.ling.iwaraflow"
         minSdk = 28
         targetSdk = 36
-        versionCode = 10
-        versionName = "0.6.4"
+        versionCode = 11
+        versionName = "0.6.5"
     }
 
     buildTypes {

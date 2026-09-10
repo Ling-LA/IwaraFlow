@@ -76,7 +76,7 @@ class FollowingActivity : AppCompatActivity() {
                 runOnUiThread {
                     if (closed) return@runOnUiThread
                     // 同一位作者可能同时出现在相邻两页（关注顺序会随分页请求变化）。
-                    val fresh = followingPage.users.filter { author -> seenIds.add(author.id) }
+                    val fresh = followingPage.users.filter { author -> seenIds.add(author.id.ifBlank { author.username }) }
                     val start = items.size
                     items += fresh
                     adapter.notifyItemRangeInserted(start, fresh.size)

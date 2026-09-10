@@ -28,6 +28,7 @@ import androidx.activity.result.contract.ActivityResultContracts
 import androidx.appcompat.app.AppCompatActivity
 import androidx.core.app.ActivityCompat
 import androidx.core.content.ContextCompat
+import androidx.lifecycle.Lifecycle
 import androidx.viewpager2.widget.ViewPager2
 
 class MainActivityV3 : AppCompatActivity() {
@@ -52,6 +53,7 @@ class MainActivityV3 : AppCompatActivity() {
     private var pagingEnabled = true
     private var requestSerial = 0
     private var openingInternalPage = false
+    private var pendingVideoId: String? = null
     private val pageSize = 28
 
     private data class FeedSession(
@@ -75,26 +77,16 @@ class MainActivityV3 : AppCompatActivity() {
     private val savedVideosLauncher = registerForActivityResult(ActivityResultContracts.StartActivityForResult()) { result ->
         openingInternalPage = false
         val videoId = result.data?.getStringExtra(SavedVideosActivity.EXTRA_VIDEO_ID).orEmpty()
-        if (!isFinishing && !isDestroyed) {
-            hideStatusBar()
-            if (videoId.isNotBlank()) openSingleVideo(videoId)
-            else window.decorView.postDelayed({ if (!isFinishing && !isDestroyed) adapter.resumeActive() }, 90L)
-        }
+        pendingVideoId = videoId.takeIf { it.isNotBlank() }
     }
 
     private fun resumeAfterInternalPage() {
         openingInternalPage = false
-        if (!isFinishing && !isDestroyed) {
-            hideStatusBar()
-            // Let the child Activity complete onDestroy before reclaiming Media3/cache playback ownership.
-            window.decorView.postDelayed({
-                if (!isFinishing && !isDestroyed && !openingInternalPage) adapter.resumeActive()
-            }, 90L)
-        }
     }
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
+        openingInternalPage = savedInstanceState?.getBoolean("opening_internal_page") ?: false
         setContentView(R.layout.activity_main)
         hideStatusBar()
 
@@ -209,7 +201,7 @@ class MainActivityV3 : AppCompatActivity() {
 
     private fun saveCurrentHomeSession() {
         if (searchQuery != null || mode !in homeModes || adapter.items.isEmpty()) return
-        adapter.pauseAll()
+        adapter.savePlaybackPosition()
         val index = pager.currentItem.coerceIn(0, adapter.items.lastIndex)
         homeFeedSessions[mode] = FeedSession(
             items = adapter.items.toList(),
@@ -344,6 +336,7 @@ class MainActivityV3 : AppCompatActivity() {
     }
 
     private fun openAuthor(id: String, name: String, username: String) {
+        if (openingInternalPage || isFinishing || isDestroyed) return
         if (id.isBlank() && username.isBlank()) {
             Toast.makeText(this, "该视频没有作者资料", Toast.LENGTH_SHORT).show(); return
         }
@@ -357,12 +350,14 @@ class MainActivityV3 : AppCompatActivity() {
     }
 
     private fun openSavedVideos(kind: String) {
+        if (openingInternalPage || isFinishing || isDestroyed) return
         openingInternalPage = true
         adapter.pauseAll()
         savedVideosLauncher.launch(Intent(this, SavedVideosActivity::class.java).putExtra(SavedVideosActivity.EXTRA_KIND, kind))
     }
 
     private fun openFollowingPage() {
+        if (openingInternalPage || isFinishing || isDestroyed) return
         if (!api.isLoggedIn()) { showLoginDialog(); return }
         openingInternalPage = true
         adapter.pauseAll()
@@ -398,7 +393,7 @@ class MainActivityV3 : AppCompatActivity() {
 
     private fun showMainMenu() {
         val account = if (api.isLoggedIn()) "退出 Iwara 登录" else "登录 Iwara"
-        val items = arrayOf(account, "浏览历史", "本地收藏", "Iwara 点赞记录", "已关注用户", "设置", "检查更新", "重新加载当前流")
+        val items = arrayOf(account, "浏览历史", "本地收藏", "Iwara 点赞记录", "已关注用户", "设置", "检查更新", "重新加载当前流", "诊断信息")
         val dialog = AlertDialog.Builder(this).setTitle("IwaraFlow").setItems(items) { _, which ->
             when (which) {
                 0 -> if (api.isLoggedIn()) { api.logout(); Toast.makeText(this, "已退出登录", Toast.LENGTH_SHORT).show(); loadFeed(reset = true) } else showLoginDialog()
@@ -409,6 +404,7 @@ class MainActivityV3 : AppCompatActivity() {
                 5 -> showSettingsDialog()
                 6 -> updates.check(manual = true)
                 7 -> loadFeed(reset = true)
+                8 -> NavigationDiagnostics.show(this)
             }
         }.create()
         dialog.setOnShowListener { styleDialogButtons(dialog) }; dialog.show()
@@ -465,12 +461,14 @@ class MainActivityV3 : AppCompatActivity() {
     private fun openSingleVideo(videoId: String) {
         loading.visibility = View.VISIBLE
         api.getVideo(videoId) { result -> runOnUiThread {
+            if (isFinishing || isDestroyed) return@runOnUiThread
             loading.visibility = View.GONE
             result.onSuccess { item ->
                 saveCurrentHomeSession()
                 item.localFavorite = history.isLocalFavorite(item.id); pagingEnabled = false; mode = "single"; searchQuery = null; requestSerial++
                 adapter.replace(listOf(item)); pager.setCurrentItem(0, false); adapter.setActive(0)
             }.onFailure { Toast.makeText(this, it.message ?: "视频加载失败", Toast.LENGTH_LONG).show() }
+            if (!openingInternalPage && lifecycle.currentState.isAtLeast(Lifecycle.State.RESUMED)) adapter.resumeActive()
         } }
     }
 
@@ -551,7 +549,26 @@ class MainActivityV3 : AppCompatActivity() {
     override fun onStart() {
         super.onStart()
         updates.tryContinueInstall()
-        if (!openingInternalPage && !isInPictureInPictureMode) adapter.resumeActive()
+    }
+
+    override fun onResume() {
+        super.onResume()
+        hideStatusBar()
+        if (openingInternalPage || isFinishing) return
+        val videoId = pendingVideoId
+        pendingVideoId = null
+        if (videoId != null) openSingleVideo(videoId)
+        else adapter.resumeActive()
+    }
+
+    override fun onPause() {
+        if (openingInternalPage || !isInPictureInPictureMode) adapter.pauseAll()
+        super.onPause()
+    }
+
+    override fun onSaveInstanceState(outState: Bundle) {
+        outState.putBoolean("opening_internal_page", openingInternalPage)
+        super.onSaveInstanceState(outState)
     }
 
     override fun onStop() {
@@ -562,6 +579,7 @@ class MainActivityV3 : AppCompatActivity() {
     private fun showError(message: String) { error.text = message; error.visibility = View.VISIBLE }
 
     override fun onDestroy() {
+        requestSerial++
         adapter.releaseAll(); playableGate.close(); mediaCache.close(); recommender.close(); updates.close(); api.close(); history.close(); super.onDestroy()
     }
 }

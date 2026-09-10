@@ -6,6 +6,7 @@ import android.os.Bundle
 import android.view.View
 import android.widget.TextView
 import androidx.appcompat.app.AppCompatActivity
+import androidx.activity.OnBackPressedCallback
 import androidx.recyclerview.widget.LinearLayoutManager
 import androidx.recyclerview.widget.RecyclerView
 
@@ -29,6 +30,9 @@ class SavedVideosActivity : AppCompatActivity() {
         listView.adapter = adapter
 
         findViewById<View>(R.id.savedBack).setOnClickListener { finish() }
+        onBackPressedDispatcher.addCallback(this, object : OnBackPressedCallback(true) {
+            override fun handleOnBackPressed() = finish()
+        })
         val kind = intent.getStringExtra(EXTRA_KIND) ?: KIND_HISTORY
         val isFavorite = kind == KIND_FAVORITES
         findViewById<TextView>(R.id.savedTitle).text = if (isFavorite) "本地收藏" else "浏览历史"

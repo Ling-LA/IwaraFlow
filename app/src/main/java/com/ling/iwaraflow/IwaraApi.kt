@@ -21,6 +21,8 @@ class IwaraApi(context: Context) {
     private val imageRoot = "https://i.iwara.tv"
     private val session = SecureSessionStore(context.applicationContext)
     private val io = Executors.newCachedThreadPool()
+    private val lifecycleLock = Any()
+    @Volatile private var closed = false
     private val jsonType = "application/json; charset=utf-8".toMediaType()
 
     private val client = OkHttpClient.Builder()
@@ -51,7 +53,20 @@ class IwaraApi(context: Context) {
     }
 
     fun login(email: String, password: String, callback: (LoginResult) -> Unit) {
-        io.execute { callback(loginBlocking(email.trim(), password)) }
+        enqueue(callback) { loginBlocking(email.trim(), password) }
+    }
+
+    private fun <T> enqueue(callback: (T) -> Unit, request: () -> T) {
+        synchronized(lifecycleLock) {
+            // Page callbacks can schedule follow-up requests while the Activity is closing.
+            // Serialize submission with shutdown so that this cannot reject a late request.
+            if (closed) return
+            io.execute {
+                if (closed) return@execute
+                val result = request()
+                if (!closed) callback(result)
+            }
+        }
     }
 
     private fun loginBlocking(email: String, password: String): LoginResult {
@@ -113,7 +128,7 @@ class IwaraApi(context: Context) {
     }
 
     fun getVideos(sort: String, page: Int = 0, limit: Int = 24, callback: (Result<List<VideoItem>>) -> Unit) {
-        io.execute { callback(runCatching { getVideosBlocking(sort, page, limit) }) }
+        enqueue(callback) { runCatching { getVideosBlocking(sort, page, limit) } }
     }
 
     fun getVideosBlocking(sort: String, page: Int = 0, limit: Int = 24): List<VideoItem> {
@@ -124,7 +139,7 @@ class IwaraApi(context: Context) {
     }
 
     fun getAuthorVideos(userId: String, page: Int = 0, limit: Int = 36, callback: (Result<List<VideoItem>>) -> Unit) {
-        io.execute { callback(runCatching { getAuthorVideosBlocking(userId, page, limit) }) }
+        enqueue(callback) { runCatching { getAuthorVideosBlocking(userId, page, limit) } }
     }
 
     fun getAuthorVideosBlocking(userId: String, page: Int = 0, limit: Int = 36): List<VideoItem> {
@@ -135,13 +150,13 @@ class IwaraApi(context: Context) {
     }
 
     fun getVideo(videoId: String, callback: (Result<VideoItem>) -> Unit) {
-        io.execute { callback(runCatching {
+        enqueue(callback) { runCatching {
             parseVideo(getJsonObject("$apiRoot/video/$videoId", optionalAuth = true)) ?: throw IOException("视频不存在或已删除")
-        }) }
+        } }
     }
 
     fun searchVideos(query: String, page: Int = 0, limit: Int = 32, callback: (Result<List<VideoItem>>) -> Unit) {
-        io.execute { callback(runCatching { searchVideosBlocking(query, page, limit) }) }
+        enqueue(callback) { runCatching { searchVideosBlocking(query, page, limit) } }
     }
 
     fun searchVideosBlocking(query: String, page: Int = 0, limit: Int = 32): List<VideoItem> {
@@ -152,7 +167,7 @@ class IwaraApi(context: Context) {
     }
 
     fun getFavoriteVideos(callback: (Result<List<VideoItem>>) -> Unit) {
-        io.execute { callback(runCatching { getFavoriteVideosBlocking() }) }
+        enqueue(callback) { runCatching { getFavoriteVideosBlocking() } }
     }
 
     fun getFavoriteVideosBlocking(page: Int = 0, limit: Int = 100): List<VideoItem> {
@@ -175,7 +190,7 @@ class IwaraApi(context: Context) {
     fun setFriend(userId: String, enabled: Boolean, callback: (Result<Unit>) -> Unit) = relationWrite("$apiRoot/user/$userId/friends", enabled, callback)
 
     private fun relationWrite(url: String, enabled: Boolean, callback: (Result<Unit>) -> Unit) {
-        io.execute { callback(runCatching {
+        enqueue(callback) { runCatching {
             if (!isLoggedIn()) throw IOException("请先登录 Iwara")
             ensureAccessTokenBlocking() ?: throw IOException("登录已失效，请重新登录")
             val builder = baseRequest(url, authenticated = true)
@@ -187,35 +202,35 @@ class IwaraApi(context: Context) {
                     throw IOException(extractMessage(raw, "操作失败（HTTP ${response.code}）"))
                 }
             }
-        }) }
+        } }
     }
 
     fun getFriendStatus(userId: String, callback: (Result<String>) -> Unit) {
-        io.execute { callback(runCatching {
+        enqueue(callback) { runCatching {
             if (!isLoggedIn()) return@runCatching "none"
             getJsonObject("$apiRoot/user/$userId/friends/status", requireAuth = true).optString("status", "none")
-        }) }
+        } }
     }
 
     fun getAuthorProfile(username: String, callback: (Result<IwaraAuthor>) -> Unit) {
-        io.execute { callback(runCatching {
+        enqueue(callback) { runCatching {
             val root = getJsonObject("$apiRoot/profile/${UriEncoder.encodePath(username)}", optionalAuth = true)
             val user = root.optJSONObject("user") ?: throw IOException("作者资料不存在")
             parseAuthor(user, root.optString("body"))
-        }) }
+        } }
     }
 
     fun getCurrentUser(callback: (Result<IwaraAuthor>) -> Unit) {
-        io.execute { callback(runCatching {
+        enqueue(callback) { runCatching {
             if (!isLoggedIn()) throw IOException("请先登录 Iwara")
             val root = getJsonObject("$apiRoot/user", requireAuth = true)
             val user = root.optJSONObject("user") ?: throw IOException("无法读取当前账号")
             parseAuthor(user, root.optJSONObject("profile")?.optString("body").orEmpty())
-        }) }
+        } }
     }
 
     fun getFollowingUsers(userId: String, page: Int = 0, limit: Int = 100, callback: (Result<List<IwaraAuthor>>) -> Unit) {
-        io.execute { callback(runCatching {
+        enqueue(callback) { runCatching {
             val url = "$apiRoot/user/$userId/following".toHttpUrl().newBuilder()
                 .addQueryParameter("page", page.toString()).addQueryParameter("limit", limit.toString()).build()
             val root = getJsonObject(url.toString(), requireAuth = true)
@@ -227,11 +242,11 @@ class IwaraApi(context: Context) {
                     add(parseAuthor(user).copy(following = true))
                 }
             }
-        }) }
+        } }
     }
 
     fun resolveSources(videoId: String, callback: (Result<List<VideoSource>>) -> Unit) {
-        io.execute { callback(runCatching { resolveSourcesBlocking(videoId) }) }
+        enqueue(callback) { runCatching { resolveSourcesBlocking(videoId) } }
     }
 
     fun resolveSourcesBlocking(videoId: String): List<VideoSource> {
@@ -249,10 +264,10 @@ class IwaraApi(context: Context) {
     }
 
     fun resolveStream(videoId: String, quality: String = "highest", callback: (Result<String>) -> Unit) {
-        io.execute { callback(runCatching {
+        enqueue(callback) { runCatching {
             val sources = resolveSourcesBlocking(videoId)
             chooseSource(sources, quality)?.url ?: throw IOException("没有可播放清晰度")
-        }) }
+        } }
     }
 
     fun chooseSource(sources: List<VideoSource>, quality: String): VideoSource? {
@@ -380,7 +395,12 @@ class IwaraApi(context: Context) {
     }
 
     fun close() {
-        io.shutdownNow()
+        synchronized(lifecycleLock) {
+            if (closed) return
+            closed = true
+            io.shutdownNow()
+        }
+        client.dispatcher.cancelAll()
         client.dispatcher.executorService.shutdown()
         client.connectionPool.evictAll()
     }

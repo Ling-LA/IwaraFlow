@@ -6,6 +6,7 @@
     <uses-permission android:name="android.permission.WRITE_EXTERNAL_STORAGE" android:maxSdkVersion="28" />
 
     <application
+        android:name=".IwaraFlowApplication"
         android:allowBackup="true"
         android:usesCleartextTraffic="false"
         android:theme="@style/Theme.IwaraFlow"
@@ -34,7 +35,6 @@
         <activity
             android:name=".AuthorActivity"
             android:screenOrientation="portrait"
-            android:enableOnBackInvokedCallback="false"
             android:exported="false" />
         <activity
             android:name=".MainActivityV3"
@@ -42,8 +42,7 @@
             android:supportsPictureInPicture="true"
             android:resizeableActivity="true"
             android:configChanges="screenSize|smallestScreenSize|screenLayout|orientation"
-            android:launchMode="singleTask"
-            android:alwaysRetainTaskState="true"
+            android:launchMode="singleTop"
             android:exported="true">
             <intent-filter>
                 <action android:name="android.intent.action.MAIN" />

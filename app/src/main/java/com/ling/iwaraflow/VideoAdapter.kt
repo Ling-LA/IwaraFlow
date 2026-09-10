@@ -36,13 +36,12 @@ class VideoAdapter(
     private var preloadTask: Runnable? = null
     private var activePosition = RecyclerView.NO_POSITION
     private var pipMode = false
-    private var released = false
-
-    init {
-        registerAndClaim(this)
-    }
+    @Volatile private var released = false
+    // Selecting/binding a card is independent from granting a visible page playback.
+    @Volatile private var playbackEnabled = false
 
     fun replace(newItems: List<VideoItem>) {
+        if (released) return
         cancelIdlePreload()
         holders.toList().forEach { it.release() }
         items.clear()
@@ -52,6 +51,7 @@ class VideoAdapter(
     }
 
     fun append(newItems: List<VideoItem>) {
+        if (released) return
         val existing = items.asSequence().map { it.id }.toHashSet()
         val unique = newItems.filter { existing.add(it.id) }
         if (unique.isEmpty()) return
@@ -61,33 +61,42 @@ class VideoAdapter(
     }
 
     fun releaseAll() {
+        if (released) return
+        playbackEnabled = false
+        released = true
         cancelIdlePreload()
         holders.toList().forEach { it.release() }
         holders.clear()
-        released = true
         unregister(this)
     }
 
     fun setActive(position: Int) {
         if (released) return
-        claimPlaybackOwnership(this)
         activePosition = position
+        if (!playbackEnabled) return
+        claimPlaybackOwnership(this)
         holders.toList().forEach { holder ->
-            holder.setActive(holder.bindingAdapterPosition == activePosition)
+            holder.setActive(activePosition in items.indices && holder.bindingAdapterPosition == activePosition)
         }
         scheduleIdlePreload(position)
     }
 
     fun pauseAll() {
+        playbackEnabled = false
         cancelIdlePreload()
         holders.toList().forEach { it.setActive(false) }
     }
 
+    fun savePlaybackPosition() {
+        holders.toList().forEach { it.savePlaybackPosition() }
+    }
+
     fun resumeActive() {
         if (released) return
+        playbackEnabled = true
         claimPlaybackOwnership(this)
-        holders.forEach { holder ->
-            holder.setActive(holder.bindingAdapterPosition == activePosition)
+        holders.toList().forEach { holder ->
+            holder.setActive(activePosition in items.indices && holder.bindingAdapterPosition == activePosition)
         }
         scheduleIdlePreload(activePosition)
     }
@@ -108,8 +117,9 @@ class VideoAdapter(
 
     private fun scheduleIdlePreload(position: Int) {
         cancelIdlePreload()
-        if (position == RecyclerView.NO_POSITION) return
+        if (!playbackEnabled || released || position !in items.indices) return
         val task = Runnable {
+            if (!playbackEnabled || released || position != activePosition) return@Runnable
             val activeReady = holders.any {
                 it.bindingAdapterPosition == position && it.readyForIdlePreload()
             }
@@ -122,6 +132,7 @@ class VideoAdapter(
                 } else {
                     api.resolveSources(item.id) { result ->
                         result.onSuccess { sources ->
+                            if (released || !playbackEnabled) return@onSuccess
                             item.sources = sources
                             val source = api.chooseSource(sources, item.selectedQuality ?: prefs.defaultQuality)
                             item.streamUrl = source?.url
@@ -149,9 +160,12 @@ class VideoAdapter(
     override fun getItemCount(): Int = items.size
 
     override fun onBindViewHolder(holder: Holder, position: Int) {
+        if (released) return
+        // RecyclerView reuses holders after onViewRecycled; onCreateViewHolder is not called again.
+        holders += holder
         holder.bind(items[position])
         holder.setChromeVisible(!pipMode)
-        holder.setActive(position == activePosition)
+        holder.setActive(!released && playbackEnabled && position == activePosition)
     }
 
     inner class Holder(view: View) : RecyclerView.ViewHolder(view) {
@@ -200,8 +214,7 @@ class VideoAdapter(
         }
 
         fun bind(item: VideoItem) {
-            releasePlayerOnly()
-            generation++
+            release()
             bound = item
             item.localFavorite = history.isLocalFavorite(item.id)
             author.text = "@${item.author}"
@@ -276,12 +289,11 @@ class VideoAdapter(
                 }
             }
 
-            start(item)
         }
 
         private fun start(item: VideoItem) {
             val bindGeneration = generation
-            if (!active) return
+            if (!active || !playbackEnabled || released || player != null) return
             val renderersFactory = DefaultRenderersFactory(itemView.context).setEnableDecoderFallback(true)
             val p = ExoPlayer.Builder(itemView.context, renderersFactory).build().apply {
                 repeatMode = Player.REPEAT_MODE_OFF
@@ -314,7 +326,7 @@ class VideoAdapter(
             }
             api.resolveSources(item.id) { result ->
                 itemView.post {
-                    if (generation != bindGeneration || bound?.id != item.id || player !== p) return@post
+                    if (released || !playbackEnabled || !active || generation != bindGeneration || bound?.id != item.id || player !== p) return@post
                     result.onSuccess { sources ->
                         item.sources = sources
                         prepareChosenSource(item, sources, preservePosition = false)
@@ -345,6 +357,7 @@ class VideoAdapter(
 
         fun setActive(enabled: Boolean) {
             if (enabled) {
+                if (released || !playbackEnabled) return
                 if (active && player != null) return
                 active = true
                 if (player == null) bound?.let { start(it) }
@@ -358,6 +371,9 @@ class VideoAdapter(
                 if (!active && player == null) return
                 if (active) persistHistory(completed = false)
                 active = false
+                generation++
+                pendingSingleTap?.let { tapHandler.removeCallbacks(it) }
+                pendingSingleTap = null
                 tapHandler.removeCallbacks(holdToSpeed)
                 stopSpeedBoost()
                 stopWatchdog()
@@ -431,6 +447,8 @@ class VideoAdapter(
             val completedByProgress = duration > 0 && position >= (duration * 0.9).toLong()
             history.recordWatch(item, position, duration, completed || completedByProgress)
         }
+
+        fun savePlaybackPosition() = persistHistory(completed = false)
 
         private fun toggleRemoteLike(item: VideoItem, desired: Boolean, animate: Boolean) {
             if (likeBusy) return
@@ -552,26 +570,15 @@ class VideoAdapter(
 
     companion object {
         private val registryLock = Any()
-        private val adapters = mutableListOf<WeakReference<VideoAdapter>>()
         private var owner: WeakReference<VideoAdapter>? = null
 
-        private fun registerAndClaim(adapter: VideoAdapter) = synchronized(registryLock) {
-            adapters.removeAll { it.get() == null }
-            if (adapters.none { it.get() === adapter }) adapters += WeakReference(adapter)
-            val previous = owner?.get()
-            if (previous !== null && previous !== adapter) previous.pauseAll()
-            owner = WeakReference(adapter)
-        }
-
         private fun claimPlaybackOwnership(adapter: VideoAdapter) = synchronized(registryLock) {
-            adapters.removeAll { it.get() == null }
             val previous = owner?.get()
             if (previous !== null && previous !== adapter) previous.pauseAll()
             owner = WeakReference(adapter)
         }
 
         private fun unregister(adapter: VideoAdapter) = synchronized(registryLock) {
-            adapters.removeAll { it.get() == null || it.get() === adapter }
             if (owner?.get() === adapter) owner = null
         }
     }

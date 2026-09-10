@@ -12,6 +12,8 @@ import android.widget.Button
 import android.widget.TextView
 import android.widget.Toast
 import androidx.appcompat.app.AppCompatActivity
+import androidx.activity.OnBackPressedCallback
+import androidx.lifecycle.Lifecycle
 import androidx.recyclerview.widget.LinearLayoutManager
 import androidx.recyclerview.widget.RecyclerView
 import androidx.viewpager2.widget.ViewPager2
@@ -102,6 +104,9 @@ class AuthorActivity : AppCompatActivity() {
 
         findViewById<View>(R.id.authorBack).setOnClickListener { handleBack() }
         findViewById<View>(R.id.feedBack).setOnClickListener { handleBack() }
+        onBackPressedDispatcher.addCallback(this, object : OnBackPressedCallback(true) {
+            override fun handleOnBackPressed() = handleBack()
+        })
         followButton.setOnClickListener { toggleFollow() }
         friendButton.setOnClickListener { toggleFriend() }
 
@@ -262,6 +267,7 @@ class AuthorActivity : AppCompatActivity() {
         val index = if (noMore && playableWorks.size > 1) realIndex + 1 else realIndex
         pager.setCurrentItem(index, false)
         feedAdapter.setActive(index)
+        if (lifecycle.currentState.isAtLeast(Lifecycle.State.RESUMED)) feedAdapter.resumeActive()
     }
 
     private fun showList() {
@@ -283,11 +289,6 @@ class AuthorActivity : AppCompatActivity() {
         feedAdapter.pauseAll()
         setResult(Activity.RESULT_OK, Intent().putExtra(EXTRA_RETURN_FROM_AUTHOR, true))
         finish()
-    }
-
-    @Deprecated("Deprecated in Java")
-    override fun onBackPressed() {
-        handleBack()
     }
 
     private fun nextWork(position: Int) {
@@ -372,9 +373,14 @@ class AuthorActivity : AppCompatActivity() {
     @Suppress("UNUSED_PARAMETER")
     fun openAuthorProfile(view: View) { if (inFeed) showList() }
 
-    override fun onStart() {
-        super.onStart()
+    override fun onResume() {
+        super.onResume()
         if (inFeed && !exiting) feedAdapter.resumeActive()
+    }
+
+    override fun onPause() {
+        feedAdapter.pauseAll()
+        super.onPause()
     }
 
     override fun onStop() {

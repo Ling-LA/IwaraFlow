@@ -545,19 +545,22 @@ class VideoAdapter(
         }
 
         private fun updateLikeUi(item: VideoItem) {
-            like.setImageResource(
-                if (item.liked) R.drawable.ic_heart_rounded else R.drawable.ic_heart_rounded_outline
-            )
-            like.imageTintList = ColorStateList.valueOf(
+            like.setIcon(
+                if (item.liked) R.drawable.ic_heart_rounded else R.drawable.ic_heart_rounded_outline,
                 if (item.liked) 0xFFFF365D.toInt() else 0xFFFFFFFF.toInt()
             )
-            favorite.setImageResource(
-                if (item.localFavorite) R.drawable.ic_star_rounded else R.drawable.ic_star_rounded_outline
-            )
-            favorite.imageTintList = ColorStateList.valueOf(
+            favorite.setIcon(
+                if (item.localFavorite) R.drawable.ic_star_rounded else R.drawable.ic_star_rounded_outline,
                 if (item.localFavorite) 0xFFFFD54F.toInt() else 0xFFFFFFFF.toInt()
             )
             likeCount.text = formatCount(item.likes)
+        }
+
+        /** ImageView 不回传当前是哪个图标，记在 tag 上，点没点赞一读就知道。 */
+        private fun ImageView.setIcon(iconRes: Int, tint: Int) {
+            setImageResource(iconRes)
+            imageTintList = ColorStateList.valueOf(tint)
+            setTag(R.id.reaction_icon, iconRes)
         }
 
         private fun showQualityChooser(item: VideoItem, forDownload: Boolean) {

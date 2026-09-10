@@ -1,0 +1,5 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <!-- 记在按钮上的当前图标资源 id：ImageView 自己不回传这个。 -->
+    <item name="reaction_icon" type="id" />
+</resources>

@@ -7,9 +7,11 @@ import android.content.Context
 import android.graphics.Canvas
 import android.graphics.Color
 import android.graphics.Paint
+import android.graphics.Rect
 import android.graphics.drawable.Drawable
 import android.util.AttributeSet
 import android.view.View
+import android.view.ViewGroup
 import android.view.animation.DecelerateInterpolator
 import androidx.appcompat.content.res.AppCompatResources
 import kotlin.math.cos
@@ -49,15 +51,11 @@ class ReactionBurstView @JvmOverloads constructor(
 
     /** 在某个按钮上播放：动画的中心就是这个按钮的中心。 */
     fun playOn(anchor: View, kind: Kind) {
-        val anchorAt = IntArray(2)
-        val selfAt = IntArray(2)
-        anchor.getLocationOnScreen(anchorAt)
-        getLocationOnScreen(selfAt)
-        playAt(
-            anchorAt[0] - selfAt[0] + anchor.width / 2f,
-            anchorAt[1] - selfAt[1] + anchor.height / 2f,
-            kind
-        )
+        val bounds = Rect(0, 0, anchor.width, anchor.height)
+        // 用共同的父容器换算坐标。getLocationOnScreen 在视图还没贴到窗口时直接返回 0，
+        // 那样动画会跑到卡片左上角去。
+        (parent as? ViewGroup)?.offsetDescendantRectToMyCoords(anchor, bounds)
+        playAt(bounds.exactCenterX() - left, bounds.exactCenterY() - top, kind)
     }
 
     fun playAt(x: Float, y: Float, kind: Kind) {

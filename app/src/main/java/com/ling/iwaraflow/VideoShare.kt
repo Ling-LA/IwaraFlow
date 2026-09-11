@@ -15,11 +15,20 @@ object VideoShare {
     }
 
     fun share(context: Context, item: VideoItem) {
+        val chooser = chooserFor(context, item) ?: return
+        start(context, chooser)
+    }
+
+    /**
+     * 只造出选择器 Intent，不负责启动。
+     * 播放页要自己 launch，这样返回时能接上播放状态、也不会在分享面板后面自动进小窗。
+     */
+    fun chooserFor(context: Context, item: VideoItem): Intent? {
         if (item.id.isBlank()) {
             Toast.makeText(context, "这个视频没有可分享的链接", Toast.LENGTH_SHORT).show()
-            return
+            return null
         }
-        send(context, shareText(item), item.title, "分享视频链接")
+        return chooser(context, shareText(item), item.title, "分享视频链接")
     }
 
     fun authorLinkFor(author: IwaraAuthor): String =
@@ -42,10 +51,10 @@ object VideoShare {
             Toast.makeText(context, "这个作者没有可分享的资料", Toast.LENGTH_SHORT).show()
             return
         }
-        send(context, authorShareText(author), author.name, "分享作者主页")
+        start(context, chooser(context, authorShareText(author), author.name, "分享作者主页"))
     }
 
-    private fun send(context: Context, text: String, subject: String, title: String) {
+    private fun chooser(context: Context, text: String, subject: String, title: String): Intent {
         val send = Intent(Intent.ACTION_SEND).apply {
             type = "text/plain"
             putExtra(Intent.EXTRA_TEXT, text)
@@ -54,6 +63,10 @@ object VideoShare {
         val chooser = Intent.createChooser(send, title)
         // 从 Activity 之外（例如 application context）拉起选择器时必须自带新任务标记。
         if (context !is android.app.Activity) chooser.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+        return chooser
+    }
+
+    private fun start(context: Context, chooser: Intent) {
         runCatching { context.startActivity(chooser) }
             .onFailure { Toast.makeText(context, "没有可用的分享应用", Toast.LENGTH_SHORT).show() }
     }

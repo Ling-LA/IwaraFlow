@@ -3,11 +3,16 @@ package com.ling.iwaraflow
 import android.Manifest
 import android.app.AlertDialog
 import android.app.DownloadManager
+import android.app.PendingIntent
 import android.app.PictureInPictureParams
+import android.app.RemoteAction
+import android.content.BroadcastReceiver
 import android.content.Context
 import android.content.Intent
+import android.content.IntentFilter
 import android.content.pm.PackageManager
 import android.content.res.ColorStateList
+import android.graphics.drawable.Icon
 import android.net.Uri
 import android.os.Build
 import android.os.Bundle
@@ -94,6 +99,14 @@ class MainActivityV3 : AppCompatActivity() {
         resumeAfterInternalPage()
     }
 
+    /**
+     * 分享面板也走 launcher。直接 startActivity 的话，面板弹出来的一瞬间会触发
+     * onUserLeaveHint，开了“自动小窗”的话应用就缩进小窗藏到面板后面去了。
+     */
+    private val shareLauncher = registerForActivityResult(ActivityResultContracts.StartActivityForResult()) {
+        resumeAfterInternalPage()
+    }
+
     private val savedVideosLauncher = registerForActivityResult(ActivityResultContracts.StartActivityForResult()) { result ->
         openingInternalPage = false
         val videoId = result.data?.getStringExtra(SavedVideosActivity.EXTRA_VIDEO_ID).orEmpty()
@@ -102,6 +115,14 @@ class MainActivityV3 : AppCompatActivity() {
 
     private fun resumeAfterInternalPage() {
         openingInternalPage = false
+    }
+
+    /** 小窗里的分享按钮点下来走这里——RemoteAction 只能发 PendingIntent。 */
+    private val pipShareReceiver = object : BroadcastReceiver() {
+        override fun onReceive(context: Context?, intent: Intent?) {
+            if (intent?.action != ACTION_PIP_SHARE) return
+            adapter.activeItem()?.let { shareVideo(it) }
+        }
     }
 
     override fun onCreate(savedInstanceState: Bundle?) {
@@ -133,16 +154,22 @@ class MainActivityV3 : AppCompatActivity() {
             onDownload = ::enqueueDownload,
             onEnterPip = ::enterPip,
             onEnded = ::onVideoEnded,
-            onNeedLogin = ::showLoginDialog
+            onNeedLogin = ::showLoginDialog,
+            onShare = ::shareVideo
         )
         pager.adapter = adapter
         pager.offscreenPageLimit = 1
         pager.registerOnPageChangeCallback(object : ViewPager2.OnPageChangeCallback() {
             override fun onPageSelected(position: Int) {
                 adapter.setActive(position)
+                refreshPipActions()
                 if (pagingEnabled && position >= adapter.itemCount - 5) loadMore()
             }
         })
+
+        ContextCompat.registerReceiver(
+            this, pipShareReceiver, IntentFilter(ACTION_PIP_SHARE), ContextCompat.RECEIVER_NOT_EXPORTED
+        )
 
         setupTopBar()
         if (intent.getBooleanExtra("return_recommend", false)) returnToRecommend() else loadFeed(reset = true)
@@ -756,8 +783,44 @@ class MainActivityV3 : AppCompatActivity() {
         } catch (e: Exception) { Toast.makeText(this, "下载创建失败：${e.message}", Toast.LENGTH_LONG).show() }
     }
 
+    /** 分享当前视频。面板期间标记成“正在打开内部页面”，回来时才好接上播放。 */
+    private fun shareVideo(item: VideoItem) {
+        if (openingInternalPage || isFinishing || isDestroyed) return
+        val chooser = VideoShare.chooserFor(this, item) ?: return
+        openingInternalPage = true
+        runCatching { shareLauncher.launch(chooser) }.onFailure {
+            openingInternalPage = false
+            Toast.makeText(this, "没有可用的分享应用", Toast.LENGTH_SHORT).show()
+        }
+    }
+
+    /**
+     * 小窗里的控件由系统画，应用能加的就是这几个 RemoteAction。
+     * 放一个分享：进了小窗就看不到操作栏，否则想分享得先退出小窗。
+     */
+    private fun pipParams(): PictureInPictureParams {
+        val builder = PictureInPictureParams.Builder().setAspectRatio(Rational(16, 9))
+        val item = adapter.activeItem()
+        if (item != null && item.id.isNotBlank()) {
+            val intent = PendingIntent.getBroadcast(
+                this, 0,
+                Intent(ACTION_PIP_SHARE).setPackage(packageName),
+                PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE
+            )
+            builder.setActions(listOf(RemoteAction(
+                Icon.createWithResource(this, R.drawable.ic_share), "分享", "分享这个视频", intent
+            )))
+        }
+        return builder.build()
+    }
+
+    private fun refreshPipActions() {
+        if (!isInPictureInPictureMode) return
+        runCatching { setPictureInPictureParams(pipParams()) }
+    }
+
     private fun enterPip() {
-        try { enterPictureInPictureMode(PictureInPictureParams.Builder().setAspectRatio(Rational(16, 9)).build()) }
+        try { enterPictureInPictureMode(pipParams()) }
         catch (e: Exception) { Toast.makeText(this, "画中画启动失败：${e.message}", Toast.LENGTH_SHORT).show() }
     }
 
@@ -807,7 +870,13 @@ class MainActivityV3 : AppCompatActivity() {
 
     override fun onDestroy() {
         invalidateRequests()
+        runCatching { unregisterReceiver(pipShareReceiver) }
         adapter.releaseAll(); playableGate.close(); mediaCache.close(); recommender.close()
         likedSync.close(); updates.close(); api.close(); history.close(); super.onDestroy()
+    }
+
+    companion object {
+        /** 小窗分享按钮发的广播；只在本应用内部收发。 */
+        private const val ACTION_PIP_SHARE = "com.ling.iwaraflow.PIP_SHARE"
     }
 }

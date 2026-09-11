@@ -254,12 +254,22 @@ class RecommendationEngine(
 
         val followed = ArrayDeque(ranked.filter(::isFollowed))
         val discovery = ArrayDeque(ranked.filterNot(::isFollowed))
+        // 一边是空的就没得混，原样返回：没关注任何作者、关注的作者最近没更新、
+        // 没登录拿不到订阅流，都会走到这里。这是正常情况，不是错误。
         if (followed.isEmpty() || discovery.isEmpty()) return ranked
+
+        // 关注的更新不够按 1:[DISCOVERY_RUN] 铺满时，把间隔拉大，让这几条散布开，
+        // 而不是全挤在开头几屏之后就再也不见。够铺满时这里就等于 DISCOVERY_RUN。
+        //
+        // 间隔按**最终会露面的那一段**算：结果最后要截到 MAX_RESULTS 条，
+        // 按整个候选池去摊的话，只关注了一两个作者的账号会把那几条摊到列表末尾，正好被截掉。
+        val window = minOf(discovery.size + followed.size, MAX_RESULTS)
+        val run = maxOf(DISCOVERY_RUN, window / followed.size - 1)
 
         val out = ArrayList<VideoItem>(ranked.size)
         while (discovery.isNotEmpty() && followed.isNotEmpty()) {
-            val block = ArrayList<VideoItem>(DISCOVERY_RUN + 1)
-            repeat(DISCOVERY_RUN) { if (discovery.isNotEmpty()) block += discovery.removeFirst() }
+            val block = ArrayList<VideoItem>(run + 1)
+            repeat(run) { if (discovery.isNotEmpty()) block += discovery.removeFirst() }
             block.add(random.nextInt(block.size + 1), followed.removeFirst())
             out += block
         }

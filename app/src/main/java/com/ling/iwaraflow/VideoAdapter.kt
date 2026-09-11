@@ -30,7 +30,12 @@ class VideoAdapter(
     private val onDownload: (VideoItem, VideoSource) -> Unit,
     private val onEnterPip: () -> Unit,
     private val onEnded: (Int) -> Unit,
-    private val onNeedLogin: () -> Unit
+    private val onNeedLogin: () -> Unit,
+    /**
+     * 交给页面去分享。带播放器和小窗的页面要自己管这件事：分享面板弹出来的时候
+     * 不能自动缩进小窗，回来之后也要接上播放。不传就按老样子直接拉起选择器。
+     */
+    private val onShare: ((VideoItem) -> Unit)? = null
 ) : RecyclerView.Adapter<VideoAdapter.Holder>() {
 
     val items = mutableListOf<VideoItem>()
@@ -103,6 +108,9 @@ class VideoAdapter(
         }
         scheduleIdlePreload(activePosition)
     }
+
+    /** 当前正在播的那一条；小窗里的分享按钮要靠它知道分享谁。 */
+    fun activeItem(): VideoItem? = items.getOrNull(activePosition)
 
     fun isActivePlaying(): Boolean = holders.any {
         it.bindingAdapterPosition == activePosition && it.isPlaying()
@@ -251,7 +259,9 @@ class VideoAdapter(
             quality.setOnClickListener { showQualityChooser(item, false) }
             download.setOnClickListener { showQualityChooser(item, true) }
             pip.setOnClickListener { onEnterPip() }
-            share.setOnClickListener { VideoShare.share(itemView.context, item) }
+            share.setOnClickListener {
+                onShare?.invoke(item) ?: VideoShare.share(itemView.context, item)
+            }
 
             itemView.setOnClickListener {
                 val now = System.currentTimeMillis()

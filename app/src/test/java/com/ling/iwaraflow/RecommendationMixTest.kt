@@ -21,8 +21,8 @@ import java.util.concurrent.atomic.AtomicReference
 class RecommendationMixTest {
     private fun video(id: String) = VideoItem(id, id, "作者", emptyList(), 1, authorId = "author-$id")
 
-    /** 订阅流给 `sub-*`，各榜单给 `<sort>-*`，两边都给足量，让插入比例说了算。 */
-    private fun api(perSource: Int = 40): IwaraApi {
+    /** 订阅流给 `sub-*`，各榜单给 `<sort>-*`。[subscribed] 控制关注作者有多少条更新。 */
+    private fun api(perSource: Int = 40, subscribed: Int = perSource): IwaraApi {
         val api = mock(IwaraApi::class.java)
         `when`(api.isLoggedIn()).thenReturn(true)
         `when`(api.getCurrentUserBlocking()).thenThrow(IllegalStateException("no session in test"))
@@ -33,7 +33,7 @@ class RecommendationMixTest {
         }
         `when`(api.getSubscribedVideoPageBlocking(anyInt(), anyInt())).thenAnswer { invocation ->
             val page = invocation.getArgument<Int>(0)
-            VideoListPage((0 until perSource).map { video("sub-p$page-$it") }, -1)
+            VideoListPage((0 until subscribed).map { video("sub-p$page-$it") }, -1)
         }
         return api
     }
@@ -45,8 +45,8 @@ class RecommendationMixTest {
         return history
     }
 
-    private fun feed(): List<VideoItem> {
-        val engine = RecommendationEngine(api(), history(), random = Random(5))
+    private fun feed(api: IwaraApi = api(), seed: Long = 5): List<VideoItem> {
+        val engine = RecommendationEngine(api, history(), random = Random(seed))
         val delivered = CountDownLatch(1)
         val result = AtomicReference<Result<List<VideoItem>>>()
         engine.load(true) { outcome -> result.set(outcome); delivered.countDown() }
@@ -87,6 +87,24 @@ class RecommendationMixTest {
         assertTrue("结果太短，看不出规律", slots.size >= 6)
         assertTrue("每组的插入位置都一样，等于还是固定节奏：$slots", slots.toSet().size > 1)
         assertTrue("插入位置越界：$slots", slots.all { it in 0 until blockSize })
+    }
+
+    @Test fun anAccountThatFollowsNobodyStillGetsAFeed() {
+        // 一条关注作者的更新都没有——没登录、没关注、或者关注的人最近都没发。
+        // 这时候不该出错，也不该变成空页面，就是一整列没关注过的内容。
+        val feed = feed(api(subscribed = 0))
+        assertTrue("没有关注作者时推荐不该是空的", feed.isNotEmpty())
+        assertTrue("凭空多出关注作者的视频了", feed.none(::followed))
+    }
+
+    @Test fun aHandfulOfFollowedVideosSpreadOutInsteadOfBunchingUpAtTheTop() {
+        // 只关注了很少的作者：几条更新不该全堆在开头几屏，之后再也不见。
+        val feed = feed(api(subscribed = 2))
+        val positions = feed.withIndex().filter { followed(it.value) }.map { it.index }
+        assertEquals("两条关注更新都该留在结果里：$positions", 2, positions.size)
+        // 间隔拉开之后，两条应该分别落在前半段和后半段，而不是挨在最前面。
+        assertTrue("关注的更新全挤在开头了：$positions / 共 ${feed.size} 条",
+            positions.first() < feed.size / 2 && positions.last() >= feed.size / 2)
     }
 
     @Test fun theFollowedVideoCanBeTheVeryFirstOneInABlock() {

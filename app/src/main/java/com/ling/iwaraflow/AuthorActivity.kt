@@ -30,6 +30,7 @@ class AuthorActivity : AppCompatActivity() {
     private lateinit var pager: ViewPager2
     private lateinit var listAdapter: AuthorVideoListAdapter
     private lateinit var feedAdapter: VideoAdapter
+    private lateinit var comments: CommentsHost
     private lateinit var nameView: TextView
     private lateinit var usernameView: TextView
     private lateinit var descriptionView: TextView
@@ -46,7 +47,15 @@ class AuthorActivity : AppCompatActivity() {
     private var inFeed = false
     private var adjustingLoopEdge = false
     private var exiting = false
+    private var descriptionExpanded = false
     private val pageSize = 36
+
+    private fun setDescriptionExpanded(expanded: Boolean) {
+        if (descriptionExpanded == expanded) return
+        descriptionExpanded = expanded
+        descriptionView.maxLines = if (expanded) Int.MAX_VALUE else DESCRIPTION_COLLAPSED_LINES
+        descriptionView.ellipsize = if (expanded) null else android.text.TextUtils.TruncateAt.END
+    }
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
@@ -74,10 +83,14 @@ class AuthorActivity : AppCompatActivity() {
         listView.adapter = listAdapter
         listView.addOnScrollListener(object : RecyclerView.OnScrollListener() {
             override fun onScrolled(recyclerView: RecyclerView, dx: Int, dy: Int) {
+                // 一滑作品列表就把展开的简介收回去，给列表让地方。
+                if (dy != 0) setDescriptionExpanded(false)
                 val lm = recyclerView.layoutManager as? LinearLayoutManager ?: return
                 if (!noMore && !loadingPage && lm.findLastVisibleItemPosition() >= works.size - 6) loadNextPage()
             }
         })
+        // 简介默认只显示三行，点一下展开全文，再点收起。
+        descriptionView.setOnClickListener { setDescriptionExpanded(!descriptionExpanded) }
 
         feedAdapter = VideoAdapter(
             api = api,
@@ -87,12 +100,27 @@ class AuthorActivity : AppCompatActivity() {
             onDownload = ::download,
             onEnterPip = { Toast.makeText(this, "作者作品页暂不进入小窗", Toast.LENGTH_SHORT).show() },
             onEnded = ::nextWork,
-            onNeedLogin = { Toast.makeText(this, "请先在主页登录 Iwara", Toast.LENGTH_SHORT).show() }
+            onNeedLogin = { Toast.makeText(this, "请先在主页登录 Iwara", Toast.LENGTH_SHORT).show() },
+            onComments = { comments.open(it) }
         )
         pager.adapter = feedAdapter
         pager.offscreenPageLimit = 1
+        val density = resources.displayMetrics.density
+        comments = CommentsHost(
+            pager = pager,
+            panelRoot = findViewById(R.id.commentsPanel),
+            scrim = findViewById(R.id.commentsScrim),
+            adapter = feedAdapter,
+            api = api,
+            // 左上角的“‹ 作者作品”按钮：16dp 边距 + 44dp 高。
+            topBarHeight = { (60 * density).toInt() },
+            gapPx = (20 * density).toInt(),
+            onNeedLogin = { Toast.makeText(this, "请先在主页登录 Iwara", Toast.LENGTH_SHORT).show() },
+            onOpenAuthor = ::openAnotherAuthor
+        )
         pager.registerOnPageChangeCallback(object : ViewPager2.OnPageChangeCallback() {
             override fun onPageSelected(position: Int) {
+                comments.close()
                 if (!adjustingLoopEdge) feedAdapter.setActive(position)
                 if (!noMore && !loadingPage && position >= feedAdapter.itemCount - 5) loadNextPage()
             }
@@ -273,8 +301,26 @@ class AuthorActivity : AppCompatActivity() {
         if (lifecycle.currentState.isAtLeast(Lifecycle.State.RESUMED)) feedAdapter.resumeActive()
     }
 
+    /** 评论区里点了别的用户：另开一个作者页；点的就是当前作者就回到作品列表。 */
+    private fun openAnotherAuthor(target: IwaraAuthor) {
+        if (exiting) return
+        val current = author
+        val same = current != null && (
+            (target.id.isNotBlank() && target.id == current.id) ||
+                (target.username.isNotBlank() && target.username == current.username)
+        )
+        if (same) { comments.close(); showList(); return }
+        feedAdapter.pauseAll()
+        startActivity(Intent(this, AuthorActivity::class.java).apply {
+            putExtra(EXTRA_ID, target.id)
+            putExtra(EXTRA_NAME, target.name)
+            putExtra(EXTRA_USERNAME, target.username)
+        })
+    }
+
     private fun showList() {
         if (!inFeed || exiting) return
+        comments.close()
         feedAdapter.pauseAll()
         inFeed = false
         feedPage.visibility = View.GONE
@@ -283,7 +329,7 @@ class AuthorActivity : AppCompatActivity() {
 
     private fun handleBack() {
         if (exiting) return
-        if (inFeed) showList() else finishSafely()
+        if (comments.isOpen) comments.close() else if (inFeed) showList() else finishSafely()
     }
 
     private fun finishSafely() {
@@ -411,6 +457,7 @@ class AuthorActivity : AppCompatActivity() {
     }
 
     override fun onDestroy() {
+        if (::comments.isInitialized) comments.release()
         feedAdapter.releaseAll()
         gate.close()
         mediaCache.close()
@@ -423,6 +470,8 @@ class AuthorActivity : AppCompatActivity() {
     data class FollowResult(val authorId: String, val username: String, val following: Boolean)
 
     companion object {
+        /** 简介折叠时显示几行。 */
+        const val DESCRIPTION_COLLAPSED_LINES = 3
         const val EXTRA_ID = "author_id"
         const val EXTRA_NAME = "author_name"
         const val EXTRA_USERNAME = "author_username"

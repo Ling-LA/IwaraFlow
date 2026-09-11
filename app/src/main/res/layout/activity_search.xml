@@ -160,5 +160,16 @@
             android:textColor="#FFFFFFFF"
             android:textSize="14sp"
             android:textStyle="bold" />
+
+        <!-- 评论面板开着时盖住画面：点画面收起面板。 -->
+        <View
+            android:id="@+id/commentsScrim"
+            android:layout_width="match_parent"
+            android:layout_height="match_parent"
+            android:clickable="true"
+            android:focusable="true"
+            android:visibility="gone" />
+
+        <include layout="@layout/view_comments_panel" />
     </FrameLayout>
 </FrameLayout>

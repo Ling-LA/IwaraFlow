@@ -90,6 +90,7 @@ class SearchActivity : AppCompatActivity() {
     private var inFeed = false
     private var exiting = false
     private val pageSize = 24
+    private lateinit var comments: CommentsHost
 
     private val authorLauncher = registerForActivityResult(ActivityResultContracts.StartActivityForResult()) { result ->
         // 从作者页回来后停留在搜索结果，不自动恢复播放；关注状态同步给结果里的视频。
@@ -138,12 +139,27 @@ class SearchActivity : AppCompatActivity() {
             onDownload = ::download,
             onEnterPip = { Toast.makeText(this, "搜索结果页暂不进入小窗", Toast.LENGTH_SHORT).show() },
             onEnded = ::nextWork,
-            onNeedLogin = { Toast.makeText(this, "请先在主页登录 Iwara", Toast.LENGTH_SHORT).show() }
+            onNeedLogin = { Toast.makeText(this, "请先在主页登录 Iwara", Toast.LENGTH_SHORT).show() },
+            onComments = { comments.open(it) }
         )
         pager.adapter = feedAdapter
         pager.offscreenPageLimit = 1
+        val density = resources.displayMetrics.density
+        comments = CommentsHost(
+            pager = pager,
+            panelRoot = findViewById(R.id.commentsPanel),
+            scrim = findViewById(R.id.commentsScrim),
+            adapter = feedAdapter,
+            api = api,
+            // 左上角的返回按钮：16dp 边距 + 44dp 高。
+            topBarHeight = { (60 * density).toInt() },
+            gapPx = (20 * density).toInt(),
+            onNeedLogin = { Toast.makeText(this, "请先在主页登录 Iwara", Toast.LENGTH_SHORT).show() },
+            onOpenAuthor = ::openAuthor
+        )
         pager.registerOnPageChangeCallback(object : ViewPager2.OnPageChangeCallback() {
             override fun onPageSelected(position: Int) {
+                comments.close()
                 feedAdapter.setActive(position)
                 if (position >= feedAdapter.itemCount - 5) feedTab?.let { loadNextPage(it) }
             }
@@ -419,6 +435,7 @@ class SearchActivity : AppCompatActivity() {
 
     private fun showList() {
         if (!inFeed || exiting) return
+        comments.close()
         feedAdapter.pauseAll()
         inFeed = false
         feedPage.visibility = View.GONE
@@ -427,7 +444,7 @@ class SearchActivity : AppCompatActivity() {
 
     private fun handleBack() {
         if (exiting) return
-        if (inFeed) showList() else finishSafely()
+        if (comments.isOpen) comments.close() else if (inFeed) showList() else finishSafely()
     }
 
     private fun finishSafely() {
@@ -496,6 +513,7 @@ class SearchActivity : AppCompatActivity() {
     }
 
     override fun onDestroy() {
+        if (::comments.isInitialized) comments.release()
         exiting = true
         feedAdapter.releaseAll()
         gate.close()

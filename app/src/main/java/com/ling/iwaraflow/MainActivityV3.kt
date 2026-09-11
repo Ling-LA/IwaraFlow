@@ -47,13 +47,11 @@ class MainActivityV3 : AppCompatActivity() {
     private lateinit var error: TextView
     private lateinit var adapter: VideoAdapter
     private lateinit var topBar: View
-    /** 评论面板开着时盖在画面上的透明层：点画面是收起面板，而不是暂停视频。 */
-    private lateinit var commentsScrim: View
-    private lateinit var commentsPanel: CommentsPanel
+    private lateinit var comments: CommentsHost
 
     /** 评论面板开着时返回键先关面板，而不是退出应用。 */
     private val closeCommentsOnBack = object : OnBackPressedCallback(false) {
-        override fun handleOnBackPressed() { commentsPanel.close() }
+        override fun handleOnBackPressed() { comments.close() }
     }
 
     private var mode = "recommend"
@@ -148,8 +146,6 @@ class MainActivityV3 : AppCompatActivity() {
         loading = findViewById(R.id.loading)
         error = findViewById(R.id.error)
         topBar = findViewById(R.id.topBar)
-        commentsScrim = findViewById(R.id.commentsScrim)
-        commentsScrim.setOnClickListener { commentsPanel.close() }
 
         adapter = VideoAdapter(
             api = api,
@@ -165,22 +161,23 @@ class MainActivityV3 : AppCompatActivity() {
         )
         pager.adapter = adapter
         pager.offscreenPageLimit = 1
-        commentsPanel = CommentsPanel(
-            root = findViewById(R.id.commentsPanel),
+        comments = CommentsHost(
+            pager = pager,
+            panelRoot = findViewById(R.id.commentsPanel),
+            scrim = findViewById(R.id.commentsScrim),
+            adapter = adapter,
             api = api,
+            topBarHeight = { topBar.height.takeIf { it > 0 } ?: dp(58) },
+            gapPx = dp(COMMENTS_PANEL_GAP_DP),
             onNeedLogin = ::showLoginDialog,
-            onLayoutChanged = { open, top, bottom ->
-                closeCommentsOnBack.isEnabled = open
-                commentsScrim.visibility = if (open) View.VISIBLE else View.GONE
-                adapter.setVideoInsets(if (open) top else 0, if (open) bottom else 0)
-            },
-            onOpenAuthor = { author -> openAuthor(author.id, author.name, author.username) }
+            onOpenAuthor = { author -> openAuthor(author.id, author.name, author.username) },
+            onOpenChanged = { open -> closeCommentsOnBack.isEnabled = open }
         )
         onBackPressedDispatcher.addCallback(this, closeCommentsOnBack)
         pager.registerOnPageChangeCallback(object : ViewPager2.OnPageChangeCallback() {
             override fun onPageSelected(position: Int) {
                 // 翻到下一条了，上一条的评论就不该还挂着。
-                commentsPanel.close()
+                comments.close()
                 adapter.setActive(position)
                 if (pagingEnabled && position >= adapter.itemCount - 5) loadMore()
             }
@@ -901,13 +898,7 @@ class MainActivityV3 : AppCompatActivity() {
      */
     private fun openComments(item: VideoItem) {
         if (isInPictureInPictureMode) return
-        val screenWidth = pager.width.takeIf { it > 0 } ?: resources.displayMetrics.widthPixels
-        val screenHeight = pager.height.takeIf { it > 0 } ?: resources.displayMetrics.heightPixels
-        val topBarHeight = topBar.height.takeIf { it > 0 } ?: dp(58)
-        val aspect = adapter.activeVideoAspect()
-        val height = CommentsPanel.panelHeight(screenWidth, screenHeight, topBarHeight, aspect, gap = dp(COMMENTS_PANEL_GAP_DP))
-        val top = CommentsPanel.videoTop(screenWidth, screenHeight, topBarHeight, aspect, height)
-        commentsPanel.open(item, height, top)
+        comments.open(item)
     }
 
     /**
@@ -936,7 +927,7 @@ class MainActivityV3 : AppCompatActivity() {
         PictureInPictureParams.Builder().setAspectRatio(Rational(16, 9)).build()
 
     private fun enterPip() {
-        commentsPanel.close()
+        comments.close()
         try { enterPictureInPictureMode(pipParams()) }
         catch (e: Exception) { Toast.makeText(this, "画中画启动失败：${e.message}", Toast.LENGTH_SHORT).show() }
     }
@@ -949,7 +940,7 @@ class MainActivityV3 : AppCompatActivity() {
 
     override fun onPictureInPictureModeChanged(isInPictureInPictureMode: Boolean) {
         super.onPictureInPictureModeChanged(isInPictureInPictureMode)
-        if (isInPictureInPictureMode) commentsPanel.close()
+        if (isInPictureInPictureMode) comments.close()
         topBar.visibility = if (isInPictureInPictureMode) View.GONE else View.VISIBLE
         adapter.setPipMode(isInPictureInPictureMode)
     }
@@ -995,7 +986,7 @@ class MainActivityV3 : AppCompatActivity() {
 
     override fun onDestroy() {
         invalidateRequests()
-        if (::commentsPanel.isInitialized) commentsPanel.release()
+        if (::comments.isInitialized) comments.release()
         adapter.releaseAll(); playableGate.close(); mediaCache.close(); recommender.close()
         likedSync.close(); updates.close(); api.close(); history.close(); super.onDestroy()
     }

@@ -19,7 +19,7 @@ class CommentListAdapter(
 ) : RecyclerView.Adapter<CommentListAdapter.Holder>() {
 
     /** 列表里的一行：顶层评论或者展开出来的回复。 */
-    private class Row(val comment: IwaraComment, val depth: Int)
+    internal class Row(val comment: IwaraComment, val depth: Int)
 
     private val rows = ArrayList<Row>()
     /** 已展开回复的顶层评论 id → 回复条数，用来收起时知道删几行。 */
@@ -105,7 +105,7 @@ class CommentListAdapter(
         private val replies = view.findViewById<TextView>(R.id.commentReplies)
         private val density = view.resources.displayMetrics.density
 
-        fun bind(row: Row) {
+        internal fun bind(row: Row) {
             val c = row.comment
             // 回复整体往右缩进，看得出是挂在上一条下面的。
             val indent = (if (row.depth > 0) 48 else 16) * density

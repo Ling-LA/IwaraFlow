@@ -43,10 +43,16 @@
         <activity
             android:name=".SearchActivity"
             android:screenOrientation="portrait"
+            android:supportsPictureInPicture="true"
+            android:resizeableActivity="true"
+            android:configChanges="screenSize|smallestScreenSize|screenLayout|orientation"
             android:exported="false" />
         <activity
             android:name=".AuthorActivity"
             android:screenOrientation="portrait"
+            android:supportsPictureInPicture="true"
+            android:resizeableActivity="true"
+            android:configChanges="screenSize|smallestScreenSize|screenLayout|orientation"
             android:exported="false" />
         <activity
             android:name=".MainActivityV3"

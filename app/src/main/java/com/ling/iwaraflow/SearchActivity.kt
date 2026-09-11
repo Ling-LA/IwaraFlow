@@ -137,7 +137,8 @@ class SearchActivity : AppCompatActivity() {
             prefs = prefs,
             mediaCache = mediaCache,
             onDownload = ::download,
-            onEnterPip = { Toast.makeText(this, "搜索结果页暂不进入小窗", Toast.LENGTH_SHORT).show() },
+            onEnterPip = ::enterPip,
+            onShare = ::shareVideo,
             onEnded = ::nextWork,
             onNeedLogin = { Toast.makeText(this, "请先在主页登录 Iwara", Toast.LENGTH_SHORT).show() },
             onComments = { comments.open(it) },
@@ -483,6 +484,10 @@ class SearchActivity : AppCompatActivity() {
     }
 
     private fun download(item: VideoItem, source: VideoSource) {
+        DownloadPrompt.confirmIfDuplicate(this, history, item, source) { startDownload(item, source) }
+    }
+
+    private fun startDownload(item: VideoItem, source: VideoSource) {
         try {
             val fileName = item.title.replace(Regex("[\\\\/:*?\"<>|]"), "_").take(80) + "_${source.name}.mp4"
             val request = DownloadManager.Request(Uri.parse(source.url))
@@ -499,18 +504,60 @@ class SearchActivity : AppCompatActivity() {
 
     override fun onResume() {
         super.onResume()
+        leavingForShare = false
         if (inFeed && !exiting) feedAdapter.resumeActive()
     }
 
     override fun onPause() {
         // 半透明界面盖上来只会走到 onPause，这时释放播放器画面会变黑。
-        feedAdapter.suspendPlayback()
+        // 小窗里更不能停。
+        if (!isInPictureInPictureMode) feedAdapter.suspendPlayback()
         super.onPause()
     }
 
     override fun onStop() {
-        feedAdapter.pauseAll()
+        if (!isInPictureInPictureMode) feedAdapter.pauseAll()
         super.onStop()
+    }
+
+    // ---------------------------------------------------------------- 小窗 / 分享
+
+    /** 正在把链接交给别的应用：这段时间不要因为 onUserLeaveHint 自动进小窗。 */
+    private var leavingForShare = false
+
+    private fun shareVideo(item: VideoItem) {
+        if (item.id.isBlank()) { Toast.makeText(this, "这个视频没有可分享的链接", Toast.LENGTH_SHORT).show(); return }
+        SharePanel.show(this, VideoShare.shareText(item), item.title, "分享视频链接") { intent ->
+            leavingForShare = true
+            runCatching { startActivity(intent) }.onFailure {
+                leavingForShare = false
+                Toast.makeText(this, "没有可用的分享应用", Toast.LENGTH_SHORT).show()
+            }
+        }
+    }
+
+    private fun pipParams(): android.app.PictureInPictureParams =
+        android.app.PictureInPictureParams.Builder().setAspectRatio(android.util.Rational(16, 9)).build()
+
+    private fun enterPip() {
+        if (!inFeed || exiting) return
+        comments.close()
+        runCatching { enterPictureInPictureMode(pipParams()) }
+            .onFailure { Toast.makeText(this, "画中画启动失败：${it.message}", Toast.LENGTH_SHORT).show() }
+    }
+
+    override fun onUserLeaveHint() {
+        super.onUserLeaveHint()
+        if (leavingForShare || exiting) return
+        if (inFeed && prefs.autoPip && feedAdapter.isActivePlaying() && !isInPictureInPictureMode) enterPip()
+    }
+
+    @Suppress("DEPRECATION")
+    override fun onPictureInPictureModeChanged(isInPictureInPictureMode: Boolean) {
+        super.onPictureInPictureModeChanged(isInPictureInPictureMode)
+        if (isInPictureInPictureMode) comments.close()
+        findViewById<View>(R.id.searchFeedBack).visibility = if (isInPictureInPictureMode) View.GONE else View.VISIBLE
+        feedAdapter.setPipMode(isInPictureInPictureMode)
     }
 
     override fun onDestroy() {

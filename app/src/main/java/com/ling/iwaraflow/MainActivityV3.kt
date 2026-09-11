@@ -986,6 +986,10 @@ class MainActivityV3 : AppCompatActivity() {
     private fun dp(value: Int): Int = (value * resources.displayMetrics.density).toInt()
 
     private fun enqueueDownload(item: VideoItem, source: VideoSource) {
+        DownloadPrompt.confirmIfDuplicate(this, history, item, source) { startDownload(item, source) }
+    }
+
+    private fun startDownload(item: VideoItem, source: VideoSource) {
         if (Build.VERSION.SDK_INT == Build.VERSION_CODES.P && ContextCompat.checkSelfPermission(this, Manifest.permission.WRITE_EXTERNAL_STORAGE) != PackageManager.PERMISSION_GRANTED) {
             ActivityCompat.requestPermissions(this, arrayOf(Manifest.permission.WRITE_EXTERNAL_STORAGE), 901)
             Toast.makeText(this, "请授予存储权限后再次点击下载", Toast.LENGTH_LONG).show(); return

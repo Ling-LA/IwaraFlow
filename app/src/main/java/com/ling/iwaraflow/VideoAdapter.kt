@@ -89,10 +89,24 @@ class VideoAdapter(
         scheduleIdlePreload(position)
     }
 
+    /** 彻底停下并释放播放器：真的切到后台时用，解码器要还给系统。 */
     fun pauseAll() {
         playbackEnabled = false
         cancelIdlePreload()
         holders.toList().forEach { it.setActive(false) }
+    }
+
+    /**
+     * 只暂停，不释放播放器。
+     *
+     * 系统分享面板这类半透明界面盖上来时，本页只会走到 onPause（还看得见，不会走 onStop）。
+     * 这时如果按 [pauseAll] 把播放器释放掉，`playerView` 的 surface 一空画面就是纯黑的，
+     * 而面板根本没盖住上半屏——看上去就是“视频莫名其妙黑了”。留着播放器，画面就停在最后一帧。
+     */
+    fun suspendPlayback() {
+        playbackEnabled = false
+        cancelIdlePreload()
+        holders.toList().forEach { it.suspend() }
     }
 
     fun savePlaybackPosition() {
@@ -417,6 +431,24 @@ class VideoAdapter(
                 stopWatchdog()
                 releasePlayerOnly()
             }
+        }
+
+        /**
+         * 暂停但留住播放器和画面。这里把 [active] 置回 false，所以恢复时
+         * [setActive] 会走到“播放器还在就直接继续播”那一支，不用重新起播。
+         */
+        fun suspend() {
+            val p = player ?: return
+            if (!active) return
+            persistHistory(completed = false)
+            active = false
+            pendingSingleTap?.let { tapHandler.removeCallbacks(it) }
+            pendingSingleTap = null
+            tapHandler.removeCallbacks(holdToSpeed)
+            stopSpeedBoost()
+            stopWatchdog()
+            p.playWhenReady = false
+            p.pause()
         }
 
         fun readyForIdlePreload(): Boolean = active && player?.playbackState == Player.STATE_READY

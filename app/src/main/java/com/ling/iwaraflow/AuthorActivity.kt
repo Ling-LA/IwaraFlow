@@ -398,7 +398,8 @@ class AuthorActivity : AppCompatActivity() {
     }
 
     override fun onPause() {
-        feedAdapter.pauseAll()
+        // 半透明界面盖上来只会走到 onPause，这时释放播放器画面会变黑。
+        feedAdapter.suspendPlayback()
         super.onPause()
     }
 

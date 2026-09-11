@@ -857,7 +857,9 @@ class MainActivityV3 : AppCompatActivity() {
     }
 
     override fun onPause() {
-        if (openingInternalPage || !isInPictureInPictureMode) adapter.pauseAll()
+        // 只暂停不释放：分享面板这类半透明界面盖上来时只会走到这里，
+        // 释放了画面就黑，而面板并没有盖住上半屏。真的进后台会接着走 onStop。
+        if (openingInternalPage || !isInPictureInPictureMode) adapter.suspendPlayback()
         super.onPause()
     }
 

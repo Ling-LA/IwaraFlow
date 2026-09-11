@@ -165,7 +165,11 @@ class VideoAdapter(
 
     fun setPipMode(enabled: Boolean) {
         pipMode = enabled
-        holders.forEach { it.setChromeVisible(!enabled) }
+        holders.forEach {
+            it.setChromeVisible(!enabled)
+            // 小窗里画面要铺满整个小窗，任何留白都不能有。
+            it.applyVideoInsets()
+        }
     }
 
     private fun cancelIdlePreload() {
@@ -273,6 +277,14 @@ class VideoAdapter(
         private var downY = 0f
         private var touchMoved = false
         private var speedBoosting = false
+
+        init {
+            // 卡片尺寸一变（进出小窗、分屏）就按新高度重算留白，别拿整屏的数字硬套。
+            view.addOnLayoutChangeListener { _, _, top, _, bottom, _, oldTop, _, oldBottom ->
+                if (bottom - top != oldBottom - oldTop) applyVideoInsets()
+            }
+        }
+
         private val holdToSpeed = Runnable {
             if (active && !touchMoved) {
                 player?.let { p ->
@@ -548,14 +560,19 @@ class VideoAdapter(
         fun applyVideoInsets() {
             val height = itemView.height.takeIf { it > 0 } ?: itemView.resources.displayMetrics.heightPixels
             val panelOpen = bottomInset > 0 || topInset > 0
-            val top = if (panelOpen) topInset else 0
+            val top = if (panelOpen && !pipMode) topInset else 0
             val bottom = when {
+                // 小窗：卡片只有两三百像素高，按整屏算出来的留白比窗口还大，画面会被挤没。
+                pipMode -> 0
                 panelOpen -> bottomInset
                 landscape -> (height * LANDSCAPE_LIFT).toInt()
                 else -> 0
             }
-            if (playerView.paddingBottom != bottom || playerView.paddingTop != top) {
-                playerView.setPadding(0, top, 0, bottom)
+            // 留白不能超过卡片本身：窗口再小也得给画面留一半以上。
+            val cappedBottom = bottom.coerceAtMost(height / 2)
+            val cappedTop = top.coerceAtMost(height / 4)
+            if (playerView.paddingBottom != cappedBottom || playerView.paddingTop != cappedTop) {
+                playerView.setPadding(0, cappedTop, 0, cappedBottom)
             }
         }
 

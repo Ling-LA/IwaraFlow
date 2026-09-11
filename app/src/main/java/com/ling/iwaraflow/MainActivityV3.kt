@@ -706,7 +706,11 @@ class MainActivityV3 : AppCompatActivity() {
         panel.addView(sectionTitle("播放"))
         val autoNext = CheckBox(this).apply { text = "播放完毕自动进入下一条"; isChecked = prefs.autoNext }
         val autoPip = CheckBox(this).apply { text = "切到后台时自动进入画中画"; isChecked = prefs.autoPip }
-        panel.addView(autoNext); panel.addView(autoPip); panel.addView(sectionTitle("默认清晰度"))
+        val pauseIcon = CheckBox(this).apply {
+            text = "暂停时显示中间的播放图标"; isChecked = prefs.showPauseIndicator
+        }
+        panel.addView(autoNext); panel.addView(autoPip); panel.addView(pauseIcon)
+        panel.addView(sectionTitle("默认清晰度"))
         val qualityValues = arrayOf("highest", "Source", "1080", "720", "540", "360")
         val qualityNames = arrayOf("最高可用 / 原画", "Source", "1080p", "720p", "540p", "360p")
         val spinner = Spinner(this); spinner.adapter = ArrayAdapter(this, android.R.layout.simple_spinner_dropdown_item, qualityNames)
@@ -723,6 +727,7 @@ class MainActivityV3 : AppCompatActivity() {
         val dialog = AlertDialog.Builder(this).setTitle("设置").setMessage("播放行为、画质、推荐过滤和维护工具").setView(content)
             .setNegativeButton("取消", null).setPositiveButton("保存") { _, _ ->
                 prefs.skipSeen = skipSeen.isChecked; prefs.autoNext = autoNext.isChecked; prefs.autoPip = autoPip.isChecked
+                prefs.showPauseIndicator = pauseIcon.isChecked
                 prefs.defaultQuality = qualityValues[spinner.selectedItemPosition]
                 Toast.makeText(this, "设置已保存", Toast.LENGTH_SHORT).show(); loadFeed(reset = true)
             }.create()

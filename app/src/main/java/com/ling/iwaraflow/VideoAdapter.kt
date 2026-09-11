@@ -197,6 +197,7 @@ class VideoAdapter(
         private val share = view.findViewById<TextView>(R.id.share)
         private val reactionBurst = view.findViewById<ReactionBurstView>(R.id.reactionBurst)
         private val speedIndicator = view.findViewById<TextView>(R.id.speedIndicator)
+        private val pauseIndicator = view.findViewById<PauseIndicatorView>(R.id.pauseIndicator)
 
         private var player: ExoPlayer? = null
         private var bound: VideoItem? = null
@@ -233,6 +234,7 @@ class VideoAdapter(
             bound = item
             recoveryAttempts = 0
             item.localFavorite = history.isLocalFavorite(item.id)
+            pauseIndicator.indicatorEnabled = prefs.showPauseIndicator
             author.text = "@${item.author}"
             title.text = item.title
             tags.text = item.tags.take(8).joinToString("  ") { "#$it" }

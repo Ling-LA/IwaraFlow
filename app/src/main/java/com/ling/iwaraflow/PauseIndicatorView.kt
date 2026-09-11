@@ -10,11 +10,21 @@ import androidx.appcompat.widget.AppCompatTextView
 import androidx.media3.common.Player
 import androidx.media3.ui.PlayerView
 
-/** Shows a centered play glyph only while the card's Media3 player is explicitly paused. */
+/**
+ * 暂停时在画面中央显示一个播放图标。可以在设置里关掉——有人嫌它挡画面。
+ */
 class PauseIndicatorView @JvmOverloads constructor(
     context: Context,
     attrs: AttributeSet? = null
 ) : AppCompatTextView(context, attrs) {
+    /** 关掉之后就一直不显示；由卡片在绑定时按设置写入。 */
+    var indicatorEnabled: Boolean = true
+        set(value) {
+            if (field == value) return
+            field = value
+            refreshState()
+        }
+
     private val handler = Handler(Looper.getMainLooper())
     private val poll = object : Runnable {
         override fun run() {
@@ -36,6 +46,10 @@ class PauseIndicatorView @JvmOverloads constructor(
     }
 
     private fun refreshState() {
+        if (!indicatorEnabled) {
+            visibility = View.GONE
+            return
+        }
         val player = findSiblingPlayerView()?.player
         val explicitlyPaused = player != null &&
             !player.playWhenReady &&

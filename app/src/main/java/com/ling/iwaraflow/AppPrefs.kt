@@ -22,6 +22,11 @@ class AppPrefs(context: Context) {
         get() = prefs.getLong("liked_sync_at", 0L)
         set(value) = prefs.edit().putLong("liked_sync_at", value).apply()
 
+    /** 暂停时是否在画面中央显示那个播放图标。 */
+    var showPauseIndicator: Boolean
+        get() = prefs.getBoolean("show_pause_indicator", true)
+        set(value) = prefs.edit().putBoolean("show_pause_indicator", value).apply()
+
     var autoPip: Boolean
         get() = prefs.getBoolean("auto_pip", true)
         set(value) = prefs.edit().putBoolean("auto_pip", value).apply()

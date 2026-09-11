@@ -21,6 +21,7 @@ import android.widget.CheckBox
 import android.widget.EditText
 import android.widget.LinearLayout
 import android.widget.ProgressBar
+import android.widget.ScrollView
 import android.widget.Spinner
 import android.widget.TextView
 import android.widget.Toast
@@ -585,7 +586,8 @@ class MainActivityV3 : AppCompatActivity() {
 
     private fun showMainMenu() {
         val account = if (api.isLoggedIn()) "退出 Iwara 登录" else "登录 Iwara"
-        val items = arrayOf(account, "浏览历史", "我的收藏", "已下载", "已关注用户", "同步点赞记录", "设置", "检查更新", "重新加载当前流", "诊断信息")
+        // 同步点赞记录和诊断信息都挪进了设置页：主菜单留常用入口就够了。
+        val items = arrayOf(account, "浏览历史", "我的收藏", "已下载", "已关注用户", "设置", "检查更新", "重新加载当前流")
         val dialog = AlertDialog.Builder(this).setTitle("IwaraFlow").setItems(items) { _, which ->
             when (which) {
                 0 -> if (api.isLoggedIn()) { api.logout(); Toast.makeText(this, "已退出登录", Toast.LENGTH_SHORT).show(); loadFeed(reset = true) } else showLoginDialog()
@@ -593,11 +595,9 @@ class MainActivityV3 : AppCompatActivity() {
                 2 -> openSavedVideos(SavedVideosActivity.KIND_FAVORITES)
                 3 -> openSavedVideos(SavedVideosActivity.KIND_DOWNLOADS)
                 4 -> openFollowingPage()
-                5 -> syncLikedVideos()
-                6 -> showSettingsDialog()
-                7 -> updates.check(manual = true)
-                8 -> loadFeed(reset = true)
-                9 -> NavigationDiagnostics.show(this)
+                5 -> showSettingsDialog()
+                6 -> updates.check(manual = true)
+                7 -> loadFeed(reset = true)
             }
         }.create()
         dialog.setOnShowListener { styleDialogButtons(dialog) }; dialog.show()
@@ -684,7 +684,16 @@ class MainActivityV3 : AppCompatActivity() {
         val qualityNames = arrayOf("最高可用 / 原画", "Source", "1080p", "720p", "540p", "360p")
         val spinner = Spinner(this); spinner.adapter = ArrayAdapter(this, android.R.layout.simple_spinner_dropdown_item, qualityNames)
         spinner.setSelection(qualityValues.indexOf(prefs.defaultQuality).let { if (it >= 0) it else 0 }); panel.addView(spinner)
-        val dialog = AlertDialog.Builder(this).setTitle("设置").setMessage("播放行为、画质和推荐过滤").setView(panel)
+
+        panel.addView(sectionTitle("维护"))
+        panel.addView(actionRow("同步点赞记录", "把在网页端点过的赞补进“已看”，刷新推荐后生效。") { syncLikedVideos() })
+        panel.addView(actionRow("诊断信息", "最近的异常、退出原因和加载线索，只存在本机，不会上传。") {
+            NavigationDiagnostics.show(this)
+        })
+
+        // 多了“维护”这一段，矮屏幕上放不下，内容区要能滚动。
+        val content = ScrollView(this).apply { addView(panel) }
+        val dialog = AlertDialog.Builder(this).setTitle("设置").setMessage("播放行为、画质、推荐过滤和维护工具").setView(content)
             .setNegativeButton("取消", null).setPositiveButton("保存") { _, _ ->
                 prefs.skipSeen = skipSeen.isChecked; prefs.autoNext = autoNext.isChecked; prefs.autoPip = autoPip.isChecked
                 prefs.defaultQuality = qualityValues[spinner.selectedItemPosition]
@@ -692,6 +701,26 @@ class MainActivityV3 : AppCompatActivity() {
             }.create()
         dialog.setOnShowListener { styleDialogButtons(dialog) }; dialog.show()
     }
+
+    /**
+     * 设置页里的一行“动作”。点了立刻执行，不等“保存”——它们本来就不是开关。
+     * 也不关闭设置页：关掉的话，用户刚勾上还没保存的选项就白勾了。
+     */
+    private fun actionRow(title: String, subtitle: String, onClick: () -> Unit): View =
+        LinearLayout(this).apply {
+            orientation = LinearLayout.VERTICAL
+            isClickable = true
+            isFocusable = true
+            setPadding(dp(4), dp(10), dp(4), dp(10))
+            addView(TextView(context).apply {
+                text = title; textSize = 15f; setTextColor(0xFFD84B73.toInt())
+                setTypeface(null, android.graphics.Typeface.BOLD)
+            })
+            addView(TextView(context).apply {
+                text = subtitle; textSize = 12f; setTextColor(0xFF607D93.toInt()); setPadding(0, dp(2), 0, 0)
+            })
+            setOnClickListener { onClick() }
+        }
 
     private fun sectionTitle(text: String) = TextView(this).apply {
         this.text = text; setTextColor(0xFFFF6F91.toInt()); textSize = 13f; setPadding(0, dp(12), 0, dp(4)); setTypeface(null, android.graphics.Typeface.BOLD)

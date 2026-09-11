@@ -171,7 +171,7 @@ Iwara 官方点赞会完整同步进 `seen_videos`（服务端一页最多 50 �
 - AndroidX Media3 / ExoPlayer 1.11.0，CacheDataSource / SimpleCache 磁盘缓存
 - OkHttp、Coil
 - SQLiteOpenHelper 本地数据库；AndroidX Security Crypto 加密会话
-- Android ImageDecoder / AnimatedImageDrawable 播放内置 GIF 动画（minSdk 28，无第三方动画库）
+- Android ImageDecoder / AnimatedImageDrawable 播放内置 GIF 动画（minSdk 28，无第三方动画库）；两段素材均为 560×560、70ms/帧（点赞 26 帧，收藏 35 帧），按屏幕显示尺寸解码
 - Android DownloadManager、Picture-in-Picture、FileProvider
 - GitHub Releases 应用内更新
 
@@ -226,6 +226,10 @@ gradlew.bat assembleDebug
 > 发布新版本时必须同时提高 `versionCode` 与 `versionName`，否则已安装相同版本号的客户端不会收到更新提示。
 
 ## 更新日志
+
+### v0.8.4
+
+- 点赞动画素材放慢：每帧 40ms → 70ms（26 帧，1.04s → 1.82s），与收藏动画同节奏；画布由 750×750 重采样为 560×560，与收藏动画一致
 
 ### v0.8.3
 

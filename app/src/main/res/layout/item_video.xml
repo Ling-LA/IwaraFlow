@@ -14,18 +14,57 @@
         app:resize_mode="fit"
         app:use_controller="false" />
 
-    <com.ling.iwaraflow.PauseIndicatorView
-        android:id="@+id/pauseIndicator"
-        android:layout_width="78dp"
-        android:layout_height="78dp"
-        android:layout_gravity="center"
-        android:background="@drawable/bg_pause_indicator"
-        android:gravity="center"
-        android:paddingStart="6dp"
-        android:text="▶"
-        android:textColor="#FFFFFFFF"
-        android:textSize="34sp"
-        android:visibility="gone" />
+    <!-- 暂停时的控制行：后退 N 秒 / 播放三角 / 前进 N 秒。左下角、进度条上方，
+         位置由 PauseSeekBar 在运行时算出来（跟着进度条走）。 -->
+    <LinearLayout
+        android:id="@+id/pauseControls"
+        android:layout_width="wrap_content"
+        android:layout_height="wrap_content"
+        android:layout_gravity="top|start"
+        android:layout_marginStart="10dp"
+        android:gravity="center_vertical"
+        android:orientation="horizontal"
+        android:visibility="gone">
+
+        <TextView
+            android:id="@+id/skipBack"
+            android:layout_width="wrap_content"
+            android:layout_height="44dp"
+            android:drawableStart="@drawable/ic_skip_back"
+            android:drawablePadding="4dp"
+            android:gravity="center"
+            android:paddingStart="8dp"
+            android:paddingEnd="8dp"
+            android:text="15"
+            android:textColor="#FFFFFFFF"
+            android:textSize="13sp"
+            android:textStyle="bold" />
+
+        <com.ling.iwaraflow.PauseIndicatorView
+            android:id="@+id/pauseIndicator"
+            android:layout_width="44dp"
+            android:layout_height="44dp"
+            android:gravity="center"
+            android:paddingStart="3dp"
+            android:text="▶"
+            android:textColor="#FFFFFFFF"
+            android:textSize="24sp"
+            android:visibility="gone" />
+
+        <TextView
+            android:id="@+id/skipForward"
+            android:layout_width="wrap_content"
+            android:layout_height="44dp"
+            android:drawableEnd="@drawable/ic_skip_forward"
+            android:drawablePadding="4dp"
+            android:gravity="center"
+            android:paddingStart="8dp"
+            android:paddingEnd="8dp"
+            android:text="15"
+            android:textColor="#FFFFFFFF"
+            android:textSize="13sp"
+            android:textStyle="bold" />
+    </LinearLayout>
 
     <TextView
         android:id="@+id/speedIndicator"

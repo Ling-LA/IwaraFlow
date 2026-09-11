@@ -73,6 +73,7 @@ class PauseSeekBar @JvmOverloads constructor(
         removeCallbacks(updater)
         observedPlayer = null
         visibility = View.GONE
+        controls(cardRoot())?.visibility = View.GONE
         restoreChrome()
         super.onDetachedFromWindow()
     }
@@ -86,18 +87,21 @@ class PauseSeekBar @JvmOverloads constructor(
             p.playbackState != Player.STATE_IDLE && p.playbackState != Player.STATE_ENDED
         if (root == null || !paused || duration <= 0L) {
             visibility = View.GONE
+            controls(root)?.visibility = View.GONE
             restoreChrome()
             return
         }
         // 画中画时适配器用 GONE 收起了整套控件，这块底部不归进度条管。
         if (root.findViewById<View>(R.id.infoPanel)?.visibility == View.GONE) {
             visibility = View.GONE
+            controls(root)?.visibility = View.GONE
             chromeHidden = false
             return
         }
 
         hideChrome(root)
         placeUnderTags(root)
+        placeControls(root)
         visibility = View.VISIBLE
         if (!dragging) {
             val position = p!!.currentPosition.coerceIn(0L, duration)
@@ -115,6 +119,24 @@ class PauseSeekBar @JvmOverloads constructor(
         val lowest = (root.height - height - bottomInset).coerceAtLeast(0)
         translationY = wanted.coerceIn(0, lowest).toFloat()
     }
+
+    /** 暂停控制行（后退 / 播放 / 前进）贴在进度条正上方，左对齐。 */
+    private fun placeControls(root: View) {
+        val row = controls(root) ?: return
+        if (row.visibility != View.VISIBLE) row.visibility = View.VISIBLE
+        var rowHeight = row.height
+        if (rowHeight <= 0) {
+            row.measure(
+                View.MeasureSpec.makeMeasureSpec(root.width, View.MeasureSpec.AT_MOST),
+                View.MeasureSpec.makeMeasureSpec(root.height, View.MeasureSpec.AT_MOST)
+            )
+            rowHeight = row.measuredHeight
+        }
+        val gap = (2f * resources.displayMetrics.density).roundToInt()
+        row.translationY = (translationY - rowHeight - gap).coerceAtLeast(0f)
+    }
+
+    private fun controls(root: View?): View? = root?.findViewById(R.id.pauseControls)
 
     private fun bottomInRoot(view: View, root: View): Int {
         var offset = view.bottom

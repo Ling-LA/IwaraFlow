@@ -1,0 +1,12 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- 前进：顺时针的圆弧箭头。 -->
+<vector xmlns:android="http://schemas.android.com/apk/res/android"
+    android:width="22dp"
+    android:height="22dp"
+    android:viewportWidth="24"
+    android:viewportHeight="24">
+
+    <path
+        android:fillColor="#FFFFFFFF"
+        android:pathData="M12,5V1l5,5l-5,5V7c-3.3,0 -6,2.7 -6,6s2.7,6 6,6s6,-2.7 6,-6h2c0,4.4 -3.6,8 -8,8s-8,-3.6 -8,-8S7.6,5 12,5z" />
+</vector>

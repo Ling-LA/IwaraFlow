@@ -244,6 +244,8 @@ class VideoAdapter(
         private val reactionBurst = view.findViewById<ReactionBurstView>(R.id.reactionBurst)
         private val speedIndicator = view.findViewById<TextView>(R.id.speedIndicator)
         private val pauseIndicator = view.findViewById<PauseIndicatorView>(R.id.pauseIndicator)
+        private val skipBack = view.findViewById<TextView>(R.id.skipBack)
+        private val skipForward = view.findViewById<TextView>(R.id.skipForward)
 
         private var player: ExoPlayer? = null
         private var bound: VideoItem? = null
@@ -289,7 +291,9 @@ class VideoAdapter(
             comments.visibility = if (onComments == null) View.GONE else View.VISIBLE
             comments.setOnClickListener { onComments?.invoke(item) }
             item.localFavorite = history.isLocalFavorite(item.id)
-            pauseIndicator.indicatorEnabled = prefs.showPauseIndicator
+            applyDisplayPrefs()
+            skipBack.setOnClickListener { skipBy(-prefs.skipSeconds * 1000L) }
+            skipForward.setOnClickListener { skipBy(prefs.skipSeconds * 1000L) }
             author.text = "@${item.author}"
             title.text = item.title
             tags.text = item.tags.take(8).joinToString("  ") { "#$it" }
@@ -505,6 +509,17 @@ class VideoAdapter(
 
         fun applyDisplayPrefs() {
             pauseIndicator.indicatorEnabled = prefs.showPauseIndicator
+            val seconds = prefs.skipSeconds.toString()
+            skipBack.text = seconds
+            skipForward.text = seconds
+        }
+
+        /** 暂停控制行的前进 / 后退：夹在 0 和片长之间，片长未知时只保证不为负。 */
+        private fun skipBy(deltaMs: Long) {
+            val p = player ?: return
+            val duration = p.duration
+            val target = (p.currentPosition + deltaMs).coerceAtLeast(0L)
+            p.seekTo(if (duration > 0L) target.coerceAtMost(duration) else target)
         }
 
         /**

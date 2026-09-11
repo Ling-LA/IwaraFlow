@@ -731,9 +731,20 @@ class MainActivityV3 : AppCompatActivity() {
         val autoNext = CheckBox(this).apply { text = "播放完毕自动进入下一条"; isChecked = prefs.autoNext }
         val autoPip = CheckBox(this).apply { text = "切到后台时自动进入画中画"; isChecked = prefs.autoPip }
         val pauseIcon = CheckBox(this).apply {
-            text = "暂停时显示中间的播放图标"; isChecked = prefs.showPauseIndicator
+            text = "暂停时显示播放三角"; isChecked = prefs.showPauseIndicator
         }
         panel.addView(autoNext); panel.addView(autoPip); panel.addView(pauseIcon)
+        val skipValues = intArrayOf(5, 10, 15, 30, 60)
+        val skipNames = skipValues.map { "前进 / 后退 $it 秒" }.toTypedArray()
+        val skip = Spinner(this).apply {
+            adapter = ArrayAdapter(this@MainActivityV3, android.R.layout.simple_spinner_dropdown_item, skipNames)
+            setSelection(skipValues.indexOf(prefs.skipSeconds).takeIf { it >= 0 } ?: 2)
+        }
+        panel.addView(skip)
+        panel.addView(TextView(this).apply {
+            text = "暂停时左下角的两个按钮一次跳多少秒。"
+            textSize = 12f; setTextColor(0xFF607D93.toInt()); setPadding(dp(4), dp(4), 0, dp(8))
+        })
         panel.addView(sectionTitle("默认清晰度"))
         val qualityValues = arrayOf("highest", "Source", "1080", "720", "540", "360")
         val qualityNames = arrayOf("最高可用 / 原画", "Source", "1080p", "720p", "540p", "360p")
@@ -798,6 +809,7 @@ class MainActivityV3 : AppCompatActivity() {
             prefs.classicsEvery = newClassics; recommender.classicsEvery = newClassics
             prefs.skipSeen = skipSeen.isChecked; prefs.autoNext = autoNext.isChecked; prefs.autoPip = autoPip.isChecked
             prefs.showPauseIndicator = pauseIcon.isChecked
+            prefs.skipSeconds = skipValues[skip.selectedItemPosition]
             prefs.defaultQuality = qualityValues[spinner.selectedItemPosition]
             val newType = proxyTypes[proxyType.selectedItemPosition]
             val newHost = proxyHost.text.toString().trim()

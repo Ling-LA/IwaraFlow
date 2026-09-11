@@ -5,13 +5,13 @@ import android.os.Handler
 import android.os.Looper
 import android.util.AttributeSet
 import android.view.View
-import android.view.ViewGroup
 import androidx.appcompat.widget.AppCompatTextView
 import androidx.media3.common.Player
 import androidx.media3.ui.PlayerView
 
 /**
- * 暂停时在画面中央显示一个播放图标。可以在设置里关掉——有人嫌它挡画面。
+ * 暂停时显示的播放三角：坐在左下角的暂停控制行里，点一下继续播放。
+ * 可以在设置里关掉。
  */
 class PauseIndicatorView @JvmOverloads constructor(
     context: Context,
@@ -33,6 +33,10 @@ class PauseIndicatorView @JvmOverloads constructor(
         }
     }
 
+    init {
+        setOnClickListener { findPlayer()?.play() }
+    }
+
     override fun onAttachedToWindow() {
         super.onAttachedToWindow()
         handler.removeCallbacks(poll)
@@ -50,7 +54,7 @@ class PauseIndicatorView @JvmOverloads constructor(
             visibility = View.GONE
             return
         }
-        val player = findSiblingPlayerView()?.player
+        val player = findPlayer()
         val explicitlyPaused = player != null &&
             !player.playWhenReady &&
             player.playbackState != Player.STATE_IDLE &&
@@ -58,11 +62,12 @@ class PauseIndicatorView @JvmOverloads constructor(
         visibility = if (explicitlyPaused) View.VISIBLE else View.GONE
     }
 
-    private fun findSiblingPlayerView(): PlayerView? {
-        val parentGroup = parent as? ViewGroup ?: return null
-        for (i in 0 until parentGroup.childCount) {
-            val child = parentGroup.getChildAt(i)
-            if (child is PlayerView) return child
+    /** 只认自己这张卡片的播放器：往上找到卡片根布局，再从那里取 playerView。 */
+    private fun findPlayer(): Player? {
+        var node: View? = this
+        while (node != null) {
+            if (node.id == R.id.root) return node.findViewById<PlayerView>(R.id.playerView)?.player
+            node = node.parent as? View
         }
         return null
     }

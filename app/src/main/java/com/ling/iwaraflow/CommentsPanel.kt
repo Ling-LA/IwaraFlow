@@ -89,6 +89,9 @@ class CommentsPanel(
         })
         root.findViewById<View>(R.id.commentsClose).setOnClickListener { close() }
         root.findViewById<View>(R.id.commentsReplyCancel).setOnClickListener { cancelReply() }
+        val drag = DragToDismiss()
+        root.findViewById<View>(R.id.panelHandle).setOnTouchListener(drag)
+        root.findViewById<View>(R.id.panelHeader).setOnTouchListener(drag)
         tabInfo.setOnClickListener { selectTab(Tab.INFO) }
         tabComments.setOnClickListener { selectTab(Tab.COMMENTS) }
         input.setOnClickListener { openInput() }
@@ -126,9 +129,55 @@ class CommentsPanel(
 
     fun close() {
         if (!isOpen) return
+        root.animate().cancel()
+        root.translationY = 0f
         root.visibility = View.GONE
         adapter.translationEnabled = false
         onLayoutChanged(false, 0, 0)
+    }
+
+    /**
+     * 按住把手往下拖：面板跟着手指走，松手时拖过面板高度的四分之一（或者甩得够快）
+     * 就收起，否则弹回去。往上拖不动。
+     */
+    private inner class DragToDismiss : View.OnTouchListener {
+        private var startY = 0f
+        private var startTime = 0L
+        private var dragging = false
+        private val slop = android.view.ViewConfiguration.get(root.context).scaledTouchSlop
+
+        override fun onTouch(v: View, event: android.view.MotionEvent): Boolean {
+            when (event.actionMasked) {
+                android.view.MotionEvent.ACTION_DOWN -> {
+                    startY = event.rawY
+                    startTime = event.eventTime
+                    dragging = false
+                    root.animate().cancel()
+                    return true
+                }
+                android.view.MotionEvent.ACTION_MOVE -> {
+                    val dy = event.rawY - startY
+                    if (!dragging && dy > slop) dragging = true
+                    if (dragging) root.translationY = dy.coerceAtLeast(0f)
+                    return true
+                }
+                android.view.MotionEvent.ACTION_UP, android.view.MotionEvent.ACTION_CANCEL -> {
+                    val dy = event.rawY - startY
+                    val elapsed = (event.eventTime - startTime).coerceAtLeast(1L)
+                    val fling = dy > slop * 2 && dy / elapsed > 1.2f   // 像素 / 毫秒
+                    val farEnough = dy > root.height * DISMISS_FRACTION
+                    if (event.actionMasked == android.view.MotionEvent.ACTION_UP && dragging && (farEnough || fling)) {
+                        root.animate().translationY(root.height.toFloat()).setDuration(160L)
+                            .withEndAction { close() }.start()
+                    } else {
+                        root.animate().translationY(0f).setDuration(160L).start()
+                    }
+                    dragging = false
+                    return true
+                }
+            }
+            return false
+        }
     }
 
     /** 页面销毁时调，之后回来的请求全部作废。 */
@@ -418,6 +467,8 @@ class CommentsPanel(
     private fun hideStatus() { status.text = ""; status.visibility = View.GONE }
 
     companion object {
+        /** 把手往下拖过面板高度的这个比例松手就收起。 */
+        const val DISMISS_FRACTION = 0.25f
         /** 面板最矮占屏幕高度的多少：竖屏视频也得给评论留出能看的空间。 */
         const val MIN_FRACTION = 0.45f
         /** 面板最高占屏幕高度的多少：横屏视频上面至少留出画面本身。 */

@@ -12,17 +12,24 @@
     android:orientation="vertical"
     android:visibility="gone">
 
-    <View
-        android:layout_width="40dp"
-        android:layout_height="4dp"
-        android:layout_gravity="center_horizontal"
-        android:layout_marginTop="8dp"
-        android:background="#FFD5DEE6" />
-
-    <!-- 页签行：简介 | 评论 N … ✕ -->
-    <LinearLayout
+    <!-- 拖拽把手：按住往下拖到一定程度松手就收起面板。整块 24dp 高都能按到。 -->
+    <FrameLayout
+        android:id="@+id/panelHandle"
         android:layout_width="match_parent"
-        android:layout_height="48dp"
+        android:layout_height="24dp">
+
+        <View
+            android:layout_width="40dp"
+            android:layout_height="4dp"
+            android:layout_gravity="center"
+            android:background="#FFD5DEE6" />
+    </FrameLayout>
+
+    <!-- 页签行：简介 | 评论 N … ✕ （空白处同样可以往下拖） -->
+    <LinearLayout
+        android:id="@+id/panelHeader"
+        android:layout_width="match_parent"
+        android:layout_height="44dp"
         android:gravity="center_vertical"
         android:orientation="horizontal"
         android:paddingStart="10dp"

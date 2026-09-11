@@ -37,7 +37,8 @@ object Translator {
             .build()
     }
     private val io = Executors.newSingleThreadExecutor()
-    private val main = Handler(Looper.getMainLooper())
+    // 懒加载：纯函数（判断语言、解析返回）在没有 Android 主线程的单元测试里也要能用。
+    private val main by lazy { Handler(Looper.getMainLooper()) }
     private val cache = object : LinkedHashMap<String, Translation>(64, 0.75f, true) {
         override fun removeEldestEntry(eldest: MutableMap.MutableEntry<String, Translation>?): Boolean = size > 400
     }

@@ -26,14 +26,14 @@ class RecommendationMixTest {
         val api = mock(IwaraApi::class.java)
         `when`(api.isLoggedIn()).thenReturn(true)
         `when`(api.getCurrentUserBlocking()).thenThrow(IllegalStateException("no session in test"))
-        `when`(api.getVideosBlocking(anyString(), anyInt(), anyInt())).thenAnswer { invocation ->
+        `when`(api.getVideoListPageBlocking(anyString(), anyInt(), anyInt())).thenAnswer { invocation ->
             val sort = invocation.getArgument<String>(0)
             val page = invocation.getArgument<Int>(1)
-            (0 until perSource).map { video("$sort-p$page-$it") }
+            VideoListPage((0 until perSource).map { video("$sort-p$page-$it") }, -1)
         }
-        `when`(api.getSubscribedVideosBlocking(anyInt(), anyInt())).thenAnswer { invocation ->
+        `when`(api.getSubscribedVideoPageBlocking(anyInt(), anyInt())).thenAnswer { invocation ->
             val page = invocation.getArgument<Int>(0)
-            (0 until perSource).map { video("sub-p$page-$it") }
+            VideoListPage((0 until perSource).map { video("sub-p$page-$it") }, -1)
         }
         return api
     }

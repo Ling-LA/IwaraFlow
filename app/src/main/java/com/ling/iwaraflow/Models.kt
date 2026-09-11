@@ -24,6 +24,15 @@ data class FollowingPage(
     val hasMore: Boolean
 )
 
+/**
+ * 视频列表的一页；[total] 是服务端回报的该列表总条数，没回报时是 -1。
+ * 推荐算法靠它算出列表一共有多少页，不用再去猜或者试。
+ */
+data class VideoListPage(
+    val videos: List<VideoItem>,
+    val total: Int
+)
+
 /** 官方点赞列表的一页；[total] 是服务端回报的点赞总数。 */
 data class FavoritesPage(
     val videos: List<VideoItem>,

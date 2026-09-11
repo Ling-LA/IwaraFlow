@@ -140,8 +140,8 @@ class StartupFeedLatencyTest {
         `when`(api.isLoggedIn()).thenReturn(true)
         `when`(api.getFavoriteVideosBlocking(anyInt(), anyInt()))
             .thenReturn(listOf(VideoItem("liked-1", "liked", "fixture", emptyList(), 1)))
-        `when`(api.getVideosBlocking(anyString(), anyInt(), anyInt())).thenAnswer { invocation ->
-            listOf(VideoItem("${invocation.getArgument<String>(0)}-1", "t", "fixture", emptyList(), 1))
+        `when`(api.getVideoListPageBlocking(anyString(), anyInt(), anyInt())).thenAnswer { invocation ->
+            VideoListPage(listOf(VideoItem("${invocation.getArgument<String>(0)}-1", "t", "fixture", emptyList(), 1)), -1)
         }
         val engine = RecommendationEngine(api, history)
         val delivered = CountDownLatch(1)
@@ -159,10 +159,10 @@ class StartupFeedLatencyTest {
         val api = mock(IwaraApi::class.java)
         val history = mock(HistoryStore::class.java)
         `when`(history.preferenceProfile()).thenReturn(PreferenceProfile(emptyMap(), emptyMap()))
-        `when`(api.getVideosBlocking(anyString(), anyInt(), anyInt())).thenAnswer { invocation ->
+        `when`(api.getVideoListPageBlocking(anyString(), anyInt(), anyInt())).thenAnswer { invocation ->
             val sort = invocation.getArgument<String>(0)
             if (sort == "popularity") Thread.sleep(6_000L)
-            listOf(VideoItem("$sort-1", sort, "fixture", emptyList(), 1))
+            VideoListPage(listOf(VideoItem("$sort-1", sort, "fixture", emptyList(), 1)), -1)
         }
         val engine = RecommendationEngine(api, history, listBudgetMs = 600L)
         val delivered = CountDownLatch(1)

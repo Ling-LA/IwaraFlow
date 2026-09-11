@@ -136,25 +136,33 @@ class IwaraApi(context: Context, private val apiRoot: String = DEFAULT_API_ROOT)
         enqueue(callback) { runCatching { getVideosBlocking(sort, page, limit) } }
     }
 
-    fun getVideosBlocking(sort: String, page: Int = 0, limit: Int = 24): List<VideoItem> {
+    fun getVideosBlocking(sort: String, page: Int = 0, limit: Int = 24): List<VideoItem> =
+        getVideoListPageBlocking(sort, page, limit).videos
+
+    /** 和 [getVideosBlocking] 同一个请求，另外带上服务端回报的列表总条数。 */
+    fun getVideoListPageBlocking(sort: String, page: Int = 0, limit: Int = 24): VideoListPage {
         val url = "$apiRoot/videos".toHttpUrl().newBuilder()
             .addQueryParameter("sort", sort).addQueryParameter("rating", "all")
             .addQueryParameter("page", page.toString()).addQueryParameter("limit", limit.toString()).build()
-        return parseVideoPage(getJsonObject(url.toString(), optionalAuth = true))
+        return parseVideoListPage(getJsonObject(url.toString(), optionalAuth = true))
     }
 
     /**
      * 关注作者的最新作品。Iwara 的订阅流就是视频列表接口加 `subscribed=true`；
      * 万一服务端忽略这个参数，拿回来的也是按时间排序的新视频，不会更差。
      */
-    fun getSubscribedVideosBlocking(page: Int = 0, limit: Int = 36): List<VideoItem> {
-        if (!isLoggedIn()) return emptyList()
+    fun getSubscribedVideosBlocking(page: Int = 0, limit: Int = 36): List<VideoItem> =
+        getSubscribedVideoPageBlocking(page, limit).videos
+
+    /** 和 [getSubscribedVideosBlocking] 同一个请求，另外带上订阅流的总条数。 */
+    fun getSubscribedVideoPageBlocking(page: Int = 0, limit: Int = 36): VideoListPage {
+        if (!isLoggedIn()) return VideoListPage(emptyList(), -1)
         val url = "$apiRoot/videos".toHttpUrl().newBuilder()
             .addQueryParameter("subscribed", "true").addQueryParameter("sort", "date")
             .addQueryParameter("rating", "all")
             .addQueryParameter("page", page.toString())
             .addQueryParameter("limit", limit.coerceAtMost(MAX_PAGE_LIMIT).toString()).build()
-        return parseVideoPage(getJsonObject(url.toString(), requireAuth = true))
+        return parseVideoListPage(getJsonObject(url.toString(), requireAuth = true))
     }
 
     fun getAuthorVideos(userId: String, page: Int = 0, limit: Int = 36, callback: (Result<List<VideoItem>>) -> Unit) {
@@ -387,11 +395,13 @@ class IwaraApi(context: Context, private val apiRoot: String = DEFAULT_API_ROOT)
         }
     }
 
-    private fun parseVideoPage(root: JSONObject): List<VideoItem> {
+    private fun parseVideoPage(root: JSONObject): List<VideoItem> = parseVideoListPage(root).videos
+
+    private fun parseVideoListPage(root: JSONObject): VideoListPage {
         val results = root.optJSONArray("results") ?: JSONArray()
         val list = ArrayList<VideoItem>()
         for (i in 0 until results.length()) parseVideo(results.optJSONObject(i))?.let { list += it }
-        return list
+        return VideoListPage(list, root.optInt("count", -1))
     }
 
     private fun parseVideo(o: JSONObject?): VideoItem? {

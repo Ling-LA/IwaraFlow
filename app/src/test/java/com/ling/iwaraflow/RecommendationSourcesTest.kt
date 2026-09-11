@@ -48,14 +48,15 @@ class RecommendationSourcesTest {
         val api = mock(IwaraApi::class.java)
         `when`(api.isLoggedIn()).thenReturn(loggedIn)
         `when`(api.getCurrentUserBlocking()).thenThrow(IllegalStateException("no session in test"))
-        `when`(api.getVideosBlocking(anyString(), anyInt(), anyInt())).thenAnswer { invocation ->
+        `when`(api.getVideoListPageBlocking(anyString(), anyInt(), anyInt())).thenAnswer { invocation ->
             val sort = invocation.getArgument<String>(0)
             val page = invocation.getArgument<Int>(1)
-            (0 until perSource).map { video("$sort-p$page-$it") }
+            // total = -1：服务端没回报总数，抽页范围只受策略上限约束。
+            VideoListPage((0 until perSource).map { video("$sort-p$page-$it") }, -1)
         }
-        `when`(api.getSubscribedVideosBlocking(anyInt(), anyInt())).thenAnswer { invocation ->
+        `when`(api.getSubscribedVideoPageBlocking(anyInt(), anyInt())).thenAnswer { invocation ->
             val page = invocation.getArgument<Int>(0)
-            (0 until perSource).map { video("subscribed-p$page-$it") }
+            VideoListPage((0 until perSource).map { video("subscribed-p$page-$it") }, -1)
         }
         return api
     }
@@ -110,18 +111,38 @@ class RecommendationSourcesTest {
     }
 
     /**
-     * 存档到底多少页，App 这边并不知道。抽到空页说明列表没那么长，
-     * 之后就不该再往那么深抽——否则每一轮都在白费请求。
+     * 列表接口会回传总条数，所以抽页范围不用猜：读出来一算就知道最后一页在哪。
+     * 一页 36 条、总共 3600 条，就是第 0..99 页，再往后抽都是空的。
      */
+    @Test fun theSampledRangeComesFromTheCountTheServerReports() {
+        val api = mock(IwaraApi::class.java)
+        `when`(api.isLoggedIn()).thenReturn(false)
+        `when`(api.getCurrentUserBlocking()).thenThrow(IllegalStateException("no session in test"))
+        `when`(api.getVideoListPageBlocking(anyString(), anyInt(), anyInt())).thenAnswer { invocation ->
+            val sort = invocation.getArgument<String>(0)
+            val page = invocation.getArgument<Int>(1)
+            VideoListPage((0 until 6).map { video("$sort-p$page-$it") }, 3600)
+        }
+        val engine = RecommendationEngine(api, history(), random = Random(4))
+        try {
+            loadOnce(engine)
+            val pages = (0..8).flatMap { engine.requestsFor(it) }.filter { it.page > 0 }.map { it.page }
+            assertTrue("没抽到页，测不出范围", pages.isNotEmpty())
+            assertTrue("抽页超出了服务端说的总页数：${pages.maxOrNull()}", pages.all { it <= 99 })
+        } finally { engine.close() }
+    }
+
+    /** 服务端不回报总条数时的退路：抽到空页说明列表没那么长，之后就不该再往那么深抽。 */
     @Test fun anEmptyDeepPageStopsItFromDiggingThatDeepAgain() {
         val api = mock(IwaraApi::class.java)
         `when`(api.isLoggedIn()).thenReturn(false)
         `when`(api.getCurrentUserBlocking()).thenThrow(IllegalStateException("no session in test"))
         // 第 200 页往后一条都没有——模拟列表到底了。
-        `when`(api.getVideosBlocking(anyString(), anyInt(), anyInt())).thenAnswer { invocation ->
+        `when`(api.getVideoListPageBlocking(anyString(), anyInt(), anyInt())).thenAnswer { invocation ->
             val sort = invocation.getArgument<String>(0)
             val page = invocation.getArgument<Int>(1)
-            if (page > 200) emptyList() else (0 until 6).map { video("$sort-p$page-$it") }
+            val videos = if (page > 200) emptyList() else (0 until 6).map { video("$sort-p$page-$it") }
+            VideoListPage(videos, -1)
         }
         val engine = RecommendationEngine(api, history(), random = Random(11))
         try {

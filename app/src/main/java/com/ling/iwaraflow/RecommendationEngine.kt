@@ -9,14 +9,14 @@ import kotlin.math.ln
 /**
  * 推荐候选的来源。
  *
- * Iwara 每个月新增六千多个视频——按 36 条一页算，**光是最近半年就有一千多页**，
- * 而站点从 2014 年开到现在已经十三年，总页数远不止于此。所以“没有可推荐的视频”
+ * 全站约 32.5 万个视频（网页端按发布时间翻到底是第 10147 页、一页 32 条），
+ * 按 App 的 36 条一页算约 9000 页，最早的投稿在 2014 年 3 月。所以“没有可推荐的视频”
  * 从来不是片源不够，而是取片源的方式不对：以前每次刷新都从各个榜单的**第 0 页**开始拿，
  * 于是每次拿到的都是同一批最新的一两百条，看过一遍就真的没了。
  *
  * 现在每一轮都在整个存档里随机抽页——靠前的页抽中概率高（新内容仍然优先），
- * 但尾巴足够长，能摸到几个月甚至几年前的视频。抽页上限不写死：初始给得宽，
- * 真的抽到空页再往回收，所以不用事先知道存档到底有多少页。候选来自四处：
+ * 但尾巴足够长，能摸到几个月甚至几年前的视频。一共有多少页不写死：列表接口本来就回传
+ * 总条数，读出来算一下就是准的（见 noteTotal），服务端不给才退回用空页去试。候选来自四处：
  *
  * - **关注作者的更新**（订阅流）：首页 + 往前翻的存量；
  * - **最新投稿**：第 0 页保证新鲜，再随机抽存档里的若干页；
@@ -36,7 +36,7 @@ class RecommendationEngine(
     @Volatile private var followingIds: Set<String> = emptySet()
     @Volatile private var followingSyncedAt = 0L
     @Volatile private var followingRunning = false
-    /** 每个榜单实际能翻到第几页：抽到空页就往回收，见 noteEmptyPage。 */
+    /** 每个榜单实际能翻到第几页：优先由服务端回报的总条数算出，见 noteTotal。 */
     private val depthCeiling = java.util.concurrent.ConcurrentHashMap<String, Int>()
 
     /** 本次刷新在存档里抽到的页码，只用于诊断。 */
@@ -136,9 +136,8 @@ class RecommendationEngine(
     /**
      * 从 1..[depth] 里抽一页，概率偏向靠前（立方分布），但尾巴够长。
      *
-     * 按 36 条一页、每月新增约六千个视频算，大约 167 页等于一个月：抽到第 170 页是一个月前，
-     * 第 1000 页是半年前，第 2000 页是一年前。Iwara 运营十三年，总页数远不止这些，
-     * 所以上限不写死——见 [ceilingFor]。
+     * 上限取“策略上限”和“服务端说的真实页数”里小的那个，见 [ceilingFor]。
+     * 按 36 条一页、近期每月约六千个视频算，167 页约合一个月，1000 页约合半年。
      */
     private fun samplePage(sort: String, depth: Int): Int {
         val ceiling = ceilingFor(sort, depth)
@@ -152,10 +151,19 @@ class RecommendationEngine(
     private fun ceilingFor(sort: String, depth: Int) = minOf(depth, depthCeiling[sort] ?: depth)
 
     /**
-     * 存档到底有多少页，这边猜不出来——Iwara 从 2014 年开到现在，早年的更新速度也和现在不同。
-     * 所以初始上限给得宽，抽到的页真的空了才往回收：空页说明列表没有这么长，
-     * 把上限压到它下面一页，下次就不会再往那么深抽。只有“请求成功但一条都没有”才算数，
-     * 超时和失败不改上限。
+     * 列表接口本来就回传总条数，那就不用猜也不用试——直接算出最后一页。
+     * 这个值是权威的，会覆盖之前靠空页探出来的上限：存量每天都在长，只降不升是不对的。
+     * 每轮的第 0 页请求都会带回它，所以一次刷新之后抽页范围就是准的。
+     */
+    private fun noteTotal(sort: String, total: Int) {
+        if (total < 0) return
+        val lastPage = ((total + PAGE_SIZE - 1) / PAGE_SIZE - 1).coerceAtLeast(1)
+        depthCeiling[sort] = lastPage
+    }
+
+    /**
+     * 服务端没回报总条数时的退路：抽到的页请求成功却一条都没有，说明列表没那么长，
+     * 把上限压到它下面一页。只有“成功但空”才算数，超时和失败不改上限。
      */
     private fun noteEmptyPage(sort: String, page: Int) {
         if (page <= 1) return
@@ -171,17 +179,19 @@ class RecommendationEngine(
         deadline: Long
     ) {
         val sources = requestsFor(round).map { request ->
-            request to pool.submit<List<VideoItem>> {
-                if (request.sort == SUBSCRIBED) api.getSubscribedVideosBlocking(request.page, PAGE_SIZE)
-                else api.getVideosBlocking(request.sort, page = request.page, limit = PAGE_SIZE)
+            request to pool.submit<VideoListPage> {
+                if (request.sort == SUBSCRIBED) api.getSubscribedVideoPageBlocking(request.page, PAGE_SIZE)
+                else api.getVideoListPageBlocking(request.sort, page = request.page, limit = PAGE_SIZE)
             }
         }
         // One stalled ranking endpoint used to hold the whole cold start; a request that
         // misses the budget is treated like the failures this merge already tolerates.
         sources.forEach { (request, future) ->
             val remaining = deadline - System.nanoTime()
-            val videos = (if (remaining <= 0L) null
+            val response = (if (remaining <= 0L) null
             else runCatching { future.get(remaining, TimeUnit.NANOSECONDS) }.getOrNull()) ?: return@forEach
+            noteTotal(request.sort, response.total)
+            val videos = response.videos
             if (videos.isEmpty()) { noteEmptyPage(request.sort, request.page); return@forEach }
             if (request.sort == SUBSCRIBED) videos.forEach { subscribed += it.id }
             videos.forEachIndexed { index, item ->
@@ -325,10 +335,16 @@ class RecommendationEngine(
         private const val MAX_PARALLEL_REQUESTS = 8
         /**
          * 随机抽页的初始上限，给得比实际存量宽——抽空了会自动往回收。
-         * 一页 36 条、每月约六千个新视频，所以一个月约 167 页：8000 页约合四年，
-         * 而 Iwara 已经更新了十三年，真正的底在哪由 noteEmptyPage 探出来。
+         *
+         * 真实页数由服务端回报的总条数算出（noteTotal），这里只是第一次请求回来之前的兜底值。
+         * 实测：网页端按发布时间翻到底是第 10147 页、一页 32 条，即全站约 32.5 万个视频，
+         * 换成 App 的 36 条一页约 9000 页；给 11000 是留出余量。
          */
-        internal const val ARCHIVE_DEPTH = 8000
+        internal const val ARCHIVE_DEPTH = 11000
+        /**
+         * 流行榜排的是同一批视频，页数也一样多，但越往后越是没人看的作品，
+         * 再深就没有质量可言了，所以不跟着放到底。
+         */
         internal const val POPULAR_DEPTH = 3000
         internal const val SUBSCRIBED_DEPTH = 200
         /** 上限再怎么收也不低于这里，免得一次异常的空页把抽页缩回首页附近。 */

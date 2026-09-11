@@ -25,8 +25,8 @@ class RecommendationFallbackTest {
     ): Pair<RecommendationEngine, IwaraApi> {
         val api = mock(IwaraApi::class.java)
         `when`(history.preferenceProfile()).thenReturn(PreferenceProfile(emptyMap(), emptyMap()))
-        `when`(api.getVideosBlocking(anyString(), anyInt(), anyInt())).thenAnswer { invocation ->
-            pages(invocation.getArgument(1))
+        `when`(api.getVideoListPageBlocking(anyString(), anyInt(), anyInt())).thenAnswer { invocation ->
+            VideoListPage(pages(invocation.getArgument(1)), -1)
         }
         return RecommendationEngine(api, history) to api
     }

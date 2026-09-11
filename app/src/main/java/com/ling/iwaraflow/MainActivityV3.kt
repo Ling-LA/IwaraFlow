@@ -726,10 +726,14 @@ class MainActivityV3 : AppCompatActivity() {
         val content = ScrollView(this).apply { addView(panel) }
         val dialog = AlertDialog.Builder(this).setTitle("设置").setMessage("播放行为、画质、推荐过滤和维护工具").setView(content)
             .setNegativeButton("取消", null).setPositiveButton("保存") { _, _ ->
+                // 只有“排除已看视频”会改变推荐候选，也只有推荐流受它影响；
+                // 其它几项重拉一遍列表只会把用户刷到一半的位置冲掉。
+                val reloadFeed = mode == "recommend" && prefs.skipSeen != skipSeen.isChecked
                 prefs.skipSeen = skipSeen.isChecked; prefs.autoNext = autoNext.isChecked; prefs.autoPip = autoPip.isChecked
                 prefs.showPauseIndicator = pauseIcon.isChecked
                 prefs.defaultQuality = qualityValues[spinner.selectedItemPosition]
-                Toast.makeText(this, "设置已保存", Toast.LENGTH_SHORT).show(); loadFeed(reset = true)
+                Toast.makeText(this, "设置已保存", Toast.LENGTH_SHORT).show()
+                if (reloadFeed) loadFeed(reset = true) else adapter.applyDisplayPrefs()
             }.create()
         dialog.setOnShowListener { styleDialogButtons(dialog) }; dialog.show()
     }

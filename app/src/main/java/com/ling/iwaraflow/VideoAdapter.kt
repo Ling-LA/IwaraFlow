@@ -123,6 +123,16 @@ class VideoAdapter(
         scheduleIdlePreload(activePosition)
     }
 
+    /**
+     * 只影响显示的设置改了，推给已经绑好的卡片。
+     *
+     * 走这里而不是 notifyDataSetChanged：重新绑定会先 release 再重建播放器，
+     * 正在看的视频会顿一下、还得重新缓冲——只是换个图标显不显示，不值当。
+     */
+    fun applyDisplayPrefs() {
+        holders.toList().forEach { it.applyDisplayPrefs() }
+    }
+
     /** 当前正在播的那一条；小窗里的分享按钮要靠它知道分享谁。 */
     fun activeItem(): VideoItem? = items.getOrNull(activePosition)
 
@@ -449,6 +459,10 @@ class VideoAdapter(
             stopWatchdog()
             p.playWhenReady = false
             p.pause()
+        }
+
+        fun applyDisplayPrefs() {
+            pauseIndicator.indicatorEnabled = prefs.showPauseIndicator
         }
 
         fun readyForIdlePreload(): Boolean = active && player?.playbackState == Player.STATE_READY

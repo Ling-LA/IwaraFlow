@@ -19,6 +19,11 @@ import org.robolectric.annotation.Config
 class PauseIndicatorTest {
     private val context get() = RuntimeEnvironment.getApplication()
 
+    @Suppress("UNCHECKED_CAST")
+    private fun holderOf(adapter: VideoAdapter): VideoAdapter.Holder =
+        (VideoAdapter::class.java.getDeclaredField("holders")
+            .apply { isAccessible = true }.get(adapter) as Set<VideoAdapter.Holder>).first()
+
     private fun card(prefs: AppPrefs): Pair<VideoAdapter, View> {
         val adapter = VideoAdapter(
             mock(IwaraApi::class.java), mock(HistoryStore::class.java), prefs,
@@ -69,6 +74,33 @@ class PauseIndicatorTest {
             indicator.indicatorEnabled = false
             assertEquals("关掉就该立刻收起来，不用等下一次轮询", View.GONE, indicator.visibility)
         } finally { adapter.releaseAll() }
+    }
+
+    /**
+     * 保存设置不该把正在看的视频重新加载一遍。只影响显示的设置直接推给已绑定的卡片，
+     * 既不用重新绑定（那会 release 掉播放器、重新缓冲），更不用重拉整个列表。
+     */
+    @Test fun applyingDisplayPrefsUpdatesBoundCardsWithoutTouchingThePlayer() {
+        val prefs = AppPrefs(context)
+        val (adapter, root) = card(prefs)
+        try {
+            val indicator = root.findViewById<PauseIndicatorView>(R.id.pauseIndicator)
+            val holder = holderOf(adapter)
+            val player = mock(androidx.media3.exoplayer.ExoPlayer::class.java)
+            holder.javaClass.getDeclaredField("player")
+                .apply { isAccessible = true }.set(holder, player)
+
+            prefs.showPauseIndicator = false
+            adapter.applyDisplayPrefs()
+
+            assertFalse("设置要推到已经绑好的卡片上", indicator.indicatorEnabled)
+            assertSame("不该动播放器——那会顿一下还得重新缓冲", player,
+                holder.javaClass.getDeclaredField("player")
+                    .apply { isAccessible = true }.get(holder))
+        } finally {
+            adapter.releaseAll()
+            prefs.showPauseIndicator = true
+        }
     }
 
     @Test fun whileOffItStaysHiddenNoMatterWhatThePlayerDoes() {

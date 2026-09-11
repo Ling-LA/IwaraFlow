@@ -1,31 +1,64 @@
 <?xml version="1.0" encoding="utf-8"?>
+<!-- 启动图标前景：青→蓝渐变的圆角播放三角，一道白色波浪从中穿过，下面再压一道蓝色波浪。
+     内容收在自适应图标的 72dp 安全区里（18～90），圆形 / 方圆形遮罩都不会切到。 -->
 <vector xmlns:android="http://schemas.android.com/apk/res/android"
+    xmlns:aapt="http://schemas.android.com/aapt"
     android:width="108dp"
     android:height="108dp"
     android:viewportWidth="108"
     android:viewportHeight="108">
 
+    <!-- 播放三角：填充 + 同色粗描边（圆角连接）得到圆润的角。 -->
     <path
-        android:fillColor="#65D7FF"
-        android:pathData="M28,24 C28,19 32,15 37,15 C42,15 46,19 46,24 L46,84 C46,89 42,93 37,93 C32,93 28,89 28,84 Z" />
+        android:pathData="M35,29 L79,53 L35,79 Z"
+        android:strokeWidth="7"
+        android:strokeLineJoin="round"
+        android:strokeLineCap="round">
+        <aapt:attr name="android:fillColor">
+            <gradient
+                android:type="linear"
+                android:startX="35"
+                android:startY="29"
+                android:endX="79"
+                android:endY="79"
+                android:startColor="#FF3EE3CB"
+                android:endColor="#FF2A7BF6" />
+        </aapt:attr>
+        <aapt:attr name="android:strokeColor">
+            <gradient
+                android:type="linear"
+                android:startX="35"
+                android:startY="29"
+                android:endX="79"
+                android:endY="79"
+                android:startColor="#FF3EE3CB"
+                android:endColor="#FF2A7BF6" />
+        </aapt:attr>
+    </path>
 
+    <!-- 白色波浪：把三角下部切出一道缺口。 -->
     <path
-        android:fillColor="#FF5FA2"
-        android:pathData="M49,31 C61,23 72,22 82,20 C87,19 90,22 88,27 C84,37 76,42 65,43 C58,44 53,46 48,50 Z" />
+        android:pathData="M20,67 C33,55 47,57 57,64 C67,71 78,72 88,61"
+        android:strokeColor="#FFF7FAFD"
+        android:strokeWidth="6.5"
+        android:strokeLineCap="round"
+        android:fillColor="#00000000" />
 
+    <!-- 蓝色波浪：从左下扫到右侧，青→蓝渐变。 -->
     <path
-        android:fillColor="#2EC5FF"
-        android:pathData="M49,77 C59,70 69,69 79,66 C84,64 88,66 87,71 C85,80 77,86 67,87 C59,88 54,90 49,94 Z" />
-
-    <path
-        android:fillColor="#FFFFFF"
-        android:pathData="M53,47 L53,70 L73,58.5 Z" />
-
-    <path
-        android:fillColor="#8C6CFF"
-        android:pathData="M83,45 C85,45 86,46 86,48 L86,58 C86,60 85,61 83,61 C81,61 80,60 80,58 L80,48 C80,46 81,45 83,45 Z" />
-
-    <path
-        android:fillColor="#5AA8FF"
-        android:pathData="M91,50 C93,50 94,51 94,53 L94,63 C94,65 93,66 91,66 C89,66 88,65 88,63 L88,53 C88,51 89,50 91,50 Z" />
+        android:pathData="M15,77 C29,61 46,62 57,71 C68,80 80,82 90,67"
+        android:strokeWidth="7"
+        android:strokeLineCap="round"
+        android:fillColor="#00000000">
+        <aapt:attr name="android:strokeColor">
+            <gradient
+                android:type="linear"
+                android:startX="15"
+                android:startY="77"
+                android:endX="90"
+                android:endY="67"
+                android:startColor="#FF3EE3CB"
+                android:endColor="#FF2A7BF6" />
+        </aapt:attr>
+    </path>
 </vector>

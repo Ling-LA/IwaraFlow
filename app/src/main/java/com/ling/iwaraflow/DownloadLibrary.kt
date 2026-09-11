@@ -121,9 +121,15 @@ object DownloadLibrary {
                 while (c.moveToNext()) {
                     if (idIndex < 0 || statusIndex < 0) continue
                     val id = c.getLong(idIndex)
-                    val local = if (uriIndex >= 0) c.getString(uriIndex)?.let(Uri::parse) else null
+                    val status = c.getInt(statusIndex)
+                    // 下载完成的优先用下载器给的 content:// 地址：分区存储之后 file:// 路径
+                    // 本应用未必读得到，content:// 是下载器替我们授权过的。
+                    val granted = if (status == DownloadManager.STATUS_SUCCESSFUL) {
+                        runCatching { manager.getUriForDownloadedFile(id) }.getOrNull()
+                    } else null
+                    val local = granted ?: (if (uriIndex >= 0) c.getString(uriIndex)?.let(Uri::parse) else null)
                     val size = if (sizeIndex >= 0) c.getLong(sizeIndex).coerceAtLeast(0L) else 0L
-                    out[id] = Row(c.getInt(statusIndex), local, size)
+                    out[id] = Row(status, local, size)
                 }
             }
         }

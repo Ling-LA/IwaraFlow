@@ -6,6 +6,7 @@ import android.view.ViewGroup
 import android.widget.ImageView
 import android.widget.TextView
 import androidx.recyclerview.widget.RecyclerView
+import coil.dispose
 import coil.load
 import coil.transform.CircleCropTransformation
 
@@ -151,11 +152,18 @@ class CommentListAdapter(
             // 回复整体往右缩进，看得出是挂在上一条下面的。
             val indent = (if (row.depth > 0) 48 else 16) * density
             itemView.setPadding(indent.toInt(), itemView.paddingTop, itemView.paddingRight, itemView.paddingBottom)
-            avatar.setImageDrawable(null)
+            // 先把上一条还没回来的头像请求取消掉：卡片被复用后，旧请求晚一步回来会把
+            // 别人的头像贴到这条上，看起来就是“很多人一个头像、滑一下又变了”。
+            avatar.dispose()
             if (c.author.avatarUrl.isNotBlank()) {
-                avatar.load(c.author.avatarUrl) { crossfade(true); transformations(CircleCropTransformation()) }
+                avatar.load(c.author.avatarUrl) {
+                    crossfade(true)
+                    placeholder(R.drawable.bg_avatar_placeholder)
+                    error(R.drawable.bg_avatar_placeholder)
+                    transformations(CircleCropTransformation())
+                }
             } else {
-                avatar.setImageResource(R.drawable.bg_reply_toggle)
+                avatar.setImageResource(R.drawable.bg_avatar_placeholder)
             }
             author.text = c.author.name.ifBlank { c.author.username }.ifBlank { "匿名" }
             val openAuthor = onOpenAuthor?.takeIf { c.author.id.isNotBlank() || c.author.username.isNotBlank() }

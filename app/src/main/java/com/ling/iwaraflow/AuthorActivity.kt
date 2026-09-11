@@ -17,6 +17,8 @@ import androidx.lifecycle.Lifecycle
 import androidx.recyclerview.widget.LinearLayoutManager
 import androidx.recyclerview.widget.RecyclerView
 import androidx.viewpager2.widget.ViewPager2
+import coil.load
+import coil.transform.CircleCropTransformation
 
 class AuthorActivity : AppCompatActivity() {
     private lateinit var api: IwaraApi
@@ -167,6 +169,14 @@ class AuthorActivity : AppCompatActivity() {
                     nameView.text = loaded.name
                     usernameView.text = "@${loaded.username}"
                     descriptionView.text = loaded.description
+                    if (loaded.avatarUrl.isNotBlank()) {
+                        findViewById<android.widget.ImageView>(R.id.authorAvatar).load(loaded.avatarUrl) {
+                            crossfade(true)
+                            placeholder(R.drawable.bg_avatar_placeholder)
+                            error(R.drawable.bg_avatar_placeholder)
+                            transformations(CircleCropTransformation())
+                        }
+                    }
                     refreshRelationUi()
                     if (api.isLoggedIn()) {
                         api.getFriendStatus(loaded.id) { statusResult ->

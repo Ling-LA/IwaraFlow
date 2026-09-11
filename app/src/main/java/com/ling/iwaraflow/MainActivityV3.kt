@@ -120,7 +120,13 @@ class MainActivityV3 : AppCompatActivity() {
         openingInternalPage = false
         val videoId = result.data?.getStringExtra(SavedVideosActivity.EXTRA_VIDEO_ID).orEmpty()
         pendingVideoId = videoId.takeIf { it.isNotBlank() }
+        pendingLocalUri = result.data?.getStringExtra(SavedVideosActivity.EXTRA_LOCAL_URI)?.takeIf { it.isNotBlank() }
+        pendingTitle = result.data?.getStringExtra(SavedVideosActivity.EXTRA_TITLE).orEmpty()
     }
+
+    /** 已下载页面选中的本地文件；有它就直接播本地，不走网络。 */
+    private var pendingLocalUri: String? = null
+    private var pendingTitle = ""
 
     private fun resumeAfterInternalPage() {
         openingInternalPage = false
@@ -694,6 +700,24 @@ class MainActivityV3 : AppCompatActivity() {
         dialog.show()
     }
 
+    /**
+     * 播一个下载好的本地文件：视频信息从下载记录里取，播放源就是那个文件，
+     * 不去网上解析地址，所以离线也能放。
+     */
+    private fun openLocalVideo(videoId: String, localUri: String, title: String) {
+        val record = history.downloadRecords(limit = 5000).firstOrNull { it.item.id == videoId }
+        val item = record?.item ?: VideoItem(videoId, title.ifBlank { "已下载的视频" }, "", emptyList(), 0)
+        item.sources = listOf(VideoSource(LOCAL_SOURCE_NAME, localUri, 10_000))
+        item.streamUrl = localUri
+        item.selectedQuality = LOCAL_SOURCE_NAME
+        item.localFavorite = history.isLocalFavorite(item.id)
+        saveCurrentHomeSession()
+        pagingEnabled = false; mode = "single"; invalidateRequests()
+        loading.visibility = View.GONE
+        adapter.replace(listOf(item)); pager.setCurrentItem(0, false); adapter.setActive(0)
+        if (!openingInternalPage && lifecycle.currentState.isAtLeast(Lifecycle.State.RESUMED)) adapter.resumeActive()
+    }
+
     private fun openSingleVideo(videoId: String) {
         loading.visibility = View.VISIBLE
         api.getVideo(videoId) { result -> runOnUiThread {
@@ -1045,8 +1069,11 @@ class MainActivityV3 : AppCompatActivity() {
         hideStatusBar()
         if (openingInternalPage || isFinishing) return
         val videoId = pendingVideoId
+        val localUri = pendingLocalUri
         pendingVideoId = null
-        if (videoId != null) openSingleVideo(videoId)
+        pendingLocalUri = null
+        if (videoId != null && localUri != null) openLocalVideo(videoId, localUri, pendingTitle)
+        else if (videoId != null) openSingleVideo(videoId)
         else adapter.resumeActive()
     }
 
@@ -1086,5 +1113,7 @@ class MainActivityV3 : AppCompatActivity() {
         const val SETTINGS_SCROLL_FRACTION = 0.42f
         /** 评论面板顶边比“刚好贴住画面底边”再往下收的距离（dp）。 */
         const val COMMENTS_PANEL_GAP_DP = 20
+        /** 已下载视频的播放源名字，画质按钮上显示它。 */
+        const val LOCAL_SOURCE_NAME = "本地文件"
     }
 }

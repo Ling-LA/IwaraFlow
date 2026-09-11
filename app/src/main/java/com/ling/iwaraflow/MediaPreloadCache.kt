@@ -31,7 +31,8 @@ import java.util.concurrent.atomic.AtomicInteger
  */
 @OptIn(UnstableApi::class)
 class MediaPreloadCache(context: Context) {
-    private val pending: Future<SharedState> = warmUp(context.applicationContext)
+    private val appContext = context.applicationContext
+    private val pending: Future<SharedState> = warmUp(appContext)
     private var closed = false
 
     private val shared: SharedState
@@ -41,8 +42,16 @@ class MediaPreloadCache(context: Context) {
             throw e.cause ?: e
         }
 
-    fun createMediaSource(url: String): MediaSource =
-        shared.mediaSourceFactory.createMediaSource(MediaItem.fromUri(url))
+    /** 本地文件（content:// / file://）不走缓存和 HTTP 数据源，直接读。 */
+    private val localFactory by lazy { DefaultMediaSourceFactory(appContext) }
+
+    fun createMediaSource(url: String): MediaSource {
+        val scheme = url.substringBefore(':', "").lowercase()
+        if (scheme == "content" || scheme == "file") {
+            return localFactory.createMediaSource(MediaItem.fromUri(url))
+        }
+        return shared.mediaSourceFactory.createMediaSource(MediaItem.fromUri(url))
+    }
 
     fun prefetch(url: String) = prefetch(url, 2L * 1024L * 1024L)
 

@@ -93,19 +93,11 @@ class SavedVideosActivity : AppCompatActivity() {
      */
     private fun openVideo(item: VideoItem) {
         val local = downloads[item.id]?.takeIf { it.state == DownloadLibrary.State.READY }?.localUri
-        if (local != null && playLocally(local)) return
-        setResult(Activity.RESULT_OK, Intent().putExtra(EXTRA_VIDEO_ID, item.id))
+        val data = Intent().putExtra(EXTRA_VIDEO_ID, item.id).putExtra(EXTRA_TITLE, item.title)
+        // 本地文件交给主页的播放器直接放，不拉起外部播放器，也不去网上再拉一遍。
+        if (local != null) data.putExtra(EXTRA_LOCAL_URI, local.toString())
+        setResult(Activity.RESULT_OK, data)
         finish()
-    }
-
-    private fun playLocally(uri: Uri): Boolean {
-        val intent = Intent(Intent.ACTION_VIEW)
-            .setDataAndType(uri, "video/*")
-            .addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
-        return runCatching { startActivity(intent); true }.getOrElse {
-            Toast.makeText(this, "没有可以播放本地文件的应用，改为在线播放", Toast.LENGTH_SHORT).show()
-            false
-        }
     }
 
     override fun onDestroy() {
@@ -118,6 +110,9 @@ class SavedVideosActivity : AppCompatActivity() {
     companion object {
         const val EXTRA_KIND = "saved_kind"
         const val EXTRA_VIDEO_ID = "video_id"
+        /** 已下载视频的本地地址（content:// 或 file://），主页据此直接播本地文件。 */
+        const val EXTRA_LOCAL_URI = "local_uri"
+        const val EXTRA_TITLE = "video_title"
         const val KIND_HISTORY = "history"
         const val KIND_FAVORITES = "favorites"
         const val KIND_DOWNLOADS = "downloads"

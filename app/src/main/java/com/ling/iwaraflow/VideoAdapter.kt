@@ -654,7 +654,10 @@ class VideoAdapter(
             val p = player ?: return
             val position = p.currentPosition.coerceAtLeast(0L)
             val duration = p.duration.coerceAtLeast(0L)
-            item.resumePositionMs = if (completed) 0L else position
+            // 已经放完的视频记 0，不记片尾：否则划回来时从片尾起播，立刻又 ENDED、
+            // 又自动跳下一条，看上去就是“划不回去”。
+            val ended = completed || p.playbackState == Player.STATE_ENDED
+            item.resumePositionMs = if (ended) 0L else position
             val completedByProgress = duration > 0 && position >= (duration * 0.9).toLong()
             history.recordWatch(item, position, duration, completed || completedByProgress)
         }

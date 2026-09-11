@@ -21,8 +21,8 @@ import kotlin.math.ln
  * - **最新投稿**：第 0 页保证新鲜，再随机抽存档里的若干页；
  * - **热门 / 流行榜**：保证质量，同样不只看第一页；
  *
- * 排序由本地口味（作者 / 标签偏好）、点赞量、播放量、新鲜度共同决定，
- * 关注的作者再额外加分。
+ * 排序由本地口味（作者 / 标签偏好）、点赞量、播放量、新鲜度共同决定。关注的作者
+ * 不参与加分——那样会整屏都是已关注的人；它们改成按固定间隔插进结果里，见 interleave。
  */
 class RecommendationEngine(
     private val api: IwaraApi,
@@ -61,13 +61,15 @@ class RecommendationEngine(
         try {
             val deadline = System.nanoTime() + TimeUnit.MILLISECONDS.toNanos(listBudgetMs)
             val merged = LinkedHashMap<String, Pair<VideoItem, Double>>()
+            // 哪些视频来自关注作者的订阅流——最后按位置插进结果里要用。
+            val subscribed = HashSet<String>()
             val likedFuture = if (skipSeen && api.isLoggedIn()) {
                 // Iwara 官方点赞只存在服务端，列表接口不一定回传 liked，
                 // 所以刷新推荐时顺带同步一次点赞记录，让它们真正算作已看。
                 pool.submit<List<VideoItem>> { api.getFavoriteVideosBlocking() }
             } else null
 
-            mergeRound(pool, merged, round = 0, deadline = deadline)
+            mergeRound(pool, merged, subscribed, round = 0, deadline = deadline)
             if (merged.isEmpty()) throw IllegalStateException("所有推荐榜单请求均失败")
 
             likedFuture?.let { f ->
@@ -77,7 +79,7 @@ class RecommendationEngine(
                 liked?.forEach { item -> history.markSeen(item.id) }
             }
 
-            if (!skipSeen) return rank(merged).take(MAX_RESULTS)
+            if (!skipSeen) return interleave(rank(merged), subscribed).take(MAX_RESULTS)
 
             var buckets = split(rank(merged))
             // 没看过的不够就再抽几轮。每轮抽的都是存档里别的页，不是往后走一页——
@@ -86,7 +88,7 @@ class RecommendationEngine(
             while (buckets.fresh.size < MIN_FRESH_CANDIDATES && round <= MAX_EXTRA_ROUNDS) {
                 val extraDeadline = System.nanoTime() + TimeUnit.MILLISECONDS.toNanos(listBudgetMs)
                 val before = merged.size
-                mergeRound(pool, merged, round = round, deadline = extraDeadline)
+                mergeRound(pool, merged, subscribed, round = round, deadline = extraDeadline)
                 round += 1
                 if (merged.size == before) break
                 buckets = split(rank(merged))
@@ -97,7 +99,7 @@ class RecommendationEngine(
                 buckets.fresh.isNotEmpty() || buckets.watched.isNotEmpty() -> buckets.fresh + buckets.watched
                 else -> buckets.all()
             }
-            return result.take(MAX_RESULTS)
+            return interleave(result, subscribed).take(MAX_RESULTS)
         } finally {
             pool.shutdownNow()
         }
@@ -143,6 +145,7 @@ class RecommendationEngine(
     private fun mergeRound(
         pool: ExecutorService,
         merged: LinkedHashMap<String, Pair<VideoItem, Double>>,
+        subscribed: MutableSet<String>,
         round: Int,
         deadline: Long
     ) {
@@ -158,6 +161,7 @@ class RecommendationEngine(
             val remaining = deadline - System.nanoTime()
             val videos = (if (remaining <= 0L) null
             else runCatching { future.get(remaining, TimeUnit.NANOSECONDS) }.getOrNull()) ?: return@forEach
+            if (request.sort == SUBSCRIBED) videos.forEach { subscribed += it.id }
             videos.forEachIndexed { index, item ->
                 val rankBonus = (PAGE_SIZE - index).coerceAtLeast(0) / PAGE_SIZE.toDouble()
                 // 后面几轮补进来的稍微让一让，但不按页码衰减——存档深处的页不比首页差，
@@ -178,7 +182,6 @@ class RecommendationEngine(
 
     private fun rank(merged: Map<String, Pair<VideoItem, Double>>): List<VideoItem> {
         val profile = history.preferenceProfile()
-        val followed = followingIds
         val now = System.currentTimeMillis()
         return merged.values
             .asSequence()
@@ -192,14 +195,39 @@ class RecommendationEngine(
                 // 按原来的曲线，一个月前的视频就已经被压到几乎没有分了。
                 val freshness = 1.6 / (1.0 + ageDays / 30.0)
                 val affinity = profile.score(item).coerceAtMost(8.0) * 0.38
-                // 关注了就是明确的口味信号，比任何榜单名次都直接。
-                val followBonus = if (item.authorId.isNotBlank() && item.authorId in followed) FOLLOW_BONUS else 0.0
                 val stableJitter = ((item.id.hashCode().toLong() and 0xffff) / 65535.0) * 0.15
-                item to (sourceScore + likeScore + viewScore + freshness + affinity + followBonus + stableJitter)
+                // 关注的作者不在这里加分——加分会让他们整片霸榜。改成排完序之后按位置插入。
+                item to (sourceScore + likeScore + viewScore + freshness + affinity + stableJitter)
             }
             .sortedByDescending { it.second }
             .map { it.first }
             .toList()
+    }
+
+    /**
+     * 关注作者的更新按**位置**插进结果里，而不是靠权重往上挤。
+     *
+     * 以前订阅流权重最高、关注的作者还额外加分，结果整屏刷出来全是已经关注的人——
+     * 推荐页就失去意义了。现在每 [DISCOVERY_RUN] 条没关注的内容里插一条关注作者的，
+     * 占比是固定的，跟打分高低无关。哪一条先插仍然由打分决定。
+     */
+    private fun interleave(ranked: List<VideoItem>, subscribed: Set<String>): List<VideoItem> {
+        val followedAuthors = followingIds
+        fun isFollowed(item: VideoItem) =
+            item.id in subscribed || (item.authorId.isNotBlank() && item.authorId in followedAuthors)
+
+        val followed = ArrayDeque(ranked.filter(::isFollowed))
+        val discovery = ArrayDeque(ranked.filterNot(::isFollowed))
+        if (followed.isEmpty() || discovery.isEmpty()) return ranked
+
+        val out = ArrayList<VideoItem>(ranked.size)
+        while (discovery.isNotEmpty() && followed.isNotEmpty()) {
+            repeat(DISCOVERY_RUN) { if (discovery.isNotEmpty()) out += discovery.removeFirst() }
+            out += followed.removeFirst()
+        }
+        out += discovery
+        out += followed
+        return out
     }
 
     private fun split(ranked: List<VideoItem>): Buckets {
@@ -259,9 +287,10 @@ class RecommendationEngine(
             "date" to 2.4
         )
         internal const val SUBSCRIBED = "__subscribed__"
-        /** 关注作者的更新权重最高：这是用户自己选的作者。 */
-        private const val SUBSCRIBED_WEIGHT = 3.6
-        private const val FOLLOW_BONUS = 1.4
+        /** 订阅流只是候选来源之一，不再比别的榜单重——占比由插入间隔决定。 */
+        private const val SUBSCRIBED_WEIGHT = 2.8
+        /** 每这么多条“发现”里插一条关注作者的更新。 */
+        internal const val DISCOVERY_RUN = 4
         private const val PAGE_SIZE = 36
         private const val MAX_RESULTS = 80
         /** 首轮 6 个请求 + 点赞同步，留一点余量。 */

@@ -5,7 +5,10 @@ import android.content.Context
 import android.database.sqlite.SQLiteDatabase
 import android.database.sqlite.SQLiteOpenHelper
 
-class HistoryStore(context: Context) : SQLiteOpenHelper(context, "iwaraflow.db", null, 3) {
+/** 一条下载记录：哪个视频、哪个清晰度、系统下载器给的编号。 */
+data class DownloadRecord(val item: VideoItem, val quality: String, val downloadId: Long)
+
+class HistoryStore(context: Context) : SQLiteOpenHelper(context, "iwaraflow.db", null, 4) {
     override fun onCreate(db: SQLiteDatabase) {
         db.execSQL(
             """CREATE TABLE history(
@@ -46,6 +49,7 @@ class HistoryStore(context: Context) : SQLiteOpenHelper(context, "iwaraflow.db",
                 last_seen_at INTEGER NOT NULL
             )""".trimIndent()
         )
+        db.execSQL(DOWNLOADS_TABLE)
         db.execSQL("CREATE INDEX idx_history_time ON history(watched_at DESC)")
         db.execSQL("CREATE INDEX idx_interactions_time ON interactions(created_at DESC)")
         db.execSQL("CREATE INDEX idx_seen_last_time ON seen_videos(last_seen_at DESC)")
@@ -71,6 +75,52 @@ class HistoryStore(context: Context) : SQLiteOpenHelper(context, "iwaraflow.db",
                    SELECT video_id, watched_at, watched_at FROM history""".trimIndent()
             )
         }
+        if (oldVersion < 4) db.execSQL(DOWNLOADS_TABLE)
+    }
+
+    /** 下载的时候记一笔，"已下载"那一页读的就是这张表。 */
+    @Synchronized
+    fun recordDownload(item: VideoItem, quality: String, downloadId: Long) {
+        val values = ContentValues().apply {
+            put("video_id", item.id)
+            put("quality", quality)
+            put("title", item.title)
+            put("author", item.author)
+            put("tags", item.tags.joinToString("\u001F"))
+            put("download_id", downloadId)
+            put("created_at", System.currentTimeMillis())
+        }
+        writableDatabase.insertWithOnConflict("downloads", null, values, SQLiteDatabase.CONFLICT_REPLACE)
+    }
+
+    @Synchronized
+    fun downloadRecords(limit: Int = 300): List<DownloadRecord> {
+        val out = ArrayList<DownloadRecord>()
+        readableDatabase.query(
+            "downloads",
+            arrayOf("video_id", "quality", "title", "author", "tags", "download_id"),
+            null, null, null, null, "created_at DESC", limit.toString()
+        ).use { c ->
+            while (c.moveToNext()) {
+                out += DownloadRecord(
+                    item = VideoItem(
+                        id = c.getString(0),
+                        title = c.getString(2),
+                        author = c.getString(3),
+                        tags = splitTags(c.getString(4)),
+                        likes = 0
+                    ),
+                    quality = c.getString(1),
+                    downloadId = c.getLong(5)
+                )
+            }
+        }
+        return out
+    }
+
+    @Synchronized
+    fun forgetDownload(videoId: String, quality: String) {
+        writableDatabase.delete("downloads", "video_id=? AND quality=?", arrayOf(videoId, quality))
     }
 
     @Synchronized
@@ -261,4 +311,18 @@ class HistoryStore(context: Context) : SQLiteOpenHelper(context, "iwaraflow.db",
 
     private fun splitTags(raw: String?): List<String> =
         raw?.split("\u001F")?.filter { it.isNotBlank() } ?: emptyList()
+
+    companion object {
+        /** 同一个视频的不同清晰度各算一条，所以主键是视频加清晰度。 */
+        private val DOWNLOADS_TABLE = """CREATE TABLE IF NOT EXISTS downloads(
+                video_id TEXT NOT NULL,
+                quality TEXT NOT NULL,
+                title TEXT NOT NULL,
+                author TEXT NOT NULL,
+                tags TEXT NOT NULL,
+                download_id INTEGER NOT NULL,
+                created_at INTEGER NOT NULL,
+                PRIMARY KEY(video_id, quality)
+            )""".trimIndent()
+    }
 }

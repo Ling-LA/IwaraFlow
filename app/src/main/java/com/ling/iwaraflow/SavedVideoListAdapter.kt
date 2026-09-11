@@ -10,7 +10,9 @@ import coil.load
 
 class SavedVideoListAdapter(
     private val items: List<VideoItem>,
-    private val onClick: (VideoItem) -> Unit
+    private val onClick: (VideoItem) -> Unit,
+    /** 角标上的一行小字，返回 null 就不显示。“已下载”那一页用它标下载状态。 */
+    private val note: (VideoItem) -> String? = { null }
 ) : RecyclerView.Adapter<SavedVideoListAdapter.Holder>() {
 
     override fun onCreateViewHolder(parent: ViewGroup, viewType: Int): Holder =
@@ -34,7 +36,9 @@ class SavedVideoListAdapter(
                 if (item.views > 0 || item.likes > 0) append("  ·  ${formatCount(item.views)} 播放  ·  ${formatCount(item.likes)} 赞")
             }
             tags.text = item.tags.take(5).joinToString("  ") { "#$it" }
-            issue.visibility = View.GONE
+            val label = note(item)
+            issue.text = label.orEmpty()
+            issue.visibility = if (label == null) View.GONE else View.VISIBLE
             itemView.alpha = 1f
             itemView.setOnClickListener { onClick(item) }
 

@@ -386,8 +386,9 @@ class MainActivity : AppCompatActivity() {
                 .setAllowedOverMetered(true)
                 .setAllowedOverRoaming(false)
                 .setDestinationInExternalPublicDir(Environment.DIRECTORY_DOWNLOADS, "IwaraFlow/$fileName")
-            (getSystemService(Context.DOWNLOAD_SERVICE) as DownloadManager).enqueue(request)
+            val downloadId = (getSystemService(Context.DOWNLOAD_SERVICE) as DownloadManager).enqueue(request)
             history.recordInteraction(item, "download", 1.1)
+            history.recordDownload(item, source.name, downloadId)
             Toast.makeText(this, "已加入系统下载：${source.name}", Toast.LENGTH_SHORT).show()
         } catch (e: Exception) {
             Toast.makeText(this, "下载创建失败：${e.message}", Toast.LENGTH_LONG).show()

@@ -585,18 +585,19 @@ class MainActivityV3 : AppCompatActivity() {
 
     private fun showMainMenu() {
         val account = if (api.isLoggedIn()) "退出 Iwara 登录" else "登录 Iwara"
-        val items = arrayOf(account, "浏览历史", "本地收藏", "已关注用户", "同步点赞记录", "设置", "检查更新", "重新加载当前流", "诊断信息")
+        val items = arrayOf(account, "浏览历史", "我的收藏", "已下载", "已关注用户", "同步点赞记录", "设置", "检查更新", "重新加载当前流", "诊断信息")
         val dialog = AlertDialog.Builder(this).setTitle("IwaraFlow").setItems(items) { _, which ->
             when (which) {
                 0 -> if (api.isLoggedIn()) { api.logout(); Toast.makeText(this, "已退出登录", Toast.LENGTH_SHORT).show(); loadFeed(reset = true) } else showLoginDialog()
                 1 -> openSavedVideos(SavedVideosActivity.KIND_HISTORY)
                 2 -> openSavedVideos(SavedVideosActivity.KIND_FAVORITES)
-                3 -> openFollowingPage()
-                4 -> syncLikedVideos()
-                5 -> showSettingsDialog()
-                6 -> updates.check(manual = true)
-                7 -> loadFeed(reset = true)
-                8 -> NavigationDiagnostics.show(this)
+                3 -> openSavedVideos(SavedVideosActivity.KIND_DOWNLOADS)
+                4 -> openFollowingPage()
+                5 -> syncLikedVideos()
+                6 -> showSettingsDialog()
+                7 -> updates.check(manual = true)
+                8 -> loadFeed(reset = true)
+                9 -> NavigationDiagnostics.show(this)
             }
         }.create()
         dialog.setOnShowListener { styleDialogButtons(dialog) }; dialog.show()
@@ -718,8 +719,11 @@ class MainActivityV3 : AppCompatActivity() {
                 .addRequestHeader("User-Agent", "Mozilla/5.0 (Linux; Android 14) AppleWebKit/537.36 Chrome/152 Mobile Safari/537.36")
                 .setNotificationVisibility(DownloadManager.Request.VISIBILITY_VISIBLE_NOTIFY_COMPLETED).setAllowedOverMetered(true).setAllowedOverRoaming(false)
                 .setDestinationInExternalPublicDir(Environment.DIRECTORY_DOWNLOADS, "IwaraFlow/${safeTitle}_${item.id}_${safeQuality}.mp4")
-            (getSystemService(Context.DOWNLOAD_SERVICE) as DownloadManager).enqueue(request)
-            history.recordInteraction(item, "download", 1.1); Toast.makeText(this, "已加入系统下载：${source.name}", Toast.LENGTH_SHORT).show()
+            val downloadId = (getSystemService(Context.DOWNLOAD_SERVICE) as DownloadManager).enqueue(request)
+            history.recordInteraction(item, "download", 1.1)
+            // 记一笔，"已下载"那一页要靠它把视频和系统下载对上号。
+            history.recordDownload(item, source.name, downloadId)
+            Toast.makeText(this, "已加入系统下载：${source.name}", Toast.LENGTH_SHORT).show()
         } catch (e: Exception) { Toast.makeText(this, "下载创建失败：${e.message}", Toast.LENGTH_LONG).show() }
     }
 

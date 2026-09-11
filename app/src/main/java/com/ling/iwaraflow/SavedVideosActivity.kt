@@ -2,9 +2,11 @@ package com.ling.iwaraflow
 
 import android.app.Activity
 import android.content.Intent
+import android.net.Uri
 import android.os.Bundle
 import android.view.View
 import android.widget.TextView
+import android.widget.Toast
 import androidx.appcompat.app.AppCompatActivity
 import androidx.activity.OnBackPressedCallback
 import androidx.recyclerview.widget.LinearLayoutManager
@@ -16,6 +18,7 @@ class SavedVideosActivity : AppCompatActivity() {
     private lateinit var listView: RecyclerView
     private lateinit var adapter: SavedVideoListAdapter
     private val items = mutableListOf<VideoItem>()
+    private val downloads = mutableMapOf<String, DownloadLibrary.Entry>()
     private var closed = false
 
     override fun onCreate(savedInstanceState: Bundle?) {
@@ -25,7 +28,7 @@ class SavedVideosActivity : AppCompatActivity() {
         api = IwaraApi(this)
         history = HistoryStore(this)
         listView = findViewById(R.id.savedVideos)
-        adapter = SavedVideoListAdapter(items, ::openVideo)
+        adapter = SavedVideoListAdapter(items, ::openVideo) { item -> downloads[item.id]?.note() }
         listView.layoutManager = LinearLayoutManager(this)
         listView.adapter = adapter
 
@@ -34,18 +37,37 @@ class SavedVideosActivity : AppCompatActivity() {
             override fun handleOnBackPressed() = finish()
         })
         val kind = intent.getStringExtra(EXTRA_KIND) ?: KIND_HISTORY
-        val isFavorite = kind == KIND_FAVORITES
-        findViewById<TextView>(R.id.savedTitle).text = if (isFavorite) "本地收藏" else "浏览历史"
+        findViewById<TextView>(R.id.savedTitle).text = when (kind) {
+            KIND_FAVORITES -> "我的收藏"
+            KIND_DOWNLOADS -> "已下载"
+            else -> "浏览历史"
+        }
 
-        val raw = if (isFavorite) history.localFavorites(300) else history.recentHistory(200)
-        items += raw
+        items += when (kind) {
+            KIND_FAVORITES -> history.localFavorites(300)
+            KIND_DOWNLOADS -> DownloadLibrary.entries(this, history)
+                .also { entries -> entries.forEach { downloads[it.item.id] = it } }
+                .map { it.item }
+            else -> history.recentHistory(200)
+        }
         adapter.notifyDataSetChanged()
-        findViewById<TextView>(R.id.savedSubtitle).text = if (isFavorite) {
-            "${items.size} 条 · 仅保存在本机"
-        } else {
-            "最近观看的 ${items.size} 条视频"
+        findViewById<TextView>(R.id.savedSubtitle).text = when (kind) {
+            KIND_FAVORITES -> "共 ${items.size} 条"
+            KIND_DOWNLOADS -> downloadsSubtitle()
+            else -> "最近观看的 ${items.size} 条视频"
         }
         enrichMissingVideoDetails()
+    }
+
+    private fun downloadsSubtitle(): String {
+        if (items.isEmpty()) return "还没有下载过视频"
+        val ready = downloads.values.filter { it.state == DownloadLibrary.State.READY }
+        val size = DownloadLibrary.formatSize(ready.sumOf { it.sizeBytes })
+        return buildString {
+            append("共 ${items.size} 个")
+            if (ready.size < items.size) append(" · ${ready.size} 个可播放")
+            if (size.isNotEmpty()) append(" · $size")
+        }
     }
 
     private fun enrichMissingVideoDetails() {
@@ -65,9 +87,25 @@ class SavedVideosActivity : AppCompatActivity() {
         }
     }
 
+    /**
+     * 下好的视频直接放本地那一份——下载就是为了这个。还没下完 / 文件不在了的，
+     * 退回到照常在线播放，别让这一行点了没反应。
+     */
     private fun openVideo(item: VideoItem) {
+        val local = downloads[item.id]?.takeIf { it.state == DownloadLibrary.State.READY }?.localUri
+        if (local != null && playLocally(local)) return
         setResult(Activity.RESULT_OK, Intent().putExtra(EXTRA_VIDEO_ID, item.id))
         finish()
+    }
+
+    private fun playLocally(uri: Uri): Boolean {
+        val intent = Intent(Intent.ACTION_VIEW)
+            .setDataAndType(uri, "video/*")
+            .addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
+        return runCatching { startActivity(intent); true }.getOrElse {
+            Toast.makeText(this, "没有可以播放本地文件的应用，改为在线播放", Toast.LENGTH_SHORT).show()
+            false
+        }
     }
 
     override fun onDestroy() {
@@ -82,5 +120,6 @@ class SavedVideosActivity : AppCompatActivity() {
         const val EXTRA_VIDEO_ID = "video_id"
         const val KIND_HISTORY = "history"
         const val KIND_FAVORITES = "favorites"
+        const val KIND_DOWNLOADS = "downloads"
     }
 }

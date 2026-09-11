@@ -381,7 +381,8 @@ class AuthorActivity : AppCompatActivity() {
                 .addRequestHeader("Referer", "https://www.iwara.tv/")
                 .setNotificationVisibility(DownloadManager.Request.VISIBILITY_VISIBLE_NOTIFY_COMPLETED)
                 .setDestinationInExternalPublicDir(Environment.DIRECTORY_DOWNLOADS, "IwaraFlow/$fileName")
-            (getSystemService(Context.DOWNLOAD_SERVICE) as DownloadManager).enqueue(request)
+            val downloadId = (getSystemService(Context.DOWNLOAD_SERVICE) as DownloadManager).enqueue(request)
+            history.recordDownload(item, source.name, downloadId)
             Toast.makeText(this, "已加入下载", Toast.LENGTH_SHORT).show()
         } catch (e: Exception) {
             Toast.makeText(this, "下载失败：${e.message}", Toast.LENGTH_SHORT).show()

@@ -40,6 +40,7 @@ object DownloadLibrary {
     }
 
     fun entries(context: Context, history: HistoryStore): List<Entry> {
+        importLegacyDownloads(context, history)
         val records = history.downloadRecords()
         if (records.isEmpty()) return emptyList()
         val status = queryStatus(context, records.map { it.downloadId })
@@ -53,6 +54,55 @@ object DownloadLibrary {
                 else -> Entry(record, State.RUNNING, null, row.sizeBytes)
             }
         }
+    }
+
+    /**
+     * 0.7.18 之前的版本下载时不记本地表，那些视频在“已下载”里就看不见。
+     * 系统下载器记得本应用发起过的每一次下载，文件名又是我们自己拼的
+     * `<标题>_<视频 id>_<清晰度>.mp4`，从中把 id 和清晰度拆回来就能补录。
+     * 只补表里没有的；已经记过的不动。
+     */
+    internal fun importLegacyDownloads(context: Context, history: HistoryStore) {
+        val manager = context.getSystemService(Context.DOWNLOAD_SERVICE) as? DownloadManager ?: return
+        val known = history.downloadRecords(limit = 5000).map { it.downloadId }.toHashSet()
+        runCatching {
+            manager.query(DownloadManager.Query())?.use { c ->
+                val idIndex = c.getColumnIndex(DownloadManager.COLUMN_ID)
+                val titleIndex = c.getColumnIndex(DownloadManager.COLUMN_TITLE)
+                val uriIndex = c.getColumnIndex(DownloadManager.COLUMN_LOCAL_URI)
+                if (idIndex < 0) return
+                while (c.moveToNext()) {
+                    val downloadId = c.getLong(idIndex)
+                    if (downloadId in known) continue
+                    val local = if (uriIndex >= 0) c.getString(uriIndex).orEmpty() else ""
+                    val parsed = parseFileName(local) ?: continue
+                    val title = (if (titleIndex >= 0) c.getString(titleIndex) else null)
+                        ?.takeIf { it.isNotBlank() } ?: parsed.title
+                    history.recordDownload(
+                        VideoItem(parsed.videoId, title, "", emptyList(), 0),
+                        parsed.quality, downloadId
+                    )
+                }
+            }
+        }
+    }
+
+    internal class ParsedName(val title: String, val videoId: String, val quality: String)
+
+    /**
+     * 从本地文件名拆出视频 id 和清晰度。文件名形如 `标题_视频id_清晰度.mp4`，
+     * 标题里可能有下划线，所以从右边数：最后一段是清晰度，倒数第二段是 id。
+     */
+    internal fun parseFileName(localUri: String): ParsedName? {
+        val name = Uri.decode(localUri.substringAfterLast('/')).removeSuffix(".mp4")
+        if (name.isBlank() || name == localUri) return null
+        val parts = name.split('_')
+        if (parts.size < 3) return null
+        val quality = parts.last()
+        val videoId = parts[parts.size - 2]
+        val title = parts.dropLast(2).joinToString("_")
+        if (videoId.isBlank() || quality.isBlank()) return null
+        return ParsedName(title.ifBlank { videoId }, videoId, quality)
     }
 
     private class Row(val status: Int, val localUri: Uri?, val sizeBytes: Long)

@@ -111,19 +111,22 @@
         android:orientation="vertical"
         android:paddingBottom="28dp">
 
+        <!-- 和收藏按钮同尺寸：50dp 高、9dp 内边距，图标 32dp。 -->
         <ImageView
             android:id="@+id/like"
             android:layout_width="match_parent"
-            android:layout_height="54dp"
+            android:layout_height="50dp"
             android:contentDescription="点赞"
             android:padding="9dp"
             android:scaleType="fitCenter"
             android:src="@drawable/ic_heart_rounded_outline" />
 
+        <!-- 往上收一点，贴住爱心。 -->
         <TextView
             android:id="@+id/likeCount"
             android:layout_width="match_parent"
             android:layout_height="wrap_content"
+            android:layout_marginTop="-6dp"
             android:gravity="center"
             android:textColor="#FFFFFFFF"
             android:textSize="12sp" />
@@ -136,6 +139,19 @@
             android:padding="9dp"
             android:scaleType="fitCenter"
             android:src="@drawable/ic_star_rounded_outline" />
+
+        <!-- 官方评论：打开底部半屏面板，视频缩到面板上方接着播。 -->
+        <TextView
+            android:id="@+id/comments"
+            android:layout_width="match_parent"
+            android:layout_height="46dp"
+            android:drawableTop="@drawable/ic_comment"
+            android:drawablePadding="2dp"
+            android:gravity="center"
+            android:text="评论"
+            android:textColor="#FFFFFFFF"
+            android:textSize="12sp"
+            android:textStyle="bold" />
 
         <TextView
             android:id="@+id/quality"

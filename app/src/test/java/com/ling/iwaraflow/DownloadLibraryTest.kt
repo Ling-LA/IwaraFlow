@@ -81,6 +81,39 @@ class DownloadLibraryTest {
         assertTrue(DownloadLibrary.entries(RuntimeEnvironment.getApplication(), history).isEmpty())
     }
 
+    // ------------------------------------------------ 旧版本的下载补录
+
+    @Test fun anOldDownloadFileNameGivesBackTheVideoIdAndQuality() {
+        val parsed = DownloadLibrary.parseFileName("file:///storage/emulated/0/Download/IwaraFlow/%E6%A0%87%E9%A2%98_abc123_Source.mp4")!!
+        assertEquals("标题", parsed.title)
+        assertEquals("abc123", parsed.videoId)
+        assertEquals("Source", parsed.quality)
+    }
+
+    @Test fun underscoresInsideTheTitleDoNotConfuseTheParser() {
+        val parsed = DownloadLibrary.parseFileName("file:///x/My_Long_Title_v1_ab12cd_1080p.mp4")!!
+        assertEquals("My_Long_Title_v1", parsed.title)
+        assertEquals("ab12cd", parsed.videoId)
+        assertEquals("1080p", parsed.quality)
+    }
+
+    @Test fun aFileNameThatIsNotOursIsIgnored() {
+        assertNull(DownloadLibrary.parseFileName(""))
+        assertNull(DownloadLibrary.parseFileName("file:///x/random.mp4"))
+        assertNull(DownloadLibrary.parseFileName("file:///x/only_two.mp4"))
+    }
+
+    @Test fun fileNamesWithoutTheMp4SuffixStillParse() {
+        val parsed = DownloadLibrary.parseFileName("content://downloads/all_downloads/%E7%89%87%E5%90%8D_id9_540p")!!
+        assertEquals("id9", parsed.videoId)
+        assertEquals("540p", parsed.quality)
+    }
+
+    @Test fun importingWithNothingInTheSystemDownloaderAddsNothing() {
+        DownloadLibrary.importLegacyDownloads(RuntimeEnvironment.getApplication(), history)
+        assertTrue(history.downloadRecords().isEmpty())
+    }
+
     @Test fun sizesReadAsHumanNumbers() {
         assertEquals("", DownloadLibrary.formatSize(0))
         assertEquals("512 KB", DownloadLibrary.formatSize(512L * 1024))

@@ -94,4 +94,7 @@
         android:textColor="#FFFFFFFF"
         android:textSize="15sp"
         android:visibility="gone" />
+
+    <!-- 评论面板放最后，盖在视频流和顶栏之上；高度由代码按视频画面算。 -->
+    <include layout="@layout/view_comments_panel" />
 </FrameLayout>

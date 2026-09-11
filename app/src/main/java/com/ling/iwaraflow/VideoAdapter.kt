@@ -35,7 +35,9 @@ class VideoAdapter(
      * 交给页面去分享。带播放器和小窗的页面要自己管这件事：分享面板弹出来的时候
      * 不能自动缩进小窗，回来之后也要接上播放。不传就按老样子直接拉起选择器。
      */
-    private val onShare: ((VideoItem) -> Unit)? = null
+    private val onShare: ((VideoItem) -> Unit)? = null,
+    /** 点了评论按钮。不传就不显示评论按钮（作者页、搜索页这些没有评论面板）。 */
+    private val onComments: ((VideoItem) -> Unit)? = null
 ) : RecyclerView.Adapter<VideoAdapter.Holder>() {
 
     val items = mutableListOf<VideoItem>()
@@ -133,8 +135,27 @@ class VideoAdapter(
         holders.toList().forEach { it.applyDisplayPrefs() }
     }
 
+    /**
+     * 评论面板开着时画面要让出的上下留白（像素）。上面留顶栏，下面留面板高度，
+     * 画面缩进中间那块，面板不遮画面。两个都传 0 就是关掉，卡片回到各自的默认摆法
+     * （横屏略偏上、竖屏铺满）。
+     */
+    fun setVideoInsets(top: Int, bottom: Int) {
+        topInset = top.coerceAtLeast(0)
+        bottomInset = bottom.coerceAtLeast(0)
+        holders.toList().forEach { it.applyVideoInsets() }
+    }
+
+    private var topInset = 0
+    private var bottomInset = 0
+
     /** 当前正在播的那一条；小窗里的分享按钮要靠它知道分享谁。 */
     fun activeItem(): VideoItem? = items.getOrNull(activePosition)
+
+    /** 当前这条视频的宽高比（宽 / 高）；播放器还没解出画面尺寸时为 null。 */
+    fun activeVideoAspect(): Float? = holders.firstOrNull {
+        it.bindingAdapterPosition == activePosition
+    }?.videoAspect()
 
     fun isActivePlaying(): Boolean = holders.any {
         it.bindingAdapterPosition == activePosition && it.isPlaying()
@@ -219,12 +240,17 @@ class VideoAdapter(
         private val download = view.findViewById<TextView>(R.id.download)
         private val pip = view.findViewById<TextView>(R.id.pip)
         private val share = view.findViewById<TextView>(R.id.share)
+        private val comments = view.findViewById<TextView>(R.id.comments)
         private val reactionBurst = view.findViewById<ReactionBurstView>(R.id.reactionBurst)
         private val speedIndicator = view.findViewById<TextView>(R.id.speedIndicator)
         private val pauseIndicator = view.findViewById<PauseIndicatorView>(R.id.pauseIndicator)
 
         private var player: ExoPlayer? = null
         private var bound: VideoItem? = null
+        /** 当前视频是横屏的吗。播放器解出画面尺寸后才知道，绑定时先当成不是。 */
+        private var landscape = false
+        /** 画面宽高比（宽 / 高），0 表示还不知道。 */
+        private var aspect = 0f
         private var active = false
         private var generation = 0
         private var likeBusy = false
@@ -257,6 +283,11 @@ class VideoAdapter(
             release()
             bound = item
             recoveryAttempts = 0
+            landscape = false
+            aspect = 0f
+            applyVideoInsets()
+            comments.visibility = if (onComments == null) View.GONE else View.VISIBLE
+            comments.setOnClickListener { onComments?.invoke(item) }
             item.localFavorite = history.isLocalFavorite(item.id)
             pauseIndicator.indicatorEnabled = prefs.showPauseIndicator
             author.text = "@${item.author}"
@@ -359,6 +390,17 @@ class VideoAdapter(
                 addListener(object : Player.Listener {
                     override fun onPlayerError(error: PlaybackException) {
                         if (active && bound?.id == item.id) refreshSourceAfterError(item, error.errorCodeName)
+                    }
+
+                    override fun onVideoSizeChanged(videoSize: androidx.media3.common.VideoSize) {
+                        if (videoSize.width <= 0 || videoSize.height <= 0) return
+                        val ratio = videoSize.pixelWidthHeightRatio.takeIf { it > 0f } ?: 1f
+                        aspect = videoSize.width * ratio / videoSize.height
+                        val wide = aspect > 1f
+                        if (wide != landscape) {
+                            landscape = wide
+                            applyVideoInsets()
+                        }
                     }
 
                     override fun onPlaybackStateChanged(playbackState: Int) {
@@ -464,6 +506,31 @@ class VideoAdapter(
         fun applyDisplayPrefs() {
             pauseIndicator.indicatorEnabled = prefs.showPauseIndicator
         }
+
+        /**
+         * 画面在卡片里的摆法。PlayerView 是 fit 模式、内容居中，所以给它内边距
+         * 就等于把画面限制在剩下的那块区域里。
+         *
+         * - 评论面板开着：上面留顶栏、下面留面板，画面缩进中间那块，面板不遮画面；
+         * - 横屏视频：抬起卡片高度的 24%，画面中心落在约 38% 处——像哔哩哔哩那样偏上，
+         *   而不是死在正中央，顺带也离底下的信息栏远一点；
+         * - 竖屏视频：不动，铺满。
+         */
+        fun applyVideoInsets() {
+            val height = itemView.height.takeIf { it > 0 } ?: itemView.resources.displayMetrics.heightPixels
+            val panelOpen = bottomInset > 0 || topInset > 0
+            val top = if (panelOpen) topInset else 0
+            val bottom = when {
+                panelOpen -> bottomInset
+                landscape -> (height * LANDSCAPE_LIFT).toInt()
+                else -> 0
+            }
+            if (playerView.paddingBottom != bottom || playerView.paddingTop != top) {
+                playerView.setPadding(0, top, 0, bottom)
+            }
+        }
+
+        fun videoAspect(): Float? = aspect.takeIf { it > 0f }
 
         fun readyForIdlePreload(): Boolean = active && player?.playbackState == Player.STATE_READY
 
@@ -727,6 +794,8 @@ class VideoAdapter(
         .build()
 
     companion object {
+        /** 横屏视频往上抬的比例（占卡片高度）。 */
+        const val LANDSCAPE_LIFT = 0.24f
         /** 同一条视频最多自动刷新几次播放地址，避免真的放不了时无限重试。 */
         const val MAX_ERROR_RECOVERIES = 2
         const val MIN_BUFFER_MS = 12_000

@@ -40,7 +40,7 @@ class ReactionBurstView @JvmOverloads constructor(
      * 换算成屏幕上差不多大的图形。
      */
     enum class Kind(val gifRes: Int, val gifDp: Float, val iconRes: Int, val color: Int) {
-        LIKE(R.raw.like_burst, 120f, R.drawable.ic_heart_rounded, 0xFFFF365D.toInt()),
+        LIKE(R.raw.like_burst, 104f, R.drawable.ic_heart_rounded, 0xFFFF365D.toInt()),
         FAVORITE(R.raw.favorite_burst, 104f, R.drawable.ic_star_rounded, 0xFFFFD54F.toInt())
     }
 

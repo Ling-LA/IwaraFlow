@@ -7,9 +7,11 @@ import android.app.Application
 import android.content.ClipData
 import android.content.ClipboardManager
 import android.content.Context
+import android.content.Intent
 import android.os.Build
 import android.os.Bundle
 import android.widget.Toast
+import androidx.core.content.FileProvider
 import java.io.File
 import java.text.SimpleDateFormat
 import java.util.Date
@@ -66,7 +68,51 @@ object NavigationDiagnostics {
     }
 
     fun show(activity: Activity) {
-        val report = buildString {
+        val report = buildReport(activity)
+        AlertDialog.Builder(activity)
+            .setTitle("诊断信息（仅保存在本机）")
+            .setMessage(report)
+            .setNegativeButton("关闭", null)
+            .setNeutralButton("复制") { _, _ ->
+                (activity.getSystemService(Context.CLIPBOARD_SERVICE) as ClipboardManager)
+                    .setPrimaryClip(ClipData.newPlainText("IwaraFlow 诊断信息", report))
+                Toast.makeText(activity, "已复制", Toast.LENGTH_SHORT).show()
+            }
+            .setPositiveButton("分享文件") { _, _ -> shareAsFile(activity, report) }
+            .show()
+    }
+
+    /**
+     * 整份报告存成 txt 再分享出去。以前只能复制文本，一份报告几千字，
+     * 贴到 QQ 里超长会被截断，交上来的诊断经常缺尾巴；文件没有这个问题。
+     */
+    private fun shareAsFile(activity: Activity, report: String) {
+        val file = runCatching { writeReportFile(activity, report) }.getOrNull()
+        if (file == null) {
+            Toast.makeText(activity, "诊断文件写入失败", Toast.LENGTH_SHORT).show()
+            return
+        }
+        val uri = FileProvider.getUriForFile(activity, "${activity.packageName}.fileprovider", file)
+        val send = Intent(Intent.ACTION_SEND).apply {
+            type = "text/plain"
+            putExtra(Intent.EXTRA_STREAM, uri)
+            putExtra(Intent.EXTRA_SUBJECT, file.name)
+            addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
+        }
+        runCatching { activity.startActivity(Intent.createChooser(send, "分享诊断文件")) }
+            .onFailure { Toast.makeText(activity, "没有可用的分享应用", Toast.LENGTH_SHORT).show() }
+    }
+
+    /** 写到缓存目录的 diagnostics/ 下，只留最近几份。 */
+    internal fun writeReportFile(context: Context, report: String): File {
+        val dir = File(context.cacheDir, "diagnostics").apply { mkdirs() }
+        dir.listFiles()?.sortedByDescending { it.lastModified() }?.drop(4)?.forEach { it.delete() }
+        val stamp = SimpleDateFormat("yyyyMMdd-HHmmss-SSS", Locale.ROOT).format(Date())
+        return File(dir, "IwaraFlow-${version(context)}-诊断-$stamp.txt").apply { writeText(report) }
+    }
+
+    internal fun buildReport(activity: Activity): String {
+        return buildString {
             appendLine("IwaraFlow ${version(activity)} · ${Build.MANUFACTURER} ${Build.MODEL}")
             appendLine("Android ${Build.VERSION.RELEASE} / API ${Build.VERSION.SDK_INT}")
             appendLine("\n最近系统退出记录：")
@@ -83,15 +129,6 @@ object NavigationDiagnostics {
             appendLine(runCatching { File(activity.filesDir, "navigation-lifecycle.txt").readText().takeLast(16_000) }
                 .getOrDefault("暂无记录"))
         }
-        AlertDialog.Builder(activity)
-            .setTitle("诊断信息（仅保存在本机）")
-            .setMessage(report)
-            .setNegativeButton("关闭", null)
-            .setPositiveButton("复制诊断信息") { _, _ ->
-                (activity.getSystemService(Context.CLIPBOARD_SERVICE) as ClipboardManager)
-                    .setPrimaryClip(ClipData.newPlainText("IwaraFlow 诊断信息", report))
-                Toast.makeText(activity, "已复制，可粘贴到问题反馈中", Toast.LENGTH_SHORT).show()
-            }.show()
     }
 
     private fun version(context: Context): String = runCatching {

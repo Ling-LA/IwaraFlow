@@ -33,6 +33,23 @@ data class VideoListPage(
     val total: Int
 )
 
+/** 一条 Iwara 官方评论。[parentId] 非空表示这是某条评论下的回复。 */
+data class IwaraComment(
+    val id: String,
+    val body: String,
+    val author: IwaraAuthor,
+    val createdAt: Long,
+    val replyCount: Int = 0,
+    val parentId: String = ""
+)
+
+/** 评论列表的一页；[total] 是服务端回报的总条数（回复列表时是该评论的回复总数）。 */
+data class CommentPage(
+    val comments: List<IwaraComment>,
+    val total: Int,
+    val hasMore: Boolean
+)
+
 /** 官方点赞列表的一页；[total] 是服务端回报的点赞总数。 */
 data class FavoritesPage(
     val videos: List<VideoItem>,

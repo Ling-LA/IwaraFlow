@@ -30,6 +30,7 @@ import android.widget.ScrollView
 import android.widget.Spinner
 import android.widget.TextView
 import android.widget.Toast
+import androidx.activity.OnBackPressedCallback
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.appcompat.app.AppCompatActivity
 import androidx.core.app.ActivityCompat
@@ -51,6 +52,12 @@ class MainActivityV3 : AppCompatActivity() {
     private lateinit var error: TextView
     private lateinit var adapter: VideoAdapter
     private lateinit var topBar: View
+    private lateinit var commentsPanel: CommentsPanel
+
+    /** 评论面板开着时返回键先关面板，而不是退出应用。 */
+    private val closeCommentsOnBack = object : OnBackPressedCallback(false) {
+        override fun handleOnBackPressed() { commentsPanel.close() }
+    }
 
     private var mode = "recommend"
     private var currentPage = 0
@@ -135,7 +142,7 @@ class MainActivityV3 : AppCompatActivity() {
         history = HistoryStore(this)
         history.warmUp()
         prefs = AppPrefs(this)
-        recommender = RecommendationEngine(api, history)
+        recommender = RecommendationEngine(api, history).apply { classicsEvery = prefs.classicsEvery }
         playableGate = PlayableVideoGate(api)
         mediaCache = MediaPreloadCache(this)
         updates = UpdateManager(this)
@@ -155,12 +162,25 @@ class MainActivityV3 : AppCompatActivity() {
             onEnterPip = ::enterPip,
             onEnded = ::onVideoEnded,
             onNeedLogin = ::showLoginDialog,
-            onShare = ::shareVideo
+            onShare = ::shareVideo,
+            onComments = ::openComments
         )
         pager.adapter = adapter
         pager.offscreenPageLimit = 1
+        commentsPanel = CommentsPanel(
+            root = findViewById(R.id.commentsPanel),
+            api = api,
+            onNeedLogin = ::showLoginDialog,
+            onLayoutChanged = { open, top, bottom ->
+                closeCommentsOnBack.isEnabled = open
+                adapter.setVideoInsets(if (open) top else 0, if (open) bottom else 0)
+            }
+        )
+        onBackPressedDispatcher.addCallback(this, closeCommentsOnBack)
         pager.registerOnPageChangeCallback(object : ViewPager2.OnPageChangeCallback() {
             override fun onPageSelected(position: Int) {
+                // 翻到下一条了，上一条的评论就不该还挂着。
+                commentsPanel.close()
                 adapter.setActive(position)
                 refreshPipActions()
                 if (pagingEnabled && position >= adapter.itemCount - 5) loadMore()
@@ -332,8 +352,8 @@ class MainActivityV3 : AppCompatActivity() {
                         if (requestId != requestSerial) return@runOnUiThread
                         awaitingFullFeed = false
                         loading.visibility = View.GONE
-                        note("推荐加载失败：${it.message?.take(80)}")
-                        showError("推荐加载失败\n${it.message}")
+                        note("推荐加载失败：${it.message?.take(120)}")
+                        showError(NetworkProxy.explain(it.message) ?: "推荐加载失败\n${it.message}")
                     }
                 }
             }
@@ -364,8 +384,9 @@ class MainActivityV3 : AppCompatActivity() {
                     awaitingFullFeed = false
                     loading.visibility = View.GONE
                     loadingMore = false
-                    note("$mode 第 $currentPage 页加载失败：${it.message?.take(80)}")
-                    if (reset) showError("Iwara 数据加载失败\n${it.message}\n\n请确认网络可以访问 iwara.tv")
+                    note("$mode 第 $currentPage 页加载失败：${it.message?.take(120)}")
+                    if (reset) showError(NetworkProxy.explain(it.message)
+                        ?: "Iwara 数据加载失败\n${it.message}\n\n请确认网络可以访问 iwara.tv")
                 }
             }
         }
@@ -703,6 +724,17 @@ class MainActivityV3 : AppCompatActivity() {
             text = "开启后只在生成新的推荐列表时过滤历史记录，不会在滑动过程中连续自动跳过。"; textSize = 12f
             setTextColor(0xFF607D93.toInt()); setPadding(dp(4), 0, 0, dp(8))
         })
+        val classicsValues = intArrayOf(0, 8, 12, 16, 24)
+        val classicsNames = arrayOf("不穿插老片", "每 8 条穿插一条老片", "每 12 条穿插一条老片", "每 16 条穿插一条老片", "每 24 条穿插一条老片")
+        val classics = Spinner(this).apply {
+            adapter = ArrayAdapter(this@MainActivityV3, android.R.layout.simple_spinner_dropdown_item, classicsNames)
+            setSelection(classicsValues.indexOf(prefs.classicsEvery).takeIf { it >= 0 } ?: 2)
+        }
+        panel.addView(classics)
+        panel.addView(TextView(this).apply {
+            text = "老片指点赞很高、发布超过半年的作品，随机插在每一组里的任意位置。避免短时间刷太多把新片刷没、后面越刷越旧，也避免一直碰不到历史上的高质量作品。"
+            textSize = 12f; setTextColor(0xFF607D93.toInt()); setPadding(dp(4), dp(4), 0, dp(8))
+        })
         panel.addView(sectionTitle("播放"))
         val autoNext = CheckBox(this).apply { text = "播放完毕自动进入下一条"; isChecked = prefs.autoNext }
         val autoPip = CheckBox(this).apply { text = "切到后台时自动进入画中画"; isChecked = prefs.autoPip }
@@ -716,6 +748,21 @@ class MainActivityV3 : AppCompatActivity() {
         val spinner = Spinner(this); spinner.adapter = ArrayAdapter(this, android.R.layout.simple_spinner_dropdown_item, qualityNames)
         spinner.setSelection(qualityValues.indexOf(prefs.defaultQuality).let { if (it >= 0) it else 0 }); panel.addView(spinner)
 
+        panel.addView(sectionTitle("网络"))
+        panel.addView(TextView(this).apply {
+            text = "Iwara 在部分地区无法直连。代理工具只开了本地端口、没开 VPN 模式时，可以让本应用自己走那个端口。"
+            textSize = 12f; setTextColor(0xFF607D93.toInt()); setPadding(dp(4), 0, 0, dp(6))
+        })
+        val proxyTypes = arrayOf(NetworkProxy.TYPE_NONE, NetworkProxy.TYPE_HTTP, NetworkProxy.TYPE_SOCKS)
+        val proxyNames = arrayOf("不使用代理", "HTTP 代理", "SOCKS5 代理")
+        val proxyType = Spinner(this).apply {
+            adapter = ArrayAdapter(this@MainActivityV3, android.R.layout.simple_spinner_dropdown_item, proxyNames)
+            setSelection(proxyTypes.indexOf(prefs.proxyType).coerceAtLeast(0))
+        }
+        val proxyHost = settingsInput("主机，例如 127.0.0.1", prefs.proxyHost, InputType.TYPE_CLASS_TEXT or InputType.TYPE_TEXT_VARIATION_URI)
+        val proxyPort = settingsInput("端口，例如 7890", prefs.proxyPort.takeIf { it > 0 }?.toString().orEmpty(), InputType.TYPE_CLASS_NUMBER)
+        panel.addView(proxyType); panel.addView(proxyHost); panel.addView(proxyPort)
+
         panel.addView(sectionTitle("维护"))
         panel.addView(actionRow("同步点赞记录", "把在网页端点过的赞补进“已看”，刷新推荐后生效。") { syncLikedVideos() })
         panel.addView(actionRow("诊断信息", "最近的异常、退出原因和加载线索，只存在本机，不会上传。") {
@@ -728,14 +775,37 @@ class MainActivityV3 : AppCompatActivity() {
             .setNegativeButton("取消", null).setPositiveButton("保存") { _, _ ->
                 // 只有“排除已看视频”会改变推荐候选，也只有推荐流受它影响；
                 // 其它几项重拉一遍列表只会把用户刷到一半的位置冲掉。
-                val reloadFeed = mode == "recommend" && prefs.skipSeen != skipSeen.isChecked
+                val newClassics = classicsValues[classics.selectedItemPosition]
+                val reloadFeed = mode == "recommend" &&
+                    (prefs.skipSeen != skipSeen.isChecked || prefs.classicsEvery != newClassics)
+                prefs.classicsEvery = newClassics; recommender.classicsEvery = newClassics
                 prefs.skipSeen = skipSeen.isChecked; prefs.autoNext = autoNext.isChecked; prefs.autoPip = autoPip.isChecked
                 prefs.showPauseIndicator = pauseIcon.isChecked
                 prefs.defaultQuality = qualityValues[spinner.selectedItemPosition]
+                val newType = proxyTypes[proxyType.selectedItemPosition]
+                val newHost = proxyHost.text.toString().trim()
+                val newPort = proxyPort.text.toString().trim().toIntOrNull() ?: 0
+                val proxyChanged = newType != prefs.proxyType || newHost != prefs.proxyHost || newPort != prefs.proxyPort
+                if (newType != NetworkProxy.TYPE_NONE && NetworkProxy.proxyFor(newType, newHost, newPort) == null) {
+                    Toast.makeText(this, "代理主机或端口不完整，代理设置未保存", Toast.LENGTH_LONG).show()
+                } else {
+                    prefs.proxyType = newType; prefs.proxyHost = newHost; prefs.proxyPort = newPort
+                    if (proxyChanged) NetworkProxy.apply(prefs)
+                }
                 Toast.makeText(this, "设置已保存", Toast.LENGTH_SHORT).show()
-                if (reloadFeed) loadFeed(reset = true) else adapter.applyDisplayPrefs()
+                // 网络路径变了，之前失败的请求要重新来。
+                if (reloadFeed || proxyChanged) loadFeed(reset = true) else adapter.applyDisplayPrefs()
             }.create()
         dialog.setOnShowListener { styleDialogButtons(dialog) }; dialog.show()
+    }
+
+    private fun settingsInput(hint: String, value: String, inputType: Int) = EditText(this).apply {
+        this.hint = hint; setText(value); this.inputType = inputType; setSingleLine(true)
+        setTextColor(0xFF17324A.toInt()); setHintTextColor(0x99607D93.toInt())
+        background = ContextCompat.getDrawable(this@MainActivityV3, R.drawable.bg_input)
+        setPadding(dp(16), dp(10), dp(16), dp(10))
+        layoutParams = LinearLayout.LayoutParams(LinearLayout.LayoutParams.MATCH_PARENT, LinearLayout.LayoutParams.WRAP_CONTENT)
+            .apply { topMargin = dp(6) }
     }
 
     /**
@@ -792,6 +862,21 @@ class MainActivityV3 : AppCompatActivity() {
         } catch (e: Exception) { Toast.makeText(this, "下载创建失败：${e.message}", Toast.LENGTH_LONG).show() }
     }
 
+    /**
+     * 打开评论面板。面板高度和画面顶边按当前视频的宽高比算：横屏视频面板顶边贴住画面底边，
+     * 竖屏视频画面缩到顶栏和面板之间。播放器不动，视频照常播。
+     */
+    private fun openComments(item: VideoItem) {
+        if (isInPictureInPictureMode) return
+        val screenWidth = pager.width.takeIf { it > 0 } ?: resources.displayMetrics.widthPixels
+        val screenHeight = pager.height.takeIf { it > 0 } ?: resources.displayMetrics.heightPixels
+        val topBarHeight = topBar.height.takeIf { it > 0 } ?: dp(58)
+        val aspect = adapter.activeVideoAspect()
+        val height = CommentsPanel.panelHeight(screenWidth, screenHeight, topBarHeight, aspect)
+        val top = CommentsPanel.videoTop(screenWidth, screenHeight, topBarHeight, aspect, height)
+        commentsPanel.open(item, height, top)
+    }
+
     /** 分享当前视频。面板期间标记成“正在打开内部页面”，回来时才好接上播放。 */
     private fun shareVideo(item: VideoItem) {
         if (openingInternalPage || isFinishing || isDestroyed) return
@@ -829,6 +914,7 @@ class MainActivityV3 : AppCompatActivity() {
     }
 
     private fun enterPip() {
+        commentsPanel.close()
         try { enterPictureInPictureMode(pipParams()) }
         catch (e: Exception) { Toast.makeText(this, "画中画启动失败：${e.message}", Toast.LENGTH_SHORT).show() }
     }
@@ -841,6 +927,7 @@ class MainActivityV3 : AppCompatActivity() {
 
     override fun onPictureInPictureModeChanged(isInPictureInPictureMode: Boolean) {
         super.onPictureInPictureModeChanged(isInPictureInPictureMode)
+        if (isInPictureInPictureMode) commentsPanel.close()
         topBar.visibility = if (isInPictureInPictureMode) View.GONE else View.VISIBLE
         adapter.setPipMode(isInPictureInPictureMode)
     }
@@ -882,6 +969,7 @@ class MainActivityV3 : AppCompatActivity() {
     override fun onDestroy() {
         invalidateRequests()
         runCatching { unregisterReceiver(pipShareReceiver) }
+        if (::commentsPanel.isInitialized) commentsPanel.release()
         adapter.releaseAll(); playableGate.close(); mediaCache.close(); recommender.close()
         likedSync.close(); updates.close(); api.close(); history.close(); super.onDestroy()
     }

@@ -251,6 +251,83 @@ class IwaraApi(context: Context, private val apiRoot: String = DEFAULT_API_ROOT)
         return FavoritesPage(out, root.optInt("count", -1), hasMorePages(root, page, out.size))
     }
 
+    // ---------------------------------------------------------------- 评论
+
+    fun getComments(videoId: String, page: Int = 0, parentId: String? = null, callback: (Result<CommentPage>) -> Unit) {
+        enqueue(callback) { runCatching { getCommentPageBlocking(videoId, page, parentId) } }
+    }
+
+    /**
+     * 官方评论：`/video/{id}/comments`。带 `parent=<评论 id>` 时返回那条评论下的回复。
+     * 登录了就带上 token——服务端据此回传本人身份，也能看到仅登录可见的内容。
+     */
+    fun getCommentPageBlocking(videoId: String, page: Int = 0, parentId: String? = null, limit: Int = 32): CommentPage {
+        val builder = "$apiRoot/video/$videoId/comments".toHttpUrl().newBuilder()
+            .addQueryParameter("page", page.toString())
+            .addQueryParameter("limit", limit.coerceAtMost(MAX_PAGE_LIMIT).toString())
+        if (!parentId.isNullOrBlank()) builder.addQueryParameter("parent", parentId)
+        val root = getJsonObject(builder.build().toString(), optionalAuth = true)
+        val results = root.optJSONArray("results") ?: JSONArray()
+        val list = ArrayList<IwaraComment>()
+        for (i in 0 until results.length()) parseComment(results.optJSONObject(i))?.let { list += it }
+        return CommentPage(list, root.optInt("count", -1), hasMorePages(root, page, list.size))
+    }
+
+    fun postComment(videoId: String, body: String, parentId: String? = null, callback: (Result<IwaraComment>) -> Unit) {
+        enqueue(callback) { runCatching { postCommentBlocking(videoId, body, parentId) } }
+    }
+
+    /**
+     * 发评论 / 回复：`POST /video/{id}/comments`，正文字段是 `body`，回复带 `parentId`。
+     * 回复直接落到 Iwara 官网上，和在网页里回复完全一样。
+     */
+    fun postCommentBlocking(videoId: String, body: String, parentId: String? = null): IwaraComment {
+        val text = body.trim()
+        if (text.isBlank()) throw IOException("评论内容不能为空")
+        if (!isLoggedIn()) throw IOException("请先登录 Iwara")
+        ensureAccessTokenBlocking() ?: throw IOException("登录已失效，请重新登录")
+        val json = JSONObject().put("body", text)
+        if (!parentId.isNullOrBlank()) json.put("parentId", parentId)
+        val request = baseRequest("$apiRoot/video/$videoId/comments", authenticated = true)
+            .post(json.toString().toRequestBody(jsonType)).build()
+        client.newCall(request).execute().use { response ->
+            val raw = response.body?.string().orEmpty()
+            if (!response.isSuccessful) {
+                throw IOException(extractMessage(raw, when (response.code) {
+                    401 -> "登录已失效，请重新登录"
+                    403 -> "没有评论权限"
+                    429 -> "评论太频繁，稍后再试"
+                    else -> "评论发送失败（HTTP ${response.code}）"
+                }))
+            }
+            val posted = runCatching { parseComment(JSONObject(raw)) }.getOrNull()
+            // 服务端不一定原样回传评论体；回传不了就自己拼一条，界面上先显示出来。
+            return posted ?: IwaraComment(
+                id = "", body = text, author = IwaraAuthor("", "我", ""),
+                createdAt = System.currentTimeMillis(), parentId = parentId.orEmpty()
+            )
+        }
+    }
+
+    private fun parseComment(o: JSONObject?): IwaraComment? {
+        o ?: return null
+        val id = o.optString("id")
+        val body = o.optString("body")
+        if (id.isBlank() && body.isBlank()) return null
+        val user = o.optJSONObject("user") ?: JSONObject()
+        val created = runCatching {
+            o.optString("createdAt").takeIf { it.isNotBlank() }?.let { Instant.parse(it).toEpochMilli() }
+        }.getOrNull() ?: 0L
+        return IwaraComment(
+            id = id,
+            body = body,
+            author = parseAuthor(user),
+            createdAt = created,
+            replyCount = o.optInt("numReplies", 0),
+            parentId = o.optJSONObject("parent")?.optString("id").orEmpty().ifBlank { o.optString("parentId") }
+        )
+    }
+
     fun likeVideo(videoId: String, liked: Boolean, callback: (Result<Unit>) -> Unit) = relationWrite("$apiRoot/video/$videoId/like", liked, callback)
     fun followUser(userId: String, following: Boolean, callback: (Result<Unit>) -> Unit) = relationWrite("$apiRoot/user/$userId/followers", following, callback)
     fun setFriend(userId: String, enabled: Boolean, callback: (Result<Unit>) -> Unit) = relationWrite("$apiRoot/user/$userId/friends", enabled, callback)

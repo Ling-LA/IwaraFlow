@@ -39,6 +39,19 @@ class RecommendationEngine(
     /** 每个榜单实际能翻到第几页：优先由服务端回报的总条数算出，见 noteTotal。 */
     private val depthCeiling = java.util.concurrent.ConcurrentHashMap<String, Int>()
 
+    /**
+     * 每多少条推荐里穿插一条老片，0 = 不穿插。引擎自己的默认是 0，页面按设置写进来。
+     *
+     * 抽页已经保证新片源源不断，但反过来也有问题：短时间刷得多，新的很快刷完，
+     * 后面越刷越旧；刷得少，又一直碰不到历史上那些点赞很高的老作品。
+     * 所以单独开一条“老片”流——按总点赞排序、往后翻到几十上百页去抽，
+     * 那里全是有年头又受欢迎的作品——按固定间隔、随机位置塞进结果里。
+     */
+    @Volatile var classicsEvery: Int = 0
+
+    /** 最近一次榜单请求失败的原因，只在全部失败时拿来充实错误信息。 */
+    @Volatile private var lastFailure: Throwable? = null
+
     /** 本次刷新在存档里抽到的页码，只用于诊断。 */
     @Volatile var sampledPages: List<Int> = emptyList()
         private set
@@ -72,8 +85,15 @@ class RecommendationEngine(
                 pool.submit<List<VideoItem>> { api.getFavoriteVideosBlocking() }
             } else null
 
+            val classicsFuture = if (classicsEvery > 0) pool.submit<List<VideoItem>> { fetchClassics() } else null
+
             mergeRound(pool, merged, subscribed, round = 0, deadline = deadline)
-            if (merged.isEmpty()) throw IllegalStateException("所有推荐榜单请求均失败")
+            if (merged.isEmpty()) {
+                // 把底下那个真正的错误带出来。诊断里只写“全部失败”等于什么都没说：
+                // 两份国内机器的报告就是靠 date 榜单单独记的 "Connection reset" 才看出是网络被掐。
+                val cause = lastFailure?.message?.takeIf { it.isNotBlank() }
+                throw IllegalStateException(if (cause != null) "所有推荐榜单请求均失败（$cause）" else "所有推荐榜单请求均失败")
+            }
 
             likedFuture?.let { f ->
                 val remaining = deadline - System.nanoTime()
@@ -82,7 +102,10 @@ class RecommendationEngine(
                 liked?.forEach { item -> history.markSeen(item.id) }
             }
 
-            if (!skipSeen) return interleave(rank(merged), subscribed).take(MAX_RESULTS)
+            if (!skipSeen) {
+                val classics = classicsFuture?.let { awaitClassics(it, deadline, skipSeen = false) }.orEmpty()
+                return weaveClassics(interleave(rank(merged), subscribed), classics).take(MAX_RESULTS)
+            }
 
             var buckets = split(rank(merged))
             // 没看过的不够就再抽几轮。每轮抽的都是存档里别的页，不是往后走一页——
@@ -102,10 +125,64 @@ class RecommendationEngine(
                 buckets.fresh.isNotEmpty() || buckets.watched.isNotEmpty() -> buckets.fresh + buckets.watched
                 else -> buckets.all()
             }
-            return interleave(result, subscribed).take(MAX_RESULTS)
+            val classics = classicsFuture?.let { awaitClassics(it, deadline, skipSeen = true) }.orEmpty()
+            return weaveClassics(interleave(result, subscribed), classics).take(MAX_RESULTS)
         } finally {
             pool.shutdownNow()
         }
+    }
+
+    /**
+     * 老片候选：按总点赞排序的列表，跳过最前面那几页（那是常年霸榜的），
+     * 在后面均匀抽一页。这一页里的视频点赞都不低，而且大多有些年头。
+     */
+    private fun fetchClassics(): List<VideoItem> {
+        val ceiling = ceilingFor(CLASSICS_SORT, CLASSICS_DEPTH)
+        val page = if (ceiling <= CLASSICS_MIN_PAGE) ceiling
+        else CLASSICS_MIN_PAGE + random.nextInt(ceiling - CLASSICS_MIN_PAGE + 1)
+        sampledPages = sampledPages + page
+        val response = api.getVideoListPageBlocking(CLASSICS_SORT, page = page, limit = PAGE_SIZE)
+        noteTotal(CLASSICS_SORT, response.total)
+        if (response.videos.isEmpty()) noteEmptyPage(CLASSICS_SORT, page)
+        return response.videos
+    }
+
+    /** 老片流失败或超时就当没有，不能拖住首屏。 */
+    private fun awaitClassics(
+        future: java.util.concurrent.Future<List<VideoItem>>,
+        deadline: Long,
+        skipSeen: Boolean
+    ): List<VideoItem> {
+        val remaining = deadline - System.nanoTime()
+        val videos = (if (remaining <= 0L) null
+        else runCatching { future.get(remaining, TimeUnit.NANOSECONDS) }.getOrNull()) ?: return emptyList()
+        val cutoff = System.currentTimeMillis() - CLASSIC_MIN_AGE_MS
+        return videos.filter { item ->
+            // 发布时间不明（接口没给）就不按年龄筛：抽到的页本身已经够靠后了。
+            val oldEnough = item.createdAt <= 0L || item.createdAt < cutoff
+            oldEnough && !item.liked && !history.isLocalFavorite(item.id) && !(skipSeen && history.isSeen(item.id))
+        }
+    }
+
+    /**
+     * 每 [classicsEvery] 条里塞一条老片，塞在这一组里的随机位置——可能是第一条，
+     * 也可能是最后一条。老片不够时有多少塞多少，塞完就照常。
+     */
+    internal fun weaveClassics(feed: List<VideoItem>, classics: List<VideoItem>): List<VideoItem> {
+        val every = classicsEvery
+        if (every <= 0 || classics.isEmpty() || feed.isEmpty()) return feed
+        val taken = feed.map { it.id }.toHashSet()
+        val pool = ArrayDeque(classics.filter { taken.add(it.id) })
+        if (pool.isEmpty()) return feed
+        val out = ArrayList<VideoItem>(feed.size + pool.size)
+        val rest = ArrayDeque(feed)
+        while (rest.isNotEmpty()) {
+            val block = ArrayList<VideoItem>(every + 1)
+            repeat(every) { if (rest.isNotEmpty()) block += rest.removeFirst() }
+            if (pool.isNotEmpty()) block.add(random.nextInt(block.size + 1), pool.removeFirst())
+            out += block
+        }
+        return out
     }
 
     /** 一次请求：某个榜单（或订阅流）的某一页。 */
@@ -189,7 +266,9 @@ class RecommendationEngine(
         sources.forEach { (request, future) ->
             val remaining = deadline - System.nanoTime()
             val response = (if (remaining <= 0L) null
-            else runCatching { future.get(remaining, TimeUnit.NANOSECONDS) }.getOrNull()) ?: return@forEach
+            else runCatching { future.get(remaining, TimeUnit.NANOSECONDS) }
+                .onFailure { lastFailure = (it as? java.util.concurrent.ExecutionException)?.cause ?: it }
+                .getOrNull()) ?: return@forEach
             noteTotal(request.sort, response.total)
             val videos = response.videos
             if (videos.isEmpty()) { noteEmptyPage(request.sort, request.page); return@forEach }
@@ -339,6 +418,14 @@ class RecommendationEngine(
         private const val SUBSCRIBED_WEIGHT = 2.8
         /** 每这么多条“发现”配一条关注作者的更新，插在这一组里的随机位置。 */
         internal const val DISCOVERY_RUN = 5
+        /** 老片流：按总点赞排序，跳过最前面常年霸榜的几页，在后面均匀抽。 */
+        internal const val CLASSICS_SORT = "likes"
+        internal const val CLASSICS_MIN_PAGE = 8
+        internal const val CLASSICS_DEPTH = 300
+        /** 发布不满半年的不算老片。 */
+        private const val CLASSIC_MIN_AGE_MS = 180L * 24 * 60 * 60 * 1000
+        /** 设置里的默认：每 12 条穿插一条。 */
+        const val DEFAULT_CLASSICS_EVERY = 12
         private const val PAGE_SIZE = 36
         private const val MAX_RESULTS = 80
         /** 首轮 6 个请求 + 点赞同步，留一点余量。 */

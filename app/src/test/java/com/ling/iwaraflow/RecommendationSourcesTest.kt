@@ -76,6 +76,7 @@ class RecommendationSourcesTest {
     @Test fun theAllTimeTopChartsAreNoLongerRead() {
         val feed = load(RecommendationEngine(api(loggedIn = false), history()))
         // 全站历史总榜每次都是同一批老视频，拉它们只是白费一次请求。
+        // （likes 榜现在只在开了“老片穿插”时才读，而且读的是深处的页，见 ClassicsWeaveTest。）
         assertTrue("不该再取 likes 总榜", feed.none { it.id.startsWith("likes-") })
         assertTrue("不该再取 views 总榜", feed.none { it.id.startsWith("views-") })
         assertTrue("热门榜单仍然保留", feed.any { it.id.startsWith("trending-") })

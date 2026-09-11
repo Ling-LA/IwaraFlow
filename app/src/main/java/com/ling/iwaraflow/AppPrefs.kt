@@ -9,6 +9,11 @@ class AppPrefs(context: Context) {
         get() = prefs.getBoolean("skip_seen", true)
         set(value) = prefs.edit().putBoolean("skip_seen", value).apply()
 
+    /** 推荐里每多少条穿插一条老片，0 = 关闭。 */
+    var classicsEvery: Int
+        get() = prefs.getInt("classics_every", RecommendationEngine.DEFAULT_CLASSICS_EVERY)
+        set(value) = prefs.edit().putInt("classics_every", value.coerceAtLeast(0)).apply()
+
     var defaultQuality: String
         get() = prefs.getString("default_quality", "highest") ?: "highest"
         set(value) = prefs.edit().putString("default_quality", value).apply()
@@ -26,6 +31,19 @@ class AppPrefs(context: Context) {
     var showPauseIndicator: Boolean
         get() = prefs.getBoolean("show_pause_indicator", true)
         set(value) = prefs.edit().putBoolean("show_pause_indicator", value).apply()
+
+    /** 手动代理。类型是 [NetworkProxy.TYPE_NONE] / TYPE_HTTP / TYPE_SOCKS。 */
+    var proxyType: String
+        get() = prefs.getString("proxy_type", NetworkProxy.TYPE_NONE) ?: NetworkProxy.TYPE_NONE
+        set(value) = prefs.edit().putString("proxy_type", value).apply()
+
+    var proxyHost: String
+        get() = prefs.getString("proxy_host", "") ?: ""
+        set(value) = prefs.edit().putString("proxy_host", value.trim()).apply()
+
+    var proxyPort: Int
+        get() = prefs.getInt("proxy_port", 0)
+        set(value) = prefs.edit().putInt("proxy_port", value).apply()
 
     var autoPip: Boolean
         get() = prefs.getBoolean("auto_pip", true)

@@ -3,4 +3,8 @@
     <external-files-path
         name="update_apks"
         path="Download/updates/" />
+    <!-- 诊断报告 txt，分享给别人时通过 FileProvider 授权读取。 -->
+    <cache-path
+        name="diagnostics"
+        path="diagnostics/" />
 </paths>

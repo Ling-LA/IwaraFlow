@@ -3,16 +3,11 @@ package com.ling.iwaraflow
 import android.Manifest
 import android.app.AlertDialog
 import android.app.DownloadManager
-import android.app.PendingIntent
 import android.app.PictureInPictureParams
-import android.app.RemoteAction
-import android.content.BroadcastReceiver
 import android.content.Context
 import android.content.Intent
-import android.content.IntentFilter
 import android.content.pm.PackageManager
 import android.content.res.ColorStateList
-import android.graphics.drawable.Icon
 import android.net.Uri
 import android.os.Build
 import android.os.Bundle
@@ -107,12 +102,19 @@ class MainActivityV3 : AppCompatActivity() {
     }
 
     /**
-     * 分享面板也走 launcher。直接 startActivity 的话，面板弹出来的一瞬间会触发
-     * onUserLeaveHint，开了“自动小窗”的话应用就缩进小窗藏到面板后面去了。
+     * 分享目标应用也走 launcher。直接 startActivity 的话，目标应用弹出来的一瞬间会触发
+     * onUserLeaveHint，开了“自动小窗”的话应用就缩进小窗藏到人家后面去了。
      */
     private val shareLauncher = registerForActivityResult(ActivityResultContracts.StartActivityForResult()) {
+        sharingToApp = false
         resumeAfterInternalPage()
     }
+
+    /**
+     * 正在把链接交给别的应用。QQ 这类应用的分享入口是一张小窗卡片，盖在本页上面，
+     * 视频要在后面接着播（和哔哩哔哩分享到 QQ 一样），所以这期间 onPause 不暂停。
+     */
+    private var sharingToApp = false
 
     private val savedVideosLauncher = registerForActivityResult(ActivityResultContracts.StartActivityForResult()) { result ->
         openingInternalPage = false
@@ -122,14 +124,6 @@ class MainActivityV3 : AppCompatActivity() {
 
     private fun resumeAfterInternalPage() {
         openingInternalPage = false
-    }
-
-    /** 小窗里的分享按钮点下来走这里——RemoteAction 只能发 PendingIntent。 */
-    private val pipShareReceiver = object : BroadcastReceiver() {
-        override fun onReceive(context: Context?, intent: Intent?) {
-            if (intent?.action != ACTION_PIP_SHARE) return
-            adapter.activeItem()?.let { shareVideo(it) }
-        }
     }
 
     override fun onCreate(savedInstanceState: Bundle?) {
@@ -182,14 +176,9 @@ class MainActivityV3 : AppCompatActivity() {
                 // 翻到下一条了，上一条的评论就不该还挂着。
                 commentsPanel.close()
                 adapter.setActive(position)
-                refreshPipActions()
                 if (pagingEnabled && position >= adapter.itemCount - 5) loadMore()
             }
         })
-
-        ContextCompat.registerReceiver(
-            this, pipShareReceiver, IntentFilter(ACTION_PIP_SHARE), ContextCompat.RECEIVER_NOT_EXPORTED
-        )
 
         setupTopBar()
         if (intent.getBooleanExtra("return_recommend", false)) returnToRecommend() else loadFeed(reset = true)
@@ -877,41 +866,30 @@ class MainActivityV3 : AppCompatActivity() {
         commentsPanel.open(item, height, top)
     }
 
-    /** 分享当前视频。面板期间标记成“正在打开内部页面”，回来时才好接上播放。 */
+    /**
+     * 分享当前视频：弹应用内的分享面板，选中目标应用后直接拉起它。
+     * 期间标记成“正在打开内部页面”（不自动进小窗），并且不暂停播放——
+     * QQ 的分享入口是盖在本页上的小窗卡片，视频在后面照常播。
+     */
     private fun shareVideo(item: VideoItem) {
         if (openingInternalPage || isFinishing || isDestroyed) return
-        val chooser = VideoShare.chooserFor(this, item) ?: return
-        openingInternalPage = true
-        runCatching { shareLauncher.launch(chooser) }.onFailure {
-            openingInternalPage = false
-            Toast.makeText(this, "没有可用的分享应用", Toast.LENGTH_SHORT).show()
+        if (item.id.isBlank()) {
+            Toast.makeText(this, "这个视频没有可分享的链接", Toast.LENGTH_SHORT).show()
+            return
+        }
+        SharePanel.show(this, VideoShare.shareText(item), item.title, "分享视频链接") { intent ->
+            openingInternalPage = true
+            sharingToApp = true
+            runCatching { shareLauncher.launch(intent) }.onFailure {
+                openingInternalPage = false
+                sharingToApp = false
+                Toast.makeText(this, "没有可用的分享应用", Toast.LENGTH_SHORT).show()
+            }
         }
     }
 
-    /**
-     * 小窗里的控件由系统画，应用能加的就是这几个 RemoteAction。
-     * 放一个分享：进了小窗就看不到操作栏，否则想分享得先退出小窗。
-     */
-    private fun pipParams(): PictureInPictureParams {
-        val builder = PictureInPictureParams.Builder().setAspectRatio(Rational(16, 9))
-        val item = adapter.activeItem()
-        if (item != null && item.id.isNotBlank()) {
-            val intent = PendingIntent.getBroadcast(
-                this, 0,
-                Intent(ACTION_PIP_SHARE).setPackage(packageName),
-                PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE
-            )
-            builder.setActions(listOf(RemoteAction(
-                Icon.createWithResource(this, R.drawable.ic_share), "分享", "分享这个视频", intent
-            )))
-        }
-        return builder.build()
-    }
-
-    private fun refreshPipActions() {
-        if (!isInPictureInPictureMode) return
-        runCatching { setPictureInPictureParams(pipParams()) }
-    }
+    private fun pipParams(): PictureInPictureParams =
+        PictureInPictureParams.Builder().setAspectRatio(Rational(16, 9)).build()
 
     private fun enterPip() {
         commentsPanel.close()
@@ -948,9 +926,14 @@ class MainActivityV3 : AppCompatActivity() {
     }
 
     override fun onPause() {
-        // 只暂停不释放：分享面板这类半透明界面盖上来时只会走到这里，
-        // 释放了画面就黑，而面板并没有盖住上半屏。真的进后台会接着走 onStop。
-        if (openingInternalPage || !isInPictureInPictureMode) adapter.suspendPlayback()
+        // 只暂停不释放：半透明界面盖上来时只会走到这里，释放了画面就黑。
+        // 正在把链接交给别的应用时干脆不暂停：QQ 的分享卡片盖在上面，视频照常播；
+        // 真的进后台会接着走 onStop，那里才停。
+        if (sharingToApp && !isInPictureInPictureMode) {
+            // 继续播
+        } else if (openingInternalPage || !isInPictureInPictureMode) {
+            adapter.suspendPlayback()
+        }
         super.onPause()
     }
 
@@ -968,14 +951,8 @@ class MainActivityV3 : AppCompatActivity() {
 
     override fun onDestroy() {
         invalidateRequests()
-        runCatching { unregisterReceiver(pipShareReceiver) }
         if (::commentsPanel.isInitialized) commentsPanel.release()
         adapter.releaseAll(); playableGate.close(); mediaCache.close(); recommender.close()
         likedSync.close(); updates.close(); api.close(); history.close(); super.onDestroy()
-    }
-
-    companion object {
-        /** 小窗分享按钮发的广播；只在本应用内部收发。 */
-        private const val ACTION_PIP_SHARE = "com.ling.iwaraflow.PIP_SHARE"
     }
 }

@@ -119,37 +119,23 @@
         android:paddingEnd="12dp"
         android:paddingBottom="10dp">
 
-        <EditText
+        <!-- 只是个入口，点了弹出贴着键盘的输入层；有草稿时显示草稿。 -->
+        <TextView
             android:id="@+id/commentsInput"
             android:layout_width="0dp"
             android:layout_height="wrap_content"
             android:layout_weight="1"
             android:background="@drawable/bg_reply_toggle"
-            android:hint="说点什么…"
-            android:imeOptions="actionSend"
-            android:inputType="textMultiLine|textCapSentences"
-            android:maxLines="4"
+            android:ellipsize="end"
+            android:maxLines="1"
             android:minHeight="40dp"
+            android:gravity="center_vertical"
             android:paddingStart="14dp"
             android:paddingTop="9dp"
             android:paddingEnd="14dp"
             android:paddingBottom="9dp"
-            android:textColor="#FF17324A"
-            android:textColorHint="#FF8A9BAA"
+            android:text="说点什么…"
+            android:textColor="#FF8A9BAA"
             android:textSize="14sp" />
-
-        <TextView
-            android:id="@+id/commentsSend"
-            android:layout_width="wrap_content"
-            android:layout_height="40dp"
-            android:layout_marginStart="10dp"
-            android:background="@drawable/bg_dialog_primary_button"
-            android:gravity="center"
-            android:paddingStart="18dp"
-            android:paddingEnd="18dp"
-            android:text="发送"
-            android:textColor="#FFFFFFFF"
-            android:textSize="14sp"
-            android:textStyle="bold" />
     </LinearLayout>
 </LinearLayout>

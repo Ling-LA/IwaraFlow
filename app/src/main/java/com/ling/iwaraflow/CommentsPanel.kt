@@ -1,10 +1,8 @@
 package com.ling.iwaraflow
 
-import android.content.Context
+import android.app.Activity
+import android.content.ContextWrapper
 import android.view.View
-import android.view.inputmethod.EditorInfo
-import android.view.inputmethod.InputMethodManager
-import android.widget.EditText
 import android.widget.TextView
 import android.widget.Toast
 import androidx.recyclerview.widget.LinearLayoutManager
@@ -19,6 +17,7 @@ import androidx.recyclerview.widget.RecyclerView
  * 打开面板不动播放器，视频照常播。
  *
  * 评论直接对接 Iwara 官网：列表是官方评论，回复也发到官网。
+ * 写评论走 [CommentInputDialog]：键盘只顶起那个输入层，面板和视频都不动。
  */
 class CommentsPanel(
     private val root: View,
@@ -33,12 +32,13 @@ class CommentsPanel(
     private val status = root.findViewById<TextView>(R.id.commentsStatus)
     private val replyBar = root.findViewById<View>(R.id.commentsReplyBar)
     private val replyTarget = root.findViewById<TextView>(R.id.commentsReplyTarget)
-    private val input = root.findViewById<EditText>(R.id.commentsInput)
-    private val send = root.findViewById<TextView>(R.id.commentsSend)
+    private val input = root.findViewById<TextView>(R.id.commentsInput)
 
     private val adapter = CommentListAdapter(onReply = ::startReply, onLoadReplies = ::loadReplies)
     private var video: VideoItem? = null
     private var replyTo: IwaraComment? = null
+    /** 还没发出去的文字；关掉输入层再打开还在。 */
+    private var draft = ""
     private var nextPage = 0
     private var hasMore = false
     private var loadingPage = false
@@ -61,14 +61,12 @@ class CommentsPanel(
         })
         root.findViewById<View>(R.id.commentsClose).setOnClickListener { close() }
         root.findViewById<View>(R.id.commentsReplyCancel).setOnClickListener { cancelReply() }
-        send.setOnClickListener { submit() }
-        input.setOnEditorActionListener { _, actionId, _ ->
-            if (actionId == EditorInfo.IME_ACTION_SEND) { submit(); true } else false
-        }
+        input.setOnClickListener { openInput() }
+        renderInput()
     }
 
     /**
-     * 打开面板看 [item] 的评论。[height] 是面板高度，[videoTop] 是画面要从哪里开始
+     * 打开面板看 [item] 的评论。[panelHeight] 是面板高度，[videoTop] 是画面要从哪里开始
      * （通常是顶栏底边），都是像素。
      */
     fun open(item: VideoItem, panelHeight: Int, videoTop: Int) {
@@ -82,7 +80,8 @@ class CommentsPanel(
         if (sameVideo) return
         generation++
         cancelReply()
-        input.setText("")
+        draft = ""
+        renderInput()
         adapter.replaceAll(emptyList())
         nextPage = 0; hasMore = false; loadingPage = false; total = -1
         title.text = "评论"
@@ -92,7 +91,6 @@ class CommentsPanel(
 
     fun close() {
         if (!isOpen) return
-        hideKeyboard()
         root.visibility = View.GONE
         onLayoutChanged(false, 0, 0)
     }
@@ -147,41 +145,74 @@ class CommentsPanel(
         title.text = if (count > 0) "评论 $count" else "评论"
     }
 
+    private fun replyName(target: IwaraComment): String =
+        target.author.name.ifBlank { target.author.username }.ifBlank { "匿名" }
+
     private fun startReply(target: IwaraComment) {
         replyTo = target
         replyBar.visibility = View.VISIBLE
-        replyTarget.text = "回复 @${target.author.name.ifBlank { target.author.username }}：${target.body.take(40)}"
-        input.hint = "回复 @${target.author.name.ifBlank { target.author.username }}"
-        input.requestFocus()
-        showKeyboard()
+        replyTarget.text = "回复 @${replyName(target)}：${target.body.take(40)}"
+        renderInput()
+        openInput()
     }
 
     private fun cancelReply() {
         replyTo = null
         replyBar.visibility = View.GONE
-        input.hint = "说点什么…"
+        renderInput()
     }
 
-    private fun submit() {
+    /** 底部那条输入入口：有草稿显示草稿，没有就显示提示语。 */
+    private fun renderInput() {
+        val target = replyTo
+        if (draft.isNotBlank()) {
+            input.text = draft
+            input.setTextColor(0xFF17324A.toInt())
+        } else {
+            input.text = if (target == null) "说点什么…" else "回复 @${replyName(target)}"
+            input.setTextColor(0xFF8A9BAA.toInt())
+        }
+    }
+
+    /** 面板所在的 Activity；布局可能被主题包装过，沿着 baseContext 往外找。 */
+    private fun hostActivity(): Activity? {
+        var context = root.context
+        while (context is ContextWrapper) {
+            if (context is Activity) return context
+            context = context.baseContext
+        }
+        return null
+    }
+
+    private fun openInput() {
+        val activity = hostActivity() ?: return
+        if (activity.isFinishing || activity.isDestroyed) return
+        if (!api.isLoggedIn()) { onNeedLogin(); return }
+        CommentInputDialog(
+            activity,
+            replyTo = replyTo?.let { "@${replyName(it)}" },
+            draft = draft,
+            onSend = ::submit,
+            onDraft = { draft = it; renderInput() }
+        ).show()
+    }
+
+    private fun submit(text: String) {
         val item = video ?: return
         if (sending) return
-        val text = input.text.toString().trim()
-        if (text.isBlank()) { Toast.makeText(root.context, "先写点内容", Toast.LENGTH_SHORT).show(); return }
-        if (!api.isLoggedIn()) { onNeedLogin(); return }
+        if (!api.isLoggedIn()) { draft = text; renderInput(); onNeedLogin(); return }
         val target = replyTo
         // 回复「回复」时挂到同一条顶层评论下，官网也是这样组织的。
         val parentId = target?.let { it.parentId.ifBlank { it.id } }?.takeIf { it.isNotBlank() }
         sending = true
-        send.alpha = 0.5f
+        draft = ""
+        renderInput()
         val gen = generation
         api.postComment(item.id, text, parentId) { result ->
             root.post {
                 if (gen != generation) return@post
                 sending = false
-                send.alpha = 1f
                 result.onSuccess { posted ->
-                    input.setText("")
-                    hideKeyboard()
                     if (parentId == null) {
                         adapter.prepend(posted)
                         list.scrollToPosition(0)
@@ -194,6 +225,9 @@ class CommentsPanel(
                     cancelReply()
                     Toast.makeText(root.context, "已发送到 Iwara", Toast.LENGTH_SHORT).show()
                 }.onFailure {
+                    // 没发出去的内容留作草稿，再点输入框还能接着改。
+                    draft = text
+                    renderInput()
                     val message = it.message ?: "评论发送失败"
                     Toast.makeText(root.context, message, Toast.LENGTH_LONG).show()
                     if (message.contains("登录")) onNeedLogin()
@@ -204,17 +238,6 @@ class CommentsPanel(
 
     private fun showStatus(text: String) { status.text = text; status.visibility = View.VISIBLE }
     private fun hideStatus() { status.visibility = View.GONE }
-
-    private fun showKeyboard() {
-        val imm = root.context.getSystemService(Context.INPUT_METHOD_SERVICE) as? InputMethodManager
-        imm?.showSoftInput(input, InputMethodManager.SHOW_IMPLICIT)
-    }
-
-    private fun hideKeyboard() {
-        val imm = root.context.getSystemService(Context.INPUT_METHOD_SERVICE) as? InputMethodManager
-        imm?.hideSoftInputFromWindow(input.windowToken, 0)
-        input.clearFocus()
-    }
 
     companion object {
         /** 面板最矮占屏幕高度的多少：竖屏视频也得给评论留出能看的空间。 */

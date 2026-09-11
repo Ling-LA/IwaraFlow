@@ -59,7 +59,7 @@ class ShareIntentTest {
     }
 
     @Test fun aPageThatDoesNotHandleSharingStillShares() {
-        // 作者页、搜索页没有小窗，用不着接管，按老样子直接拉起选择器就行。
+        // 没有页面接管、也没有 Activity 可以弹面板时，退回系统选择器。
         val (adapter, holder) = card(null)
         try {
             holder.itemView.findViewById<View>(R.id.share).performClick()
@@ -70,7 +70,6 @@ class ShareIntentTest {
         } finally { adapter.releaseAll() }
     }
 
-    /** 小窗里操作栏是藏起来的，所以要知道当前播的是哪一条才能给出分享按钮。 */
     @Test fun theAdapterKnowsWhichVideoIsPlaying() {
         val adapter = VideoAdapter(
             mock(IwaraApi::class.java), mock(HistoryStore::class.java), AppPrefs(context),

@@ -14,9 +14,21 @@ object VideoShare {
         return if (title.isBlank()) link else "$title\n$link"
     }
 
+    /**
+     * 有 Activity 就弹应用内的分享面板（点目标应用直接拉起，QQ 等会以小窗盖在本页上）；
+     * 只有普通 Context 时退回系统选择器。
+     */
     fun share(context: Context, item: VideoItem) {
-        val chooser = chooserFor(context, item) ?: return
-        start(context, chooser)
+        if (item.id.isBlank()) {
+            Toast.makeText(context, "这个视频没有可分享的链接", Toast.LENGTH_SHORT).show()
+            return
+        }
+        val activity = context as? android.app.Activity
+        if (activity != null) {
+            SharePanel.show(activity, shareText(item), item.title, "分享视频链接") { start(activity, it) }
+        } else {
+            start(context, chooser(context, shareText(item), item.title, "分享视频链接"))
+        }
     }
 
     /**
@@ -51,7 +63,12 @@ object VideoShare {
             Toast.makeText(context, "这个作者没有可分享的资料", Toast.LENGTH_SHORT).show()
             return
         }
-        start(context, chooser(context, authorShareText(author), author.name, "分享作者主页"))
+        val activity = context as? android.app.Activity
+        if (activity != null) {
+            SharePanel.show(activity, authorShareText(author), author.name, "分享作者主页") { start(activity, it) }
+        } else {
+            start(context, chooser(context, authorShareText(author), author.name, "分享作者主页"))
+        }
     }
 
     private fun chooser(context: Context, text: String, subject: String, title: String): Intent {
@@ -66,8 +83,8 @@ object VideoShare {
         return chooser
     }
 
-    private fun start(context: Context, chooser: Intent) {
-        runCatching { context.startActivity(chooser) }
+    private fun start(context: Context, intent: Intent) {
+        runCatching { context.startActivity(intent) }
             .onFailure { Toast.makeText(context, "没有可用的分享应用", Toast.LENGTH_SHORT).show() }
     }
 }

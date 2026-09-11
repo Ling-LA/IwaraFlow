@@ -12,8 +12,9 @@ import java.util.concurrent.TimeUnit
 import java.util.concurrent.atomic.AtomicReference
 
 /**
- * 候选来源。Iwara 每月新增六千多个视频，存量十二年，所以“推荐不出视频”从来不是
- * 片源问题——是取片源的方式问题：每次都从第 0 页拿，拿到的永远是同一批最新视频。
+ * 候选来源。Iwara 每月新增六千多个视频（约 167 页），十三年的存量有几千页，所以
+ * “推荐不出视频”从来不是片源问题——是取片源的方式问题：每次都从第 0 页拿，
+ * 拿到的永远是同一批最新视频。
  *
  * 这里一律用“结果里有没有这条视频”来断言：每个来源返回带自己名字和页码的视频，
  * 没被取用的来源自然不会出现在结果里。
@@ -23,14 +24,16 @@ import java.util.concurrent.atomic.AtomicReference
 class RecommendationSourcesTest {
     private fun video(id: String) = VideoItem(id, id, "作者", emptyList(), 1, authorId = "author-$id")
 
-    private fun load(engine: RecommendationEngine): List<VideoItem> {
+    private fun load(engine: RecommendationEngine): List<VideoItem> =
+        loadOnce(engine).also { engine.close() }
+
+    /** 同一个引擎要连着刷几次时用这个：close 之后线程池就没了。 */
+    private fun loadOnce(engine: RecommendationEngine): List<VideoItem> {
         val delivered = CountDownLatch(1)
         val result = AtomicReference<Result<List<VideoItem>>>()
         engine.load(true) { outcome -> result.set(outcome); delivered.countDown() }
         assertTrue("推荐没有返回", delivered.await(15, TimeUnit.SECONDS))
-        val feed = result.get().getOrThrow()
-        engine.close()
-        return feed
+        return result.get().getOrThrow()
     }
 
     private fun history(seen: (String) -> Boolean = { false }): HistoryStore {
@@ -93,20 +96,46 @@ class RecommendationSourcesTest {
     }
 
     @Test fun theSampledPagesGoDeepEnoughToMatter() {
-        // 一页 36 条。存量按发布时间有一千多页，只在前几页里打转是没有意义的。
+        // 一页 36 条、每月约六千条，光最近半年就一千多页，十三年的存量更深。
+        // 只在前几页里打转是没有意义的。
         val engine = RecommendationEngine(api(loggedIn = true), history(), random = Random(7))
         val pages = (0..3).flatMap { round -> engine.requestsFor(round) }
             .filter { it.page > 0 }
             .map { it.page }
         engine.close()
         assertTrue("没有抽到任何深页", pages.isNotEmpty())
-        assertTrue("抽页要能到几十页开外，实测最深只有 ${pages.maxOrNull()}",
-            pages.any { it > 20 })
+        assertTrue("抽页要能翻过一个月（约 167 页），实测最深只有 ${pages.maxOrNull()}",
+            pages.any { it > 167 })
         assertTrue("抽页不能越界", pages.all { it <= RecommendationEngine.ARCHIVE_DEPTH })
     }
 
+    /**
+     * 存档到底多少页，App 这边并不知道。抽到空页说明列表没那么长，
+     * 之后就不该再往那么深抽——否则每一轮都在白费请求。
+     */
+    @Test fun anEmptyDeepPageStopsItFromDiggingThatDeepAgain() {
+        val api = mock(IwaraApi::class.java)
+        `when`(api.isLoggedIn()).thenReturn(false)
+        `when`(api.getCurrentUserBlocking()).thenThrow(IllegalStateException("no session in test"))
+        // 第 200 页往后一条都没有——模拟列表到底了。
+        `when`(api.getVideosBlocking(anyString(), anyInt(), anyInt())).thenAnswer { invocation ->
+            val sort = invocation.getArgument<String>(0)
+            val page = invocation.getArgument<Int>(1)
+            if (page > 200) emptyList() else (0 until 6).map { video("$sort-p$page-$it") }
+        }
+        val engine = RecommendationEngine(api, history(), random = Random(11))
+        try {
+            val before = (0..6).flatMap { engine.requestsFor(it) }.maxOf { it.page }
+            assertTrue("这个种子本来就没抽到深页，测不出收敛：$before", before > 200)
+            repeat(6) { loadOnce(engine) }
+            val after = (0..6).flatMap { engine.requestsFor(it) }.maxOf { it.page }
+            assertTrue("抽到空页之后还在往更深处抽：$before -> $after", after < before)
+            assertTrue("上限不该一路收到首页附近：$after", after >= RecommendationEngine.MIN_DEPTH)
+        } finally { engine.close() }
+    }
+
     @Test fun seeingEverythingOnTheFirstPageIsNotRunningOutOfVideos() {
-        // 首页全看过。存量还有一千多页，这时候必须还能推得出东西。
+        // 首页全看过。存量还有几千页，这时候必须还能推得出东西。
         val seenFirstPage = { id: String -> id.contains("-p0-") }
         val feed = load(RecommendationEngine(api(loggedIn = true), history(seenFirstPage), random = Random(3)))
         assertTrue("看完首页不该就没得推了", feed.isNotEmpty())

@@ -399,6 +399,14 @@ class VideoAdapter(
                 volume = 0f
                 addListener(object : Player.Listener {
                     override fun onPlayerError(error: PlaybackException) {
+                        // 记进诊断：黑屏、播不出来这类反馈要靠它看出是解码、地址还是文件的问题。
+                        val cause = error.cause
+                        NavigationDiagnostics.note(
+                            itemView.context,
+                            "播放错误 ${item.id}：${error.errorCodeName}" +
+                                (cause?.let { "（${it.javaClass.simpleName}: ${it.message?.take(120)}）" } ?: "") +
+                                " 源=${item.streamUrl?.substringBefore(':')?.take(12) ?: "无"}"
+                        )
                         if (active && bound?.id == item.id) refreshSourceAfterError(item, error.errorCodeName)
                     }
 
@@ -633,6 +641,11 @@ class VideoAdapter(
             }
             recoveryAttempts += 1
             val bindGeneration = generation
+            val scheme = item.streamUrl?.substringBefore(':').orEmpty().lowercase()
+            if (scheme == "content" || scheme == "file") {
+                // 本地文件放不出来不该悄悄转成在线播放——用户会以为“下载没用、还得等很久”。
+                Toast.makeText(itemView.context, "本地文件播放失败（$reason），改为在线播放", Toast.LENGTH_LONG).show()
+            }
             item.sources = null
             item.streamUrl = null
             api.resolveSources(item.id) { result ->

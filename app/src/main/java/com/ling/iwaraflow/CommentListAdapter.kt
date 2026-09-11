@@ -15,7 +15,9 @@ import coil.transform.CircleCropTransformation
  */
 class CommentListAdapter(
     private val onReply: (IwaraComment) -> Unit,
-    private val onLoadReplies: (IwaraComment, (Result<List<IwaraComment>>) -> Unit) -> Unit
+    private val onLoadReplies: (IwaraComment, (Result<List<IwaraComment>>) -> Unit) -> Unit,
+    /** 点了头像或名字：进这个用户的主页。 */
+    private val onOpenAuthor: ((IwaraAuthor) -> Unit)? = null
 ) : RecyclerView.Adapter<CommentListAdapter.Holder>() {
 
     /** 列表里的一行：顶层评论或者展开出来的回复。 */
@@ -117,6 +119,12 @@ class CommentListAdapter(
                 avatar.setImageResource(R.drawable.bg_reply_toggle)
             }
             author.text = c.author.name.ifBlank { c.author.username }.ifBlank { "匿名" }
+            val openAuthor = onOpenAuthor?.takeIf { c.author.id.isNotBlank() || c.author.username.isNotBlank() }
+            val authorClick: ((View) -> Unit)? = openAuthor?.let { open -> { open(c.author) } }
+            avatar.setOnClickListener(authorClick)
+            author.setOnClickListener(authorClick)
+            avatar.isClickable = authorClick != null
+            author.isClickable = authorClick != null
             body.text = c.body
             time.text = relativeTime(c.createdAt)
             reply.setOnClickListener { onReply(c) }

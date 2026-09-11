@@ -173,7 +173,8 @@ class MainActivityV3 : AppCompatActivity() {
                 closeCommentsOnBack.isEnabled = open
                 commentsScrim.visibility = if (open) View.VISIBLE else View.GONE
                 adapter.setVideoInsets(if (open) top else 0, if (open) bottom else 0)
-            }
+            },
+            onOpenAuthor = { author -> openAuthor(author.id, author.name, author.username) }
         )
         onBackPressedDispatcher.addCallback(this, closeCommentsOnBack)
         pager.registerOnPageChangeCallback(object : ViewPager2.OnPageChangeCallback() {
@@ -767,38 +768,68 @@ class MainActivityV3 : AppCompatActivity() {
         // 限高：和主菜单差不多大，内容多出来的部分滚动看，弹窗不顶到屏幕上下沿。
         val scroll = ScrollView(this).apply {
             addView(panel)
-            layoutParams = android.widget.FrameLayout.LayoutParams(
-                android.widget.FrameLayout.LayoutParams.MATCH_PARENT,
+            layoutParams = LinearLayout.LayoutParams(
+                LinearLayout.LayoutParams.MATCH_PARENT,
                 (resources.displayMetrics.heightPixels * SETTINGS_SCROLL_FRACTION).toInt()
             )
         }
-        val content = android.widget.FrameLayout(this).apply { addView(scroll) }
-        val dialog = AlertDialog.Builder(this).setTitle("设置").setMessage("播放行为、画质、推荐过滤和维护工具").setView(content)
-            .setNegativeButton("取消", null).setPositiveButton("保存") { _, _ ->
-                // 只有“排除已看视频”会改变推荐候选，也只有推荐流受它影响；
-                // 其它几项重拉一遍列表只会把用户刷到一半的位置冲掉。
-                val newClassics = classicsValues[classics.selectedItemPosition]
-                val reloadFeed = mode == "recommend" &&
-                    (prefs.skipSeen != skipSeen.isChecked || prefs.classicsEvery != newClassics)
-                prefs.classicsEvery = newClassics; recommender.classicsEvery = newClassics
-                prefs.skipSeen = skipSeen.isChecked; prefs.autoNext = autoNext.isChecked; prefs.autoPip = autoPip.isChecked
-                prefs.showPauseIndicator = pauseIcon.isChecked
-                prefs.defaultQuality = qualityValues[spinner.selectedItemPosition]
-                val newType = proxyTypes[proxyType.selectedItemPosition]
-                val newHost = proxyHost.text.toString().trim()
-                val newPort = proxyPort.text.toString().trim().toIntOrNull() ?: 0
-                val proxyChanged = newType != prefs.proxyType || newHost != prefs.proxyHost || newPort != prefs.proxyPort
-                if (newType != NetworkProxy.TYPE_NONE && NetworkProxy.proxyFor(newType, newHost, newPort) == null) {
-                    Toast.makeText(this, "代理主机或端口不完整，代理设置未保存", Toast.LENGTH_LONG).show()
-                } else {
-                    prefs.proxyType = newType; prefs.proxyHost = newHost; prefs.proxyPort = newPort
-                    if (proxyChanged) NetworkProxy.apply(prefs)
-                }
-                Toast.makeText(this, "设置已保存", Toast.LENGTH_SHORT).show()
-                // 网络路径变了，之前失败的请求要重新来。
-                if (reloadFeed || proxyChanged) loadFeed(reset = true) else adapter.applyDisplayPrefs()
-            }.create()
-        dialog.setOnShowListener { styleDialogButtons(dialog) }; dialog.show()
+        // 取消 / 保存放在滚动区下面、弹窗自己的一栏里，常驻底部，不随内容滚走，
+        // 也不依赖 AlertDialog 的按钮栏（内容一高它就被挤出屏幕）。
+        val cancel = dialogTextButton("取消")
+        val save = dialogTextButton("保存")
+        val buttonBar = LinearLayout(this).apply {
+            orientation = LinearLayout.HORIZONTAL; gravity = android.view.Gravity.END or android.view.Gravity.CENTER_VERTICAL
+            setPadding(dp(16), dp(4), dp(16), dp(6))
+            addView(cancel); addView(save)
+        }
+        val divider = View(this).apply {
+            setBackgroundColor(0xFFD9E6F2.toInt())
+            layoutParams = LinearLayout.LayoutParams(LinearLayout.LayoutParams.MATCH_PARENT, dp(1))
+        }
+        val content = LinearLayout(this).apply {
+            orientation = LinearLayout.VERTICAL
+            addView(scroll); addView(divider); addView(buttonBar)
+        }
+        val dialog = AlertDialog.Builder(this).setTitle("设置").setMessage("播放行为、画质、推荐过滤和维护工具").setView(content).create()
+        cancel.setOnClickListener { dialog.dismiss() }
+        save.setOnClickListener {
+            // 只有“排除已看视频”和“老片穿插”会改变推荐候选，也只有推荐流受它们影响；
+            // 其它几项重拉一遍列表只会把用户刷到一半的位置冲掉。
+            val newClassics = classicsValues[classics.selectedItemPosition]
+            val reloadFeed = mode == "recommend" &&
+                (prefs.skipSeen != skipSeen.isChecked || prefs.classicsEvery != newClassics)
+            prefs.classicsEvery = newClassics; recommender.classicsEvery = newClassics
+            prefs.skipSeen = skipSeen.isChecked; prefs.autoNext = autoNext.isChecked; prefs.autoPip = autoPip.isChecked
+            prefs.showPauseIndicator = pauseIcon.isChecked
+            prefs.defaultQuality = qualityValues[spinner.selectedItemPosition]
+            val newType = proxyTypes[proxyType.selectedItemPosition]
+            val newHost = proxyHost.text.toString().trim()
+            val newPort = proxyPort.text.toString().trim().toIntOrNull() ?: 0
+            val proxyChanged = newType != prefs.proxyType || newHost != prefs.proxyHost || newPort != prefs.proxyPort
+            if (newType != NetworkProxy.TYPE_NONE && NetworkProxy.proxyFor(newType, newHost, newPort) == null) {
+                Toast.makeText(this, "代理主机或端口不完整，代理设置未保存", Toast.LENGTH_LONG).show()
+            } else {
+                prefs.proxyType = newType; prefs.proxyHost = newHost; prefs.proxyPort = newPort
+                if (proxyChanged) NetworkProxy.apply(prefs)
+            }
+            Toast.makeText(this, "设置已保存", Toast.LENGTH_SHORT).show()
+            dialog.dismiss()
+            // 网络路径变了，之前失败的请求要重新来。
+            if (reloadFeed || proxyChanged) loadFeed(reset = true) else adapter.applyDisplayPrefs()
+        }
+        dialog.show()
+    }
+
+    /** 和 AlertDialog 按钮栏同款的文字按钮，给自己摆的底栏用。 */
+    private fun dialogTextButton(label: String) = TextView(this).apply {
+        text = label; textSize = 14f; setTypeface(null, android.graphics.Typeface.BOLD)
+        setTextColor(0xFFD84B73.toInt()); gravity = android.view.Gravity.CENTER
+        minHeight = dp(42); setPadding(dp(16), 0, dp(16), 0)
+        isClickable = true; isFocusable = true
+        background = with(android.util.TypedValue()) {
+            theme.resolveAttribute(android.R.attr.selectableItemBackground, this, true)
+            ContextCompat.getDrawable(this@MainActivityV3, resourceId)
+        }
     }
 
     private fun settingsInput(hint: String, value: String, inputType: Int) = EditText(this).apply {

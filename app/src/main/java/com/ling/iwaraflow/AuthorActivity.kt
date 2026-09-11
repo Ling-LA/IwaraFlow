@@ -203,6 +203,8 @@ class AuthorActivity : AppCompatActivity() {
     }
 
     private fun updateStatus() {
+        // 从评论区点进来的用户不一定发过视频：资料照常显示，作品列表就明说没有。
+        if (works.isEmpty() && noMore) { statusView.text = "该用户没有作品"; return }
         val unavailable = works.count { it.playbackIssue != null }
         statusView.text = buildString {
             append("作品 ${works.size} 条")

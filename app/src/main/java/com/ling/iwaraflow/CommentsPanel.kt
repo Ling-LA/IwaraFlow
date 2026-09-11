@@ -25,7 +25,9 @@ class CommentsPanel(
     /** 没登录就发评论时叫页面弹登录框。 */
     private val onNeedLogin: () -> Unit,
     /** 面板开合时通知页面：开着时给出画面要让出的顶部和底部留白（像素）。 */
-    private val onLayoutChanged: (open: Boolean, top: Int, bottom: Int) -> Unit
+    private val onLayoutChanged: (open: Boolean, top: Int, bottom: Int) -> Unit,
+    /** 点了评论者的头像 / 名字：页面去打开这个用户的主页。 */
+    private val onOpenAuthor: ((IwaraAuthor) -> Unit)? = null
 ) {
     private val title = root.findViewById<TextView>(R.id.commentsTitle)
     private val list = root.findViewById<RecyclerView>(R.id.commentsList)
@@ -34,7 +36,9 @@ class CommentsPanel(
     private val replyTarget = root.findViewById<TextView>(R.id.commentsReplyTarget)
     private val input = root.findViewById<TextView>(R.id.commentsInput)
 
-    private val adapter = CommentListAdapter(onReply = ::startReply, onLoadReplies = ::loadReplies)
+    private val adapter = CommentListAdapter(
+        onReply = ::startReply, onLoadReplies = ::loadReplies, onOpenAuthor = onOpenAuthor
+    )
     private var video: VideoItem? = null
     private var replyTo: IwaraComment? = null
     /** 还没发出去的文字；关掉输入层再打开还在。 */

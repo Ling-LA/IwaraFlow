@@ -208,8 +208,12 @@ class RecommendationEngine(
      * 关注作者的更新按**位置**插进结果里，而不是靠权重往上挤。
      *
      * 以前订阅流权重最高、关注的作者还额外加分，结果整屏刷出来全是已经关注的人——
-     * 推荐页就失去意义了。现在每 [DISCOVERY_RUN] 条没关注的内容里插一条关注作者的，
-     * 占比是固定的，跟打分高低无关。哪一条先插仍然由打分决定。
+     * 推荐页就失去意义了。现在每 [DISCOVERY_RUN] 条没关注的内容配一条关注作者的，
+     * 占比固定，跟打分高低无关。
+     *
+     * 插在这一组里的哪个位置是随机的：可能是头一条，也可能压到最后一条。固定插在
+     * 组尾会形成一眼看得出来的节奏，隔几条就知道下一条是关注的作者。
+     * 哪一条关注作者的更新排在前面，仍然由打分决定。
      */
     private fun interleave(ranked: List<VideoItem>, subscribed: Set<String>): List<VideoItem> {
         val followedAuthors = followingIds
@@ -222,8 +226,10 @@ class RecommendationEngine(
 
         val out = ArrayList<VideoItem>(ranked.size)
         while (discovery.isNotEmpty() && followed.isNotEmpty()) {
-            repeat(DISCOVERY_RUN) { if (discovery.isNotEmpty()) out += discovery.removeFirst() }
-            out += followed.removeFirst()
+            val block = ArrayList<VideoItem>(DISCOVERY_RUN + 1)
+            repeat(DISCOVERY_RUN) { if (discovery.isNotEmpty()) block += discovery.removeFirst() }
+            block.add(random.nextInt(block.size + 1), followed.removeFirst())
+            out += block
         }
         out += discovery
         out += followed
@@ -289,8 +295,8 @@ class RecommendationEngine(
         internal const val SUBSCRIBED = "__subscribed__"
         /** 订阅流只是候选来源之一，不再比别的榜单重——占比由插入间隔决定。 */
         private const val SUBSCRIBED_WEIGHT = 2.8
-        /** 每这么多条“发现”里插一条关注作者的更新。 */
-        internal const val DISCOVERY_RUN = 4
+        /** 每这么多条“发现”配一条关注作者的更新，插在这一组里的随机位置。 */
+        internal const val DISCOVERY_RUN = 5
         private const val PAGE_SIZE = 36
         private const val MAX_RESULTS = 80
         /** 首轮 6 个请求 + 点赞同步，留一点余量。 */

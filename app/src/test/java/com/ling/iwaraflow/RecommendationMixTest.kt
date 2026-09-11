@@ -13,7 +13,8 @@ import java.util.concurrent.atomic.AtomicReference
 
 /**
  * 关注作者的更新以前是权重最高的来源，结果推荐页刷出来整屏都是已经关注的人，
- * 推荐也就不成其为推荐了。现在改成按位置定量插入：每几条没关注的内容插一条关注的。
+ * 推荐也就不成其为推荐了。现在改成按位置定量插入：每几条没关注的内容配一条关注的，
+ * 插在这一组里的哪个位置则是随机的。
  */
 @RunWith(RobolectricTestRunner::class)
 @Config(sdk = [36])
@@ -66,21 +67,41 @@ class RecommendationMixTest {
         assertTrue("关注作者一条都没有也不对，实际 $share%", share > 0)
     }
 
-    @Test fun followedAuthorsComeAtAFixedSpacing() {
+    /** 一组 = DISCOVERY_RUN 条没关注的 + 插进去的那一条。 */
+    private val blockSize get() = RecommendationEngine.DISCOVERY_RUN + 1
+
+    @Test fun everyBlockCarriesExactlyOneFollowedVideo() {
         val feed = feed()
-        val positions = feed.withIndex().filter { followed(it.value) }.map { it.index }
-        assertTrue("关注作者的更新必须出现在结果里", positions.size >= 3)
-        // 相邻两条关注作者之间应当隔着 DISCOVERY_RUN 条没关注的。
-        positions.zipWithNext { a, b ->
-            assertEquals("两条关注作者之间的间隔不对：$positions",
-                RecommendationEngine.DISCOVERY_RUN + 1, b - a)
+        val blocks = feed.chunked(blockSize).filter { it.size == blockSize }
+        assertTrue("结果太短，凑不出几组", blocks.size >= 4)
+        blocks.forEachIndexed { index, block ->
+            assertEquals("第 $index 组里关注作者的条数不对：${block.map { it.id }}",
+                1, block.count(::followed))
         }
-        assertTrue("开头不该就是关注作者", positions.first() >= RecommendationEngine.DISCOVERY_RUN)
     }
 
-    @Test fun theFeedStillLeadsWithDiscovery() {
+    @Test fun theInsertedPositionVariesInsteadOfAlwaysLandingOnTheSameSpot() {
         val feed = feed()
-        val head = feed.take(RecommendationEngine.DISCOVERY_RUN)
-        assertTrue("前几条应该全是没关注过的内容：${head.map { it.id }}", head.none(::followed))
+        val slots = feed.chunked(blockSize).filter { it.size == blockSize }
+            .map { block -> block.indexOfFirst(::followed) }
+        assertTrue("结果太短，看不出规律", slots.size >= 6)
+        assertTrue("每组的插入位置都一样，等于还是固定节奏：$slots", slots.toSet().size > 1)
+        assertTrue("插入位置越界：$slots", slots.all { it in 0 until blockSize })
+    }
+
+    @Test fun theFollowedVideoCanBeTheVeryFirstOneInABlock() {
+        // 用几个不同的种子多跑几次，"可以排在第一位"就该出现过。
+        val seen = (1..12).flatMap { seed ->
+            val engine = RecommendationEngine(api(), history(), random = Random(seed.toLong()))
+            val delivered = CountDownLatch(1)
+            val result = AtomicReference<Result<List<VideoItem>>>()
+            engine.load(true) { outcome -> result.set(outcome); delivered.countDown() }
+            assertTrue("推荐没有返回", delivered.await(15, TimeUnit.SECONDS))
+            val feed = result.get().getOrThrow()
+            engine.close()
+            feed.chunked(blockSize).filter { it.size == blockSize }.map { it.indexOfFirst(::followed) }
+        }.toSet()
+        assertTrue("从来没排到过第一位：$seen", 0 in seen)
+        assertTrue("从来没排到过最后一位：$seen", RecommendationEngine.DISCOVERY_RUN in seen)
     }
 }

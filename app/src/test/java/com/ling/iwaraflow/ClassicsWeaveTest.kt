@@ -25,7 +25,7 @@ class ClassicsWeaveTest {
 
     @Test fun everyGroupOfTwelveCarriesExactlyOneClassic() {
         val out = engine(12).weaveClassics(feed(60), classics(10))
-        assertEquals(70, out.size)
+        assertEquals("60 条分 5 组，每组配 1 条老片", 65, out.size)
         val groups = out.chunked(13)
         assertEquals(5, groups.size)
         groups.forEachIndexed { index, group ->

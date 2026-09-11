@@ -767,6 +767,65 @@ class MainActivityV3 : AppCompatActivity() {
         val proxyPort = settingsInput("端口，例如 7890", prefs.proxyPort.takeIf { it > 0 }?.toString().orEmpty(), InputType.TYPE_CLASS_NUMBER)
         panel.addView(proxyType); panel.addView(proxyHost); panel.addView(proxyPort)
 
+        panel.addView(sectionTitle("翻译"))
+        panel.addView(TextView(this).apply {
+            text = "简介和评论自动翻成中文用哪家服务。默认的谷歌免费接口不用密钥；其它几家填上自己的密钥。"
+            textSize = 12f; setTextColor(0xFF607D93.toInt()); setPadding(dp(4), 0, 0, dp(6))
+        })
+        val translation = prefs.translation
+        val providerIds = Translator.PROVIDERS.map { it.first }
+        val providerSpinner = Spinner(this).apply {
+            adapter = ArrayAdapter(this@MainActivityV3, android.R.layout.simple_spinner_dropdown_item, Translator.PROVIDERS.map { it.second }.toTypedArray())
+            setSelection(providerIds.indexOf(translation.provider).coerceAtLeast(0))
+        }
+        panel.addView(providerSpinner)
+        val trKey = settingsInput("API Key / 密钥", translation.key, InputType.TYPE_CLASS_TEXT or InputType.TYPE_TEXT_VARIATION_PASSWORD)
+        val trRegion = settingsInput("区域（Azure，例如 eastasia，可留空）", translation.region, InputType.TYPE_CLASS_TEXT)
+        val trAppId = settingsInput("APP ID", translation.appId, InputType.TYPE_CLASS_TEXT)
+        val trEndpoint = settingsInput("服务器地址，例如 https://libretranslate.com", translation.endpoint, InputType.TYPE_CLASS_TEXT or InputType.TYPE_TEXT_VARIATION_URI)
+        val trCustomUrl = settingsInput("请求地址模板，{text} 是原文、{target} 是目标语言", translation.endpoint, InputType.TYPE_CLASS_TEXT or InputType.TYPE_TEXT_VARIATION_URI)
+        val methodValues = arrayOf("GET", "POST")
+        val trMethod = Spinner(this).apply {
+            adapter = ArrayAdapter(this@MainActivityV3, android.R.layout.simple_spinner_dropdown_item, arrayOf("GET 请求", "POST 请求"))
+            setSelection(methodValues.indexOf(translation.customMethod.uppercase()).coerceAtLeast(0))
+        }
+        val trBody = settingsInput("POST 请求体模板，例如 {\"q\":\"{text}\",\"target\":\"{target}\"}", translation.customBody, InputType.TYPE_CLASS_TEXT, multiline = true)
+        val trHeaders = settingsInput("请求头，一行一个：Authorization: Bearer xxx", translation.customHeaders, InputType.TYPE_CLASS_TEXT, multiline = true)
+        val trResultPath = settingsInput("译文字段路径，例如 data.translatedText（留空自动猜）", translation.customResultPath, InputType.TYPE_CLASS_TEXT)
+        val trLangPath = settingsInput("源语言字段路径（可留空）", translation.customLangPath, InputType.TYPE_CLASS_TEXT)
+        val trHint = TextView(this).apply {
+            textSize = 12f; setTextColor(0xFF607D93.toInt()); setPadding(dp(4), dp(4), 0, dp(8))
+        }
+        listOf(trKey, trRegion, trAppId, trEndpoint, trCustomUrl, trMethod, trBody, trHeaders, trResultPath, trLangPath, trHint)
+            .forEach { panel.addView(it) }
+        fun showTranslationFields(provider: String) {
+            val visible: List<View> = when (provider) {
+                Translator.PROVIDER_DEEPL -> listOf(trKey)
+                Translator.PROVIDER_MICROSOFT -> listOf(trKey, trRegion)
+                Translator.PROVIDER_BAIDU -> listOf(trAppId, trKey)
+                Translator.PROVIDER_LIBRE -> listOf(trEndpoint, trKey)
+                Translator.PROVIDER_CUSTOM -> listOf(trCustomUrl, trMethod, trBody, trHeaders, trResultPath, trLangPath)
+                else -> emptyList()
+            }
+            listOf(trKey, trRegion, trAppId, trEndpoint, trCustomUrl, trMethod, trBody, trHeaders, trResultPath, trLangPath)
+                .forEach { it.visibility = if (it in visible) View.VISIBLE else View.GONE }
+            trHint.text = when (provider) {
+                Translator.PROVIDER_GOOGLE -> "走 translate.googleapis.com，在国内需要代理。"
+                Translator.PROVIDER_DEEPL -> "免费版 Key 以 :fx 结尾，会自动走 api-free.deepl.com。"
+                Translator.PROVIDER_MICROSOFT -> "Azure 门户里的 Translator 资源 Key；多区域资源可留空区域。"
+                Translator.PROVIDER_BAIDU -> "fanyi-api.baidu.com 的通用翻译，APP ID 和密钥在开放平台的开发者信息里。"
+                Translator.PROVIDER_LIBRE -> "POST 到 <地址>/translate；公共服务器可能要 API Key。"
+                else -> "返回 JSON 里译文在哪个字段用点分路径写，数字是数组下标；留空会按常见字段名猜。"
+            }
+        }
+        showTranslationFields(translation.provider)
+        providerSpinner.onItemSelectedListener = object : android.widget.AdapterView.OnItemSelectedListener {
+            override fun onItemSelected(parent: android.widget.AdapterView<*>?, view: View?, position: Int, id: Long) {
+                showTranslationFields(providerIds[position])
+            }
+            override fun onNothingSelected(parent: android.widget.AdapterView<*>?) {}
+        }
+
         panel.addView(sectionTitle("维护"))
         panel.addView(actionRow("同步点赞记录", "把在网页端点过的赞补进“已看”，刷新推荐后生效。") { syncLikedVideos() })
         panel.addView(actionRow("诊断信息", "最近的异常、退出原因和加载线索，只存在本机，不会上传。") {
@@ -822,6 +881,21 @@ class MainActivityV3 : AppCompatActivity() {
                 prefs.proxyType = newType; prefs.proxyHost = newHost; prefs.proxyPort = newPort
                 if (proxyChanged) NetworkProxy.apply(prefs)
             }
+            val provider = providerIds[providerSpinner.selectedItemPosition]
+            val newTranslation = TranslationConfig(
+                provider = provider,
+                key = trKey.text.toString().trim(),
+                region = trRegion.text.toString().trim(),
+                appId = trAppId.text.toString().trim(),
+                endpoint = (if (provider == Translator.PROVIDER_CUSTOM) trCustomUrl else trEndpoint).text.toString().trim(),
+                customMethod = methodValues[trMethod.selectedItemPosition],
+                customBody = trBody.text.toString(),
+                customHeaders = trHeaders.text.toString(),
+                customResultPath = trResultPath.text.toString().trim(),
+                customLangPath = trLangPath.text.toString().trim()
+            )
+            prefs.translation = newTranslation
+            Translator.configure(newTranslation)
             Toast.makeText(this, "设置已保存", Toast.LENGTH_SHORT).show()
             dialog.dismiss()
             // 网络路径变了，之前失败的请求要重新来。
@@ -842,8 +916,11 @@ class MainActivityV3 : AppCompatActivity() {
         }
     }
 
-    private fun settingsInput(hint: String, value: String, inputType: Int) = EditText(this).apply {
-        this.hint = hint; setText(value); this.inputType = inputType; setSingleLine(true)
+    private fun settingsInput(hint: String, value: String, inputType: Int, multiline: Boolean = false) = EditText(this).apply {
+        this.hint = hint; setText(value)
+        this.inputType = if (multiline) inputType or InputType.TYPE_TEXT_FLAG_MULTI_LINE else inputType
+        setSingleLine(!multiline)
+        if (multiline) { minLines = 2; maxLines = 5 }
         setTextColor(0xFF17324A.toInt()); setHintTextColor(0x99607D93.toInt())
         background = ContextCompat.getDrawable(this@MainActivityV3, R.drawable.bg_input)
         setPadding(dp(16), dp(10), dp(16), dp(10))

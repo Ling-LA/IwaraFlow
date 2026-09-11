@@ -37,6 +37,33 @@ class AppPrefs(context: Context) {
         get() = prefs.getInt("skip_seconds", DEFAULT_SKIP_SECONDS).coerceIn(1, 600)
         set(value) = prefs.edit().putInt("skip_seconds", value.coerceIn(1, 600)).apply()
 
+    /** 翻译服务配置，见 [TranslationConfig]。 */
+    var translation: TranslationConfig
+        get() = TranslationConfig(
+            provider = prefs.getString("tr_provider", Translator.PROVIDER_GOOGLE) ?: Translator.PROVIDER_GOOGLE,
+            key = prefs.getString("tr_key", "") ?: "",
+            region = prefs.getString("tr_region", "") ?: "",
+            appId = prefs.getString("tr_app_id", "") ?: "",
+            endpoint = prefs.getString("tr_endpoint", "") ?: "",
+            customMethod = prefs.getString("tr_custom_method", "GET") ?: "GET",
+            customBody = prefs.getString("tr_custom_body", "") ?: "",
+            customHeaders = prefs.getString("tr_custom_headers", "") ?: "",
+            customResultPath = prefs.getString("tr_custom_result_path", "") ?: "",
+            customLangPath = prefs.getString("tr_custom_lang_path", "") ?: ""
+        )
+        set(value) = prefs.edit()
+            .putString("tr_provider", value.provider)
+            .putString("tr_key", value.key)
+            .putString("tr_region", value.region)
+            .putString("tr_app_id", value.appId)
+            .putString("tr_endpoint", value.endpoint)
+            .putString("tr_custom_method", value.customMethod)
+            .putString("tr_custom_body", value.customBody)
+            .putString("tr_custom_headers", value.customHeaders)
+            .putString("tr_custom_result_path", value.customResultPath)
+            .putString("tr_custom_lang_path", value.customLangPath)
+            .apply()
+
     companion object {
         const val DEFAULT_SKIP_SECONDS = 15
     }

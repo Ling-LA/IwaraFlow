@@ -10,6 +10,16 @@
         android:layout_height="match_parent"
         android:orientation="vertical" />
 
+    <!-- 评论面板开着时盖住画面：点画面收起面板，不再传给视频卡片当暂停。
+         放在顶栏下面，顶栏照常可点；评论面板在最后，不受影响。 -->
+    <View
+        android:id="@+id/commentsScrim"
+        android:layout_width="match_parent"
+        android:layout_height="match_parent"
+        android:clickable="true"
+        android:focusable="true"
+        android:visibility="gone" />
+
     <LinearLayout
         android:id="@+id/topBar"
         android:layout_width="match_parent"

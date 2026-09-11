@@ -167,6 +167,17 @@ class CommentsTest {
         assertTrue("画面区域要比面板高，不然评论没法看", h - panel - top > panel / 2)
     }
 
+    @Test fun aGapPullsThePanelDownAndThePictureFollows() {
+        val aspect = 16f / 9f
+        val rendered = CommentsPanel.renderedHeight(w, h, aspect)
+        val flush = CommentsPanel.panelHeight(w, h, bar, aspect)
+        val panel = CommentsPanel.panelHeight(w, h, bar, aspect, gap = 60)
+        assertEquals("面板矮 60，顶边就低 60", flush - 60, panel)
+        val top = CommentsPanel.videoTop(w, h, bar, aspect, panel)
+        assertEquals("画面跟着下移，离顶栏 60", bar + 60, top)
+        assertEquals("画面底边仍然贴着面板", h - panel, top + rendered)
+    }
+
     @Test fun anUnknownAspectIsTreatedAsPortrait() {
         assertEquals(CommentsPanel.panelHeight(w, h, bar, 9f / 16f), CommentsPanel.panelHeight(w, h, bar, null))
         assertEquals(bar, CommentsPanel.videoTop(w, h, bar, null, CommentsPanel.panelHeight(w, h, bar, null)))

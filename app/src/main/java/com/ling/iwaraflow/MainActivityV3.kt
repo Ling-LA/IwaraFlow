@@ -47,6 +47,8 @@ class MainActivityV3 : AppCompatActivity() {
     private lateinit var error: TextView
     private lateinit var adapter: VideoAdapter
     private lateinit var topBar: View
+    /** 评论面板开着时盖在画面上的透明层：点画面是收起面板，而不是暂停视频。 */
+    private lateinit var commentsScrim: View
     private lateinit var commentsPanel: CommentsPanel
 
     /** 评论面板开着时返回键先关面板，而不是退出应用。 */
@@ -146,6 +148,8 @@ class MainActivityV3 : AppCompatActivity() {
         loading = findViewById(R.id.loading)
         error = findViewById(R.id.error)
         topBar = findViewById(R.id.topBar)
+        commentsScrim = findViewById(R.id.commentsScrim)
+        commentsScrim.setOnClickListener { commentsPanel.close() }
 
         adapter = VideoAdapter(
             api = api,
@@ -167,6 +171,7 @@ class MainActivityV3 : AppCompatActivity() {
             onNeedLogin = ::showLoginDialog,
             onLayoutChanged = { open, top, bottom ->
                 closeCommentsOnBack.isEnabled = open
+                commentsScrim.visibility = if (open) View.VISIBLE else View.GONE
                 adapter.setVideoInsets(if (open) top else 0, if (open) bottom else 0)
             }
         )
@@ -759,7 +764,15 @@ class MainActivityV3 : AppCompatActivity() {
         })
 
         // 多了“维护”这一段，矮屏幕上放不下，内容区要能滚动。
-        val content = ScrollView(this).apply { addView(panel) }
+        // 限高：和主菜单差不多大，内容多出来的部分滚动看，弹窗不顶到屏幕上下沿。
+        val scroll = ScrollView(this).apply {
+            addView(panel)
+            layoutParams = android.widget.FrameLayout.LayoutParams(
+                android.widget.FrameLayout.LayoutParams.MATCH_PARENT,
+                (resources.displayMetrics.heightPixels * SETTINGS_SCROLL_FRACTION).toInt()
+            )
+        }
+        val content = android.widget.FrameLayout(this).apply { addView(scroll) }
         val dialog = AlertDialog.Builder(this).setTitle("设置").setMessage("播放行为、画质、推荐过滤和维护工具").setView(content)
             .setNegativeButton("取消", null).setPositiveButton("保存") { _, _ ->
                 // 只有“排除已看视频”会改变推荐候选，也只有推荐流受它影响；
@@ -861,7 +874,7 @@ class MainActivityV3 : AppCompatActivity() {
         val screenHeight = pager.height.takeIf { it > 0 } ?: resources.displayMetrics.heightPixels
         val topBarHeight = topBar.height.takeIf { it > 0 } ?: dp(58)
         val aspect = adapter.activeVideoAspect()
-        val height = CommentsPanel.panelHeight(screenWidth, screenHeight, topBarHeight, aspect)
+        val height = CommentsPanel.panelHeight(screenWidth, screenHeight, topBarHeight, aspect, gap = dp(COMMENTS_PANEL_GAP_DP))
         val top = CommentsPanel.videoTop(screenWidth, screenHeight, topBarHeight, aspect, height)
         commentsPanel.open(item, height, top)
     }
@@ -954,5 +967,12 @@ class MainActivityV3 : AppCompatActivity() {
         if (::commentsPanel.isInitialized) commentsPanel.release()
         adapter.releaseAll(); playableGate.close(); mediaCache.close(); recommender.close()
         likedSync.close(); updates.close(); api.close(); history.close(); super.onDestroy()
+    }
+
+    companion object {
+        /** 设置弹窗里可滚动区域占屏幕高度的比例；加上标题后和主菜单弹窗差不多高。 */
+        const val SETTINGS_SCROLL_FRACTION = 0.42f
+        /** 评论面板顶边比“刚好贴住画面底边”再往下收的距离（dp）。 */
+        const val COMMENTS_PANEL_GAP_DP = 20
     }
 }

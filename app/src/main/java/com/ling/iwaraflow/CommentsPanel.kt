@@ -256,10 +256,13 @@ class CommentsPanel(
          * 面板高度：顶栏以下、画面以下剩下的全给面板，但限制在屏幕高度的 45%～70% 之间。
          * 横屏视频（画面矮）面板就高，顶边正好接在画面底边；竖屏视频画面铺满，
          * 剩不下空间，就取最小值，画面再缩进上面那块。
+         *
+         * [gap] 让面板顶边比“刚好贴住画面”再往下收一点（像素）；画面随之整体下移，
+         * 底边仍然贴着面板，只是离顶栏远一些。
          */
-        fun panelHeight(screenWidth: Int, screenHeight: Int, topBarHeight: Int, aspect: Float?): Int {
+        fun panelHeight(screenWidth: Int, screenHeight: Int, topBarHeight: Int, aspect: Float?, gap: Int = 0): Int {
             val rendered = renderedHeight(screenWidth, screenHeight, aspect)
-            val free = screenHeight - topBarHeight - rendered
+            val free = screenHeight - topBarHeight - rendered - gap.coerceAtLeast(0)
             val min = (screenHeight * MIN_FRACTION).toInt()
             val max = (screenHeight * MAX_FRACTION).toInt()
             return free.coerceIn(min, max)

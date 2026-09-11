@@ -40,6 +40,21 @@ class TranslatorTest {
         assertFalse(Translator.needsTranslation("好美"))
     }
 
+    @Test fun linksDoNotMakeChineseTextLookForeign() {
+        val body = "聊天频道，提前预览下个动画内容[Discord](https://discord.gg/hdkNEESecp)\n" +
+            "赞助版本获取：[perohub](https://perohub.com/posts/683ac7e54a3ff1ea889bd936) or [fansky](https://www.fansky.co/Cerodier/posts)\n" +
+            "所有动画都有免费版本可以在右边表格里找到 [All animation](https://docs.google.com/spreadsheets/d/1yQQo5jXVMFJgDegUiKwDmGBI9PcBeXbPwMp9sRrP2Sg/edit?usp=sharing)"
+        assertTrue(Translator.isChinese(body))
+        assertFalse(Translator.needsTranslation(body))
+        assertFalse("只有链接的也不用翻", Translator.needsTranslation("https://example.com/some/path"))
+    }
+
+    @Test fun aChineseSourceReportedByTheServiceIsNotShownAsTranslated() {
+        assertTrue(Translator.isChineseSource(Translator.Translation("x", "zh-CN")))
+        assertTrue(Translator.isChineseSource(Translator.Translation("x", "zh")))
+        assertFalse(Translator.isChineseSource(Translator.Translation("x", "ja")))
+    }
+
     @Test fun japaneseWithKanaIsTranslatedEvenThoughItHasKanji() {
         assertFalse(Translator.isChinese("使用モデル「暁、響、雷、電」"))
         assertTrue(Translator.needsTranslation("使用モデル「暁、響、雷、電」"))

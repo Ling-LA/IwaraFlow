@@ -261,6 +261,10 @@ class CommentsPanel(
                 infoTranslate.text = "翻译中…"
             }
             is Translator.State.Done -> {
+                if (Translator.isChineseSource(s.translation)) {
+                    infoTranslate.visibility = View.GONE
+                    return
+                }
                 infoTranslate.visibility = View.VISIBLE
                 val from = Translator.languageName(s.translation.sourceLang)
                 if (s.showOriginal) {

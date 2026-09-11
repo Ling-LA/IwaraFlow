@@ -1,12 +1,12 @@
 <?xml version="1.0" encoding="utf-8"?>
-<!-- 后退：逆时针的圆弧箭头。 -->
+<!-- 后退：逆时针圆弧箭头，圆心留空放秒数。 -->
 <vector xmlns:android="http://schemas.android.com/apk/res/android"
-    android:width="22dp"
-    android:height="22dp"
+    android:width="28dp"
+    android:height="28dp"
     android:viewportWidth="24"
     android:viewportHeight="24">
 
     <path
         android:fillColor="#FFFFFFFF"
-        android:pathData="M12,5V1L7,6l5,5V7c3.3,0 6,2.7 6,6s-2.7,6 -6,6s-6,-2.7 -6,-6H4c0,4.4 3.6,8 8,8s8,-3.6 8,-8S16.4,5 12,5z" />
+        android:pathData="M12,5V1.5L6.5,6l5.5,4.5V7c3.3,0 6,2.7 6,6s-2.7,6 -6,6s-6,-2.7 -6,-6H4c0,4.4 3.6,8 8,8s8,-3.6 8,-8S16.4,5 12,5z" />
 </vector>

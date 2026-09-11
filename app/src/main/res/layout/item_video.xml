@@ -21,49 +21,82 @@
         android:layout_width="wrap_content"
         android:layout_height="wrap_content"
         android:layout_gravity="top|start"
-        android:layout_marginStart="10dp"
+        android:layout_marginStart="12dp"
+        android:background="@drawable/bg_pause_controls"
         android:gravity="center_vertical"
         android:orientation="horizontal"
+        android:paddingStart="6dp"
+        android:paddingTop="4dp"
+        android:paddingEnd="6dp"
+        android:paddingBottom="4dp"
         android:visibility="gone">
 
-        <TextView
+        <!-- 后退：圆弧箭头，秒数写在圆心。 -->
+        <FrameLayout
             android:id="@+id/skipBack"
-            android:layout_width="wrap_content"
+            android:layout_width="44dp"
             android:layout_height="44dp"
-            android:drawableStart="@drawable/ic_skip_back"
-            android:drawablePadding="4dp"
-            android:gravity="center"
-            android:paddingStart="8dp"
-            android:paddingEnd="8dp"
-            android:text="15"
-            android:textColor="#FFFFFFFF"
-            android:textSize="13sp"
-            android:textStyle="bold" />
+            android:clickable="true"
+            android:focusable="true">
+
+            <ImageView
+                android:layout_width="28dp"
+                android:layout_height="28dp"
+                android:layout_gravity="center"
+                android:contentDescription="后退"
+                android:src="@drawable/ic_skip_back" />
+
+            <TextView
+                android:id="@+id/skipBackLabel"
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:layout_gravity="center"
+                android:layout_marginTop="4dp"
+                android:includeFontPadding="false"
+                android:text="15"
+                android:textColor="#FFFFFFFF"
+                android:textSize="8sp"
+                android:textStyle="bold" />
+        </FrameLayout>
 
         <com.ling.iwaraflow.PauseIndicatorView
             android:id="@+id/pauseIndicator"
-            android:layout_width="44dp"
-            android:layout_height="44dp"
-            android:gravity="center"
-            android:paddingStart="3dp"
-            android:text="▶"
-            android:textColor="#FFFFFFFF"
-            android:textSize="24sp"
+            android:layout_width="40dp"
+            android:layout_height="40dp"
+            android:layout_marginStart="6dp"
+            android:layout_marginEnd="6dp"
+            android:background="@drawable/ic_play"
+            android:contentDescription="继续播放"
+            android:text=""
             android:visibility="gone" />
 
-        <TextView
+        <!-- 前进：顺时针圆弧箭头，秒数写在圆心。 -->
+        <FrameLayout
             android:id="@+id/skipForward"
-            android:layout_width="wrap_content"
+            android:layout_width="44dp"
             android:layout_height="44dp"
-            android:drawableEnd="@drawable/ic_skip_forward"
-            android:drawablePadding="4dp"
-            android:gravity="center"
-            android:paddingStart="8dp"
-            android:paddingEnd="8dp"
-            android:text="15"
-            android:textColor="#FFFFFFFF"
-            android:textSize="13sp"
-            android:textStyle="bold" />
+            android:clickable="true"
+            android:focusable="true">
+
+            <ImageView
+                android:layout_width="28dp"
+                android:layout_height="28dp"
+                android:layout_gravity="center"
+                android:contentDescription="前进"
+                android:src="@drawable/ic_skip_forward" />
+
+            <TextView
+                android:id="@+id/skipForwardLabel"
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:layout_gravity="center"
+                android:layout_marginTop="4dp"
+                android:includeFontPadding="false"
+                android:text="15"
+                android:textColor="#FFFFFFFF"
+                android:textSize="8sp"
+                android:textStyle="bold" />
+        </FrameLayout>
     </LinearLayout>
 
     <TextView

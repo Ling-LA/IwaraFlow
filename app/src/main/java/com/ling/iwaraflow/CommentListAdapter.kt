@@ -209,6 +209,11 @@ class CommentListAdapter(
                     translate.text = "翻译中…"
                 }
                 is Translator.State.Done -> {
+                    if (Translator.isChineseSource(s.translation)) {
+                        // 本来就是中文（本地判断被链接之类的干扰了），原样显示，不提翻译。
+                        translate.visibility = View.GONE
+                        return
+                    }
                     translate.visibility = View.VISIBLE
                     val from = Translator.languageName(s.translation.sourceLang)
                     if (s.showOriginal) {

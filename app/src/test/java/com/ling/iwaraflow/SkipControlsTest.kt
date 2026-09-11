@@ -50,11 +50,11 @@ class SkipControlsTest {
         prefs.skipSeconds = 30
         val (adapter, root, _) = card(prefs)
         try {
-            assertEquals("30", root.findViewById<TextView>(R.id.skipBack).text.toString())
-            assertEquals("30", root.findViewById<TextView>(R.id.skipForward).text.toString())
+            assertEquals("30", root.findViewById<TextView>(R.id.skipBackLabel).text.toString())
+            assertEquals("30", root.findViewById<TextView>(R.id.skipForwardLabel).text.toString())
             prefs.skipSeconds = 5
             adapter.applyDisplayPrefs()
-            assertEquals("改了设置要立刻反映到已绑定的卡片上", "5", root.findViewById<TextView>(R.id.skipForward).text.toString())
+            assertEquals("改了设置要立刻反映到已绑定的卡片上", "5", root.findViewById<TextView>(R.id.skipForwardLabel).text.toString())
         } finally { adapter.releaseAll(); prefs.skipSeconds = 15 }
     }
 

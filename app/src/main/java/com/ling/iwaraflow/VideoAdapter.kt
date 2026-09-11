@@ -246,8 +246,10 @@ class VideoAdapter(
         private val reactionBurst = view.findViewById<ReactionBurstView>(R.id.reactionBurst)
         private val speedIndicator = view.findViewById<TextView>(R.id.speedIndicator)
         private val pauseIndicator = view.findViewById<PauseIndicatorView>(R.id.pauseIndicator)
-        private val skipBack = view.findViewById<TextView>(R.id.skipBack)
-        private val skipForward = view.findViewById<TextView>(R.id.skipForward)
+        private val skipBack = view.findViewById<View>(R.id.skipBack)
+        private val skipForward = view.findViewById<View>(R.id.skipForward)
+        private val skipBackLabel = view.findViewById<TextView>(R.id.skipBackLabel)
+        private val skipForwardLabel = view.findViewById<TextView>(R.id.skipForwardLabel)
 
         private var player: ExoPlayer? = null
         private var bound: VideoItem? = null
@@ -514,8 +516,8 @@ class VideoAdapter(
         fun applyDisplayPrefs() {
             pauseIndicator.indicatorEnabled = prefs.showPauseIndicator
             val seconds = prefs.skipSeconds.toString()
-            skipBack.text = seconds
-            skipForward.text = seconds
+            skipBackLabel.text = seconds
+            skipForwardLabel.text = seconds
         }
 
         /** 暂停控制行的前进 / 后退：夹在 0 和片长之间，片长未知时只保证不为负。 */

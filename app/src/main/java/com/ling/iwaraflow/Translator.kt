@@ -98,21 +98,33 @@ object Translator {
     fun cached(text: String): Translation? = synchronized(cache) { cache[text] }
 
     private val word = Regex("\\p{L}{2,}")
+    /** 链接、邮箱、@用户名：里面全是拉丁字母，但不是“外语”，判断语言前先剥掉。 */
+    private val noise = Regex("(https?://\\S+|www\\.\\S+|\\S+@\\S+\\.\\S+|@\\w+)")
 
-    /** 有没有必要翻：得有连着的至少两个字母（“1080p”这种不算），而且不是中文。 */
-    fun needsTranslation(text: String): Boolean = word.containsMatchIn(text) && !isChinese(text)
+    /** 有没有必要翻：剥掉链接后得有连着的至少两个字母（“1080p”这种不算），而且不是中文。 */
+    fun needsTranslation(text: String): Boolean {
+        val plain = stripNoise(text)
+        return word.containsMatchIn(plain) && !isChinese(plain)
+    }
+
+    internal fun stripNoise(text: String): String = noise.replace(text, " ")
 
     /**
      * 原文是不是中文。带假名的一定是日语；否则汉字占字母的四成以上就当中文
      * （中文里夹几个英文单词很常见）。没有任何字母的（纯表情、数字）也当作不用翻。
      */
     fun isChinese(text: String): Boolean {
-        if (text.any { it in '぀'..'ヿ' }) return false
-        val letters = text.count { it.isLetter() }
+        val plain = stripNoise(text)
+        if (plain.any { it in '぀'..'ヿ' }) return false
+        val letters = plain.count { it.isLetter() }
         if (letters == 0) return true
-        val han = text.count { Character.UnicodeScript.of(it.code) == Character.UnicodeScript.HAN }
+        val han = plain.count { Character.UnicodeScript.of(it.code) == Character.UnicodeScript.HAN }
         return han * 100 / letters >= 40
     }
+
+    /** 服务端识别出来源语言就是中文：那就不用翻，也不用显示那一行。 */
+    fun isChineseSource(translation: Translation): Boolean =
+        translation.sourceLang.lowercase().let { it == "zh" || it.startsWith("zh-") || it == "zh_cn" || it == "zh_tw" }
 
     fun translate(text: String, callback: (Result<Translation>) -> Unit) {
         cached(text)?.let { callback(Result.success(it)); return }

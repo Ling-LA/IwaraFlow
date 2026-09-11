@@ -2,10 +2,16 @@ package com.ling.iwaraflow
 
 import org.junit.Assert.*
 import org.junit.Test
+import org.junit.runner.RunWith
+import org.robolectric.RobolectricTestRunner
+import org.robolectric.annotation.Config
 
 /**
  * 评论 / 简介翻译：谷歌免费接口的地址和返回格式，以及“什么该翻、什么不该翻”的判断。
+ * 返回体用 org.json 解析，纯 JVM 里那是空壳，所以跑在 Robolectric 上。
  */
+@RunWith(RobolectricTestRunner::class)
+@Config(sdk = [36])
 class TranslatorTest {
     @Test fun theEndpointIsTheFreeWebTranslateApiTargetingChinese() {
         val url = Translator.endpoint("hello")

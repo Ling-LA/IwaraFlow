@@ -45,8 +45,10 @@ object Translator {
 
     fun cached(text: String): Translation? = synchronized(cache) { cache[text] }
 
-    /** 有没有必要翻：得有文字，而且不是中文。 */
-    fun needsTranslation(text: String): Boolean = text.any { it.isLetter() } && !isChinese(text)
+    private val word = Regex("\\p{L}{2,}")
+
+    /** 有没有必要翻：得有连着的至少两个字母（“1080p”这种不算），而且不是中文。 */
+    fun needsTranslation(text: String): Boolean = word.containsMatchIn(text) && !isChinese(text)
 
     /**
      * 原文是不是中文。带假名的一定是日语；否则汉字占字母的四成以上就当中文

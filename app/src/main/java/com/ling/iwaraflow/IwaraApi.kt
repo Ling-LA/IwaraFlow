@@ -513,7 +513,8 @@ class IwaraApi(context: Context, private val apiRoot: String = DEFAULT_API_ROOT)
             authorUsername = user?.optString("username").orEmpty(),
             isPrivate = o.optBoolean("private", false),
             status = o.optString("status"),
-            thumbnailUrl = thumbnailUrl
+            thumbnailUrl = thumbnailUrl,
+            description = o.optString("body").takeIf { it != "null" }.orEmpty()
         )
     }
 

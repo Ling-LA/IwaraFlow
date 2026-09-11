@@ -36,8 +36,10 @@ class VideoAdapter(
      * 不能自动缩进小窗，回来之后也要接上播放。不传就按老样子直接拉起选择器。
      */
     private val onShare: ((VideoItem) -> Unit)? = null,
-    /** 点了评论按钮。不传就不显示评论按钮（作者页、搜索页这些没有评论面板）。 */
-    private val onComments: ((VideoItem) -> Unit)? = null
+    /** 点了评论按钮。不传就不显示评论按钮（没有评论面板的页面）。 */
+    private val onComments: ((VideoItem) -> Unit)? = null,
+    /** 点了视频标题：打开简介。不传标题就只是文字。 */
+    private val onInfo: ((VideoItem) -> Unit)? = null
 ) : RecyclerView.Adapter<VideoAdapter.Holder>() {
 
     val items = mutableListOf<VideoItem>()
@@ -290,6 +292,8 @@ class VideoAdapter(
             applyVideoInsets()
             comments.visibility = if (onComments == null) View.GONE else View.VISIBLE
             comments.setOnClickListener { onComments?.invoke(item) }
+            title.setOnClickListener(onInfo?.let { open -> View.OnClickListener { open(item) } })
+            title.isClickable = onInfo != null
             item.localFavorite = history.isLocalFavorite(item.id)
             applyDisplayPrefs()
             skipBack.setOnClickListener { skipBy(-prefs.skipSeconds * 1000L) }

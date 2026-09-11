@@ -1,5 +1,5 @@
 <?xml version="1.0" encoding="utf-8"?>
-<!-- 评论面板：贴在屏幕底部的半屏面板，高度由页面按视频画面算出来，
+<!-- 视频半屏面板：「简介 / 评论」两个页签。高度由页面按视频画面算出来，
      顶边正好对齐视频底边。整块可点，点击不会穿透到后面的视频。 -->
 <LinearLayout xmlns:android="http://schemas.android.com/apk/res/android"
     android:id="@+id/commentsPanel"
@@ -19,23 +19,71 @@
         android:layout_marginTop="8dp"
         android:background="#FFD5DEE6" />
 
+    <!-- 页签行：简介 | 评论 N … ✕ -->
     <LinearLayout
         android:layout_width="match_parent"
-        android:layout_height="46dp"
+        android:layout_height="48dp"
         android:gravity="center_vertical"
         android:orientation="horizontal"
-        android:paddingStart="18dp"
+        android:paddingStart="10dp"
         android:paddingEnd="6dp">
 
-        <TextView
-            android:id="@+id/commentsTitle"
+        <LinearLayout
+            android:id="@+id/panelTabInfo"
+            android:layout_width="wrap_content"
+            android:layout_height="match_parent"
+            android:gravity="center"
+            android:orientation="vertical"
+            android:paddingStart="10dp"
+            android:paddingEnd="10dp">
+
+            <TextView
+                android:id="@+id/panelTabInfoLabel"
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:text="简介"
+                android:textColor="#FF8A9BAA"
+                android:textSize="16sp" />
+
+            <View
+                android:id="@+id/panelTabInfoLine"
+                android:layout_width="20dp"
+                android:layout_height="3dp"
+                android:layout_marginTop="5dp"
+                android:background="#FFFF5C85"
+                android:visibility="invisible" />
+        </LinearLayout>
+
+        <LinearLayout
+            android:id="@+id/panelTabComments"
+            android:layout_width="wrap_content"
+            android:layout_height="match_parent"
+            android:gravity="center"
+            android:orientation="vertical"
+            android:paddingStart="10dp"
+            android:paddingEnd="10dp">
+
+            <TextView
+                android:id="@+id/commentsTitle"
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:text="评论"
+                android:textColor="#FF17324A"
+                android:textSize="16sp"
+                android:textStyle="bold" />
+
+            <View
+                android:id="@+id/panelTabCommentsLine"
+                android:layout_width="20dp"
+                android:layout_height="3dp"
+                android:layout_marginTop="5dp"
+                android:background="#FFFF5C85" />
+        </LinearLayout>
+
+        <Space
             android:layout_width="0dp"
-            android:layout_height="wrap_content"
-            android:layout_weight="1"
-            android:text="评论"
-            android:textColor="#FF17324A"
-            android:textSize="16sp"
-            android:textStyle="bold" />
+            android:layout_height="1dp"
+            android:layout_weight="1" />
 
         <TextView
             android:id="@+id/commentsClose"
@@ -74,6 +122,70 @@
             android:textColor="#FF8A9BAA"
             android:textSize="14sp"
             android:visibility="gone" />
+
+        <!-- 简介页：标题、作者 / 日期 / 数据、标签、正文。 -->
+        <ScrollView
+            android:id="@+id/infoScroll"
+            android:layout_width="match_parent"
+            android:layout_height="match_parent"
+            android:visibility="gone">
+
+            <LinearLayout
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:orientation="vertical"
+                android:paddingStart="18dp"
+                android:paddingTop="14dp"
+                android:paddingEnd="18dp"
+                android:paddingBottom="24dp">
+
+                <TextView
+                    android:id="@+id/infoTitle"
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content"
+                    android:textColor="#FF17324A"
+                    android:textIsSelectable="true"
+                    android:textSize="16sp"
+                    android:textStyle="bold" />
+
+                <TextView
+                    android:id="@+id/infoMeta"
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content"
+                    android:layout_marginTop="6dp"
+                    android:textColor="#FF8A9BAA"
+                    android:textSize="12sp" />
+
+                <TextView
+                    android:id="@+id/infoTags"
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content"
+                    android:layout_marginTop="8dp"
+                    android:textColor="#FF285C7B"
+                    android:textSize="13sp" />
+
+                <TextView
+                    android:id="@+id/infoTranslate"
+                    android:layout_width="wrap_content"
+                    android:layout_height="wrap_content"
+                    android:layout_marginTop="12dp"
+                    android:paddingTop="2dp"
+                    android:paddingBottom="2dp"
+                    android:textColor="#FF8A9BAA"
+                    android:textSize="12sp"
+                    android:visibility="gone" />
+
+                <TextView
+                    android:id="@+id/infoBody"
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content"
+                    android:layout_marginTop="14dp"
+                    android:lineSpacingExtra="3dp"
+                    android:textColor="#FF17324A"
+                    android:textIsSelectable="true"
+                    android:textSize="14sp" />
+            </LinearLayout>
+        </ScrollView>
     </FrameLayout>
 
     <!-- 正在回复谁。点“回复”后出现，点 ✕ 取消回到发评论。 -->
@@ -109,6 +221,7 @@
     </LinearLayout>
 
     <LinearLayout
+        android:id="@+id/commentsInputRow"
         android:layout_width="match_parent"
         android:layout_height="wrap_content"
         android:background="#FFFFFFFF"

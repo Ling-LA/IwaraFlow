@@ -12,6 +12,9 @@ import coil.transform.CircleCropTransformation
 /**
  * 评论列表。顶层评论一行一条；点开「共 N 条回复」后，回复直接接在那条评论下面
  * 缩进显示，再点一次收起。这样不用跳页，也和哔哩哔哩的习惯一致。
+ *
+ * 外语评论在显示出来时自动翻成中文（[translationEnabled] 为 true 时才请求），
+ * 正文上方一行小字说明翻译自哪种语言、可切回原文；翻译失败就在那一行显示原因和重试。
  */
 class CommentListAdapter(
     private val onReply: (IwaraComment) -> Unit,
@@ -27,9 +30,19 @@ class CommentListAdapter(
     /** 已展开回复的顶层评论 id → 回复条数，用来收起时知道删几行。 */
     private val expanded = HashMap<String, Int>()
     private val loading = HashSet<String>()
+    /** 每条评论的翻译状态，按评论 id（没有 id 的按正文）记。 */
+    private val translations = HashMap<String, Translator.State>()
+
+    /** 面板开着才翻译；关了就不再发请求，避免白白触发接口风控。 */
+    var translationEnabled = false
+        set(value) {
+            if (field == value) return
+            field = value
+            if (value) notifyDataSetChanged()
+        }
 
     fun replaceAll(comments: List<IwaraComment>) {
-        rows.clear(); expanded.clear(); loading.clear()
+        rows.clear(); expanded.clear(); loading.clear(); translations.clear()
         comments.forEach { rows += Row(it, 0) }
         notifyDataSetChanged()
     }
@@ -98,9 +111,35 @@ class CommentListAdapter(
         }
     }
 
+    // ---------------------------------------------------------------- 翻译
+
+    private fun keyOf(c: IwaraComment): String = c.id.ifBlank { "body:${c.body.hashCode()}" }
+
+    private fun requestTranslation(c: IwaraComment) {
+        val key = keyOf(c)
+        translations[key] = Translator.State.Loading
+        Translator.translate(c.body) { result ->
+            translations[key] = result.fold(
+                onSuccess = { Translator.State.Done(it) },
+                onFailure = { Translator.State.Failed(Translator.explain(it)) }
+            )
+            val index = rows.indexOfFirst { keyOf(it.comment) == key }
+            if (index >= 0) notifyItemChanged(index)
+        }
+    }
+
+    private fun toggleOriginal(c: IwaraComment) {
+        val key = keyOf(c)
+        val state = translations[key] as? Translator.State.Done ?: return
+        translations[key] = state.copy(showOriginal = !state.showOriginal)
+        val index = rows.indexOfFirst { keyOf(it.comment) == key }
+        if (index >= 0) notifyItemChanged(index)
+    }
+
     inner class Holder(view: View) : RecyclerView.ViewHolder(view) {
         private val avatar = view.findViewById<ImageView>(R.id.commentAvatar)
         private val author = view.findViewById<TextView>(R.id.commentAuthor)
+        private val translate = view.findViewById<TextView>(R.id.commentTranslate)
         private val body = view.findViewById<TextView>(R.id.commentBody)
         private val time = view.findViewById<TextView>(R.id.commentTime)
         private val reply = view.findViewById<TextView>(R.id.commentReply)
@@ -125,7 +164,7 @@ class CommentListAdapter(
             author.setOnClickListener(authorClick)
             avatar.isClickable = authorClick != null
             author.isClickable = authorClick != null
-            body.text = c.body
+            bindTranslation(c)
             time.text = relativeTime(c.createdAt)
             reply.setOnClickListener { onReply(c) }
 
@@ -140,6 +179,50 @@ class CommentListAdapter(
                         else -> "共 ${c.replyCount} 条回复 ›"
                     }
                     replies.setOnClickListener { toggleReplies(c) }
+                }
+            }
+        }
+
+        private fun bindTranslation(c: IwaraComment) {
+            body.text = c.body
+            translate.setOnClickListener(null)
+            if (!Translator.needsTranslation(c.body)) {
+                translate.visibility = View.GONE
+                return
+            }
+            val key = keyOf(c)
+            var state = translations[key]
+            if (state == null) {
+                val hit = Translator.cached(c.body)
+                if (hit != null) {
+                    state = Translator.State.Done(hit)
+                    translations[key] = state
+                } else if (translationEnabled) {
+                    requestTranslation(c)
+                    state = translations[key]
+                }
+            }
+            when (val s = state) {
+                null -> translate.visibility = View.GONE
+                Translator.State.Loading -> {
+                    translate.visibility = View.VISIBLE
+                    translate.text = "翻译中…"
+                }
+                is Translator.State.Done -> {
+                    translate.visibility = View.VISIBLE
+                    val from = Translator.languageName(s.translation.sourceLang)
+                    if (s.showOriginal) {
+                        translate.text = "原文 · 查看中文翻译"
+                    } else {
+                        body.text = s.translation.text
+                        translate.text = "翻译自$from · 显示原文"
+                    }
+                    translate.setOnClickListener { toggleOriginal(c) }
+                }
+                is Translator.State.Failed -> {
+                    translate.visibility = View.VISIBLE
+                    translate.text = "翻译失败：${s.message} · 重试"
+                    translate.setOnClickListener { requestTranslation(c); bindTranslation(c) }
                 }
             }
         }

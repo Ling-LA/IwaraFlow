@@ -140,7 +140,8 @@ class SearchActivity : AppCompatActivity() {
             onEnterPip = { Toast.makeText(this, "搜索结果页暂不进入小窗", Toast.LENGTH_SHORT).show() },
             onEnded = ::nextWork,
             onNeedLogin = { Toast.makeText(this, "请先在主页登录 Iwara", Toast.LENGTH_SHORT).show() },
-            onComments = { comments.open(it) }
+            onComments = { comments.open(it) },
+            onInfo = { comments.open(it, CommentsPanel.Tab.INFO) }
         )
         pager.adapter = feedAdapter
         pager.offscreenPageLimit = 1

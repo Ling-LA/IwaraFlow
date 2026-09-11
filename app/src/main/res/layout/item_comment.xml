@@ -30,6 +30,18 @@
             android:textSize="13sp"
             android:textStyle="bold" />
 
+        <!-- 「翻译自日语 · 显示原文」/「翻译中…」/「翻译失败：… · 重试」；原文是中文时不出现。 -->
+        <TextView
+            android:id="@+id/commentTranslate"
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:layout_marginTop="3dp"
+            android:paddingTop="2dp"
+            android:paddingBottom="2dp"
+            android:textColor="#FF8A9BAA"
+            android:textSize="12sp"
+            android:visibility="gone" />
+
         <TextView
             android:id="@+id/commentBody"
             android:layout_width="match_parent"

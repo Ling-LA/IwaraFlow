@@ -77,7 +77,9 @@ data class VideoItem(
     val status: String = "",
     val thumbnailUrl: String = "",
     var playbackIssue: String? = null,
-    var resumePositionMs: Long = 0L
+    var resumePositionMs: Long = 0L,
+    /** 作者写的简介（Iwara 的 `body`）；列表接口就带，本地表里存的视频为空，看时再补拉。 */
+    var description: String = ""
 )
 
 data class LoginResult(

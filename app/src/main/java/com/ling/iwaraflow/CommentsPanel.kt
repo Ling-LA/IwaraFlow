@@ -7,9 +7,12 @@ import android.widget.TextView
 import android.widget.Toast
 import androidx.recyclerview.widget.LinearLayoutManager
 import androidx.recyclerview.widget.RecyclerView
+import java.text.SimpleDateFormat
+import java.util.Date
+import java.util.Locale
 
 /**
- * 哔哩哔哩式的半屏评论面板。
+ * 哔哩哔哩式的半屏面板，两个页签：「简介」和「评论」。
  *
  * 面板贴在屏幕底部，高度由页面按当前视频的画面算出来（见 [panelHeight]），
  * 面板顶边正好对齐画面底边：横屏视频画面本来就在上半屏，面板直接接在下面；
@@ -18,6 +21,7 @@ import androidx.recyclerview.widget.RecyclerView
  *
  * 评论直接对接 Iwara 官网：列表是官方评论，回复也发到官网。
  * 写评论走 [CommentInputDialog]：键盘只顶起那个输入层，面板和视频都不动。
+ * 外语的简介和评论在面板打开时自动翻成中文，可切回原文；关掉面板就不再发翻译请求。
  */
 class CommentsPanel(
     private val root: View,
@@ -29,27 +33,47 @@ class CommentsPanel(
     /** 点了评论者的头像 / 名字：页面去打开这个用户的主页。 */
     private val onOpenAuthor: ((IwaraAuthor) -> Unit)? = null
 ) {
+    enum class Tab { INFO, COMMENTS }
+
+    private val tabInfo = root.findViewById<View>(R.id.panelTabInfo)
+    private val tabInfoLabel = root.findViewById<TextView>(R.id.panelTabInfoLabel)
+    private val tabInfoLine = root.findViewById<View>(R.id.panelTabInfoLine)
+    private val tabComments = root.findViewById<View>(R.id.panelTabComments)
     private val title = root.findViewById<TextView>(R.id.commentsTitle)
+    private val tabCommentsLine = root.findViewById<View>(R.id.panelTabCommentsLine)
     private val list = root.findViewById<RecyclerView>(R.id.commentsList)
     private val status = root.findViewById<TextView>(R.id.commentsStatus)
+    private val infoScroll = root.findViewById<View>(R.id.infoScroll)
+    private val infoTitle = root.findViewById<TextView>(R.id.infoTitle)
+    private val infoMeta = root.findViewById<TextView>(R.id.infoMeta)
+    private val infoTags = root.findViewById<TextView>(R.id.infoTags)
+    private val infoTranslate = root.findViewById<TextView>(R.id.infoTranslate)
+    private val infoBody = root.findViewById<TextView>(R.id.infoBody)
     private val replyBar = root.findViewById<View>(R.id.commentsReplyBar)
     private val replyTarget = root.findViewById<TextView>(R.id.commentsReplyTarget)
+    private val inputRow = root.findViewById<View>(R.id.commentsInputRow)
     private val input = root.findViewById<TextView>(R.id.commentsInput)
 
     private val adapter = CommentListAdapter(
         onReply = ::startReply, onLoadReplies = ::loadReplies, onOpenAuthor = onOpenAuthor
     )
     private var video: VideoItem? = null
+    private var tab = Tab.COMMENTS
     private var replyTo: IwaraComment? = null
     /** 还没发出去的文字；关掉输入层再打开还在。 */
     private var draft = ""
+    /** 评论列表已经为哪条视频拉过了；简介页签先打开时评论要等切过去才拉。 */
+    private var commentsLoadedFor: String? = null
     private var nextPage = 0
     private var hasMore = false
     private var loadingPage = false
     private var sending = false
-    /** 每次打开加一，旧请求回来时对不上就丢掉。 */
+    /** 每次换视频加一，旧请求回来时对不上就丢掉。 */
     private var generation = 0
     private var total = -1
+    /** 简介正文的翻译状态；null 表示还没请求。 */
+    private var infoTranslation: Translator.State? = null
+    private var detailRequested = false
 
     val isOpen: Boolean get() = root.visibility == View.VISIBLE
 
@@ -65,15 +89,17 @@ class CommentsPanel(
         })
         root.findViewById<View>(R.id.commentsClose).setOnClickListener { close() }
         root.findViewById<View>(R.id.commentsReplyCancel).setOnClickListener { cancelReply() }
+        tabInfo.setOnClickListener { selectTab(Tab.INFO) }
+        tabComments.setOnClickListener { selectTab(Tab.COMMENTS) }
         input.setOnClickListener { openInput() }
         renderInput()
     }
 
     /**
-     * 打开面板看 [item] 的评论。[panelHeight] 是面板高度，[videoTop] 是画面要从哪里开始
-     * （通常是顶栏底边），都是像素。
+     * 打开面板看 [item]。[panelHeight] 是面板高度，[videoTop] 是画面要从哪里开始
+     * （通常是顶栏底边），都是像素；[initialTab] 是先显示哪个页签。
      */
-    fun open(item: VideoItem, panelHeight: Int, videoTop: Int) {
+    fun open(item: VideoItem, panelHeight: Int, videoTop: Int, initialTab: Tab = Tab.COMMENTS) {
         val sameVideo = video?.id == item.id && isOpen
         video = item
         val params = root.layoutParams
@@ -81,21 +107,27 @@ class CommentsPanel(
         root.layoutParams = params
         root.visibility = View.VISIBLE
         onLayoutChanged(true, videoTop, panelHeight)
-        if (sameVideo) return
+        adapter.translationEnabled = true
+        if (sameVideo) { selectTab(initialTab); return }
         generation++
         cancelReply()
         draft = ""
         renderInput()
         adapter.replaceAll(emptyList())
+        commentsLoadedFor = null
         nextPage = 0; hasMore = false; loadingPage = false; total = -1
         title.text = "评论"
-        showStatus("加载中…")
-        loadPage()
+        hideStatus()
+        infoTranslation = null
+        detailRequested = false
+        renderInfo(item)
+        selectTab(initialTab)
     }
 
     fun close() {
         if (!isOpen) return
         root.visibility = View.GONE
+        adapter.translationEnabled = false
         onLayoutChanged(false, 0, 0)
     }
 
@@ -103,7 +135,145 @@ class CommentsPanel(
     fun release() {
         generation++
         video = null
+        adapter.translationEnabled = false
     }
+
+    private fun selectTab(next: Tab) {
+        tab = next
+        val info = next == Tab.INFO
+        tabInfoLabel.setTextColor(if (info) 0xFF17324A.toInt() else 0xFF8A9BAA.toInt())
+        tabInfoLabel.setTypeface(null, if (info) android.graphics.Typeface.BOLD else android.graphics.Typeface.NORMAL)
+        tabInfoLine.visibility = if (info) View.VISIBLE else View.INVISIBLE
+        title.setTextColor(if (info) 0xFF8A9BAA.toInt() else 0xFF17324A.toInt())
+        title.setTypeface(null, if (info) android.graphics.Typeface.NORMAL else android.graphics.Typeface.BOLD)
+        tabCommentsLine.visibility = if (info) View.INVISIBLE else View.VISIBLE
+
+        infoScroll.visibility = if (info) View.VISIBLE else View.GONE
+        list.visibility = if (info) View.GONE else View.VISIBLE
+        inputRow.visibility = if (info) View.GONE else View.VISIBLE
+        replyBar.visibility = if (!info && replyTo != null) View.VISIBLE else View.GONE
+        if (info) {
+            status.visibility = View.GONE
+            ensureDescription()
+        } else {
+            if (status.text.isNotBlank()) status.visibility = View.VISIBLE
+            val item = video
+            if (item != null && commentsLoadedFor != item.id) {
+                commentsLoadedFor = item.id
+                showStatus("加载中…")
+                loadPage()
+            }
+        }
+    }
+
+    // ---------------------------------------------------------------- 简介
+
+    private fun renderInfo(item: VideoItem) {
+        infoTitle.text = item.title
+        val parts = ArrayList<String>()
+        parts += "@${item.author}"
+        if (item.createdAt > 0L) parts += SimpleDateFormat("yyyy-MM-dd", Locale.ROOT).format(Date(item.createdAt))
+        if (item.views > 0) parts += "${formatCount(item.views)} 次播放"
+        if (item.likes > 0) parts += "${formatCount(item.likes)} 赞"
+        infoMeta.text = parts.joinToString("  ·  ")
+        infoTags.text = item.tags.joinToString("  ") { "#$it" }
+        infoTags.visibility = if (item.tags.isEmpty()) View.GONE else View.VISIBLE
+        renderDescription(item)
+    }
+
+    private fun renderDescription(item: VideoItem) {
+        val text = item.description.trim()
+        infoTranslate.setOnClickListener(null)
+        if (text.isBlank()) {
+            infoBody.text = if (detailRequested) "读取中…" else "暂无简介"
+            infoTranslate.visibility = View.GONE
+            return
+        }
+        infoBody.text = text
+        if (!Translator.needsTranslation(text)) {
+            infoTranslate.visibility = View.GONE
+            return
+        }
+        var state = infoTranslation
+        if (state == null) {
+            val hit = Translator.cached(text)
+            if (hit != null) {
+                state = Translator.State.Done(hit)
+                infoTranslation = state
+            } else if (isOpen) {
+                requestInfoTranslation(item, text)
+                state = infoTranslation
+            }
+        }
+        when (val s = state) {
+            null -> infoTranslate.visibility = View.GONE
+            Translator.State.Loading -> {
+                infoTranslate.visibility = View.VISIBLE
+                infoTranslate.text = "翻译中…"
+            }
+            is Translator.State.Done -> {
+                infoTranslate.visibility = View.VISIBLE
+                val from = Translator.languageName(s.translation.sourceLang)
+                if (s.showOriginal) {
+                    infoTranslate.text = "原文 · 查看中文翻译"
+                } else {
+                    infoBody.text = s.translation.text
+                    infoTranslate.text = "翻译自$from · 显示原文"
+                }
+                infoTranslate.setOnClickListener {
+                    infoTranslation = s.copy(showOriginal = !s.showOriginal)
+                    renderDescription(item)
+                }
+            }
+            is Translator.State.Failed -> {
+                infoTranslate.visibility = View.VISIBLE
+                infoTranslate.text = "翻译失败：${s.message} · 重试"
+                infoTranslate.setOnClickListener { requestInfoTranslation(item, text); renderDescription(item) }
+            }
+        }
+    }
+
+    private fun requestInfoTranslation(item: VideoItem, text: String) {
+        infoTranslation = Translator.State.Loading
+        val gen = generation
+        Translator.translate(text) { result ->
+            if (gen != generation || video?.id != item.id) return@translate
+            infoTranslation = result.fold(
+                onSuccess = { Translator.State.Done(it) },
+                onFailure = { Translator.State.Failed(Translator.explain(it)) }
+            )
+            renderDescription(item)
+        }
+    }
+
+    /** 本地表里存的视频没带简介，打开简介页时补拉一次详情。 */
+    private fun ensureDescription() {
+        val item = video ?: return
+        if (item.description.isNotBlank() || detailRequested || item.id.isBlank()) return
+        detailRequested = true
+        renderDescription(item)
+        val gen = generation
+        api.getVideo(item.id) { result ->
+            root.post {
+                if (gen != generation || video?.id != item.id) return@post
+                result.onSuccess { detail ->
+                    item.description = detail.description
+                    detailRequested = false
+                    renderDescription(item)
+                }.onFailure {
+                    detailRequested = false
+                    infoBody.text = "简介读取失败：${it.message}"
+                }
+            }
+        }
+    }
+
+    private fun formatCount(value: Int): String = when {
+        value >= 10_000 -> "%.1f 万".format(value / 10_000.0)
+        else -> value.toString()
+    }
+
+    // ---------------------------------------------------------------- 评论
 
     private fun loadPage() {
         val item = video ?: return
@@ -240,8 +410,12 @@ class CommentsPanel(
         }
     }
 
-    private fun showStatus(text: String) { status.text = text; status.visibility = View.VISIBLE }
-    private fun hideStatus() { status.visibility = View.GONE }
+    private fun showStatus(text: String) {
+        status.text = text
+        status.visibility = if (tab == Tab.COMMENTS) View.VISIBLE else View.GONE
+    }
+
+    private fun hideStatus() { status.text = ""; status.visibility = View.GONE }
 
     companion object {
         /** 面板最矮占屏幕高度的多少：竖屏视频也得给评论留出能看的空间。 */

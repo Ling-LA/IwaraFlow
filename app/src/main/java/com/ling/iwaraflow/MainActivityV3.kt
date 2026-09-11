@@ -157,7 +157,8 @@ class MainActivityV3 : AppCompatActivity() {
             onEnded = ::onVideoEnded,
             onNeedLogin = ::showLoginDialog,
             onShare = ::shareVideo,
-            onComments = ::openComments
+            onComments = ::openComments,
+            onInfo = { item -> if (!isInPictureInPictureMode) comments.open(item, CommentsPanel.Tab.INFO) }
         )
         pager.adapter = adapter
         pager.offscreenPageLimit = 1

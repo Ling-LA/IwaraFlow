@@ -44,7 +44,7 @@ class CommentsHost(
      * 打开 [item] 的评论。面板高度和画面顶边按当前视频的宽高比算：横屏视频面板顶边贴住
      * 画面底边，竖屏视频画面缩到顶栏和面板之间。播放器不动，视频照常播。
      */
-    fun open(item: VideoItem) {
+    fun open(item: VideoItem, tab: CommentsPanel.Tab = CommentsPanel.Tab.COMMENTS) {
         val metrics = pager.resources.displayMetrics
         val width = pager.width.takeIf { it > 0 } ?: metrics.widthPixels
         val height = pager.height.takeIf { it > 0 } ?: metrics.heightPixels
@@ -52,7 +52,7 @@ class CommentsHost(
         val aspect = adapter.activeVideoAspect()
         val panelHeight = CommentsPanel.panelHeight(width, height, topBar, aspect, gap = gapPx)
         val top = CommentsPanel.videoTop(width, height, topBar, aspect, panelHeight)
-        panel.open(item, panelHeight, top)
+        panel.open(item, panelHeight, top, tab)
     }
 
     fun close() = panel.close()

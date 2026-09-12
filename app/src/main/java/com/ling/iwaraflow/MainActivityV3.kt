@@ -698,6 +698,8 @@ class MainActivityV3 : AppCompatActivity() {
         }
         val password = EditText(this).apply {
             hint = "密码"; inputType = InputType.TYPE_CLASS_TEXT or InputType.TYPE_TEXT_VARIATION_PASSWORD; setSingleLine(true)
+            // setSingleLine 会把变换方法换成单行的，密码的圆点遮罩就没了，得再装回去。
+            transformationMethod = android.text.method.PasswordTransformationMethod.getInstance()
             setTextColor(0xFF17324A.toInt()); setHintTextColor(0x99607D93.toInt()); background = ContextCompat.getDrawable(this@MainActivityV3, R.drawable.bg_input)
             setPadding(dp(16), dp(12), dp(16), dp(12))
         }
@@ -1010,6 +1012,10 @@ class MainActivityV3 : AppCompatActivity() {
         this.hint = hint; setText(value)
         this.inputType = if (multiline) inputType or InputType.TYPE_TEXT_FLAG_MULTI_LINE else inputType
         setSingleLine(!multiline)
+        // setSingleLine 会覆盖掉密码遮罩：密钥类的输入框要再装回圆点显示。
+        if (inputType and InputType.TYPE_MASK_VARIATION == InputType.TYPE_TEXT_VARIATION_PASSWORD) {
+            transformationMethod = android.text.method.PasswordTransformationMethod.getInstance()
+        }
         if (multiline) { minLines = 2; maxLines = 5 }
         setTextColor(0xFF17324A.toInt()); setHintTextColor(0x99607D93.toInt())
         background = ContextCompat.getDrawable(this@MainActivityV3, R.drawable.bg_input)

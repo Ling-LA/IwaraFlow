@@ -369,7 +369,7 @@ class HistoryStore(context: Context) : SQLiteOpenHelper(context, "iwaraflow.db",
                 val at = c.getLong(3)
                 val ageDays = ((now - at).coerceAtLeast(0) / 86_400_000.0)
                 val decay = 1.0 / (1.0 + ageDays / 30.0)
-                val session = if (now - at in 0..SESSION_WINDOW_MS && c.getString(5) != ACTION_CLOUD_LIKE) SESSION_BOOST else 1.0
+                val session = if (now - at <= SESSION_WINDOW_MS && c.getString(5) != ACTION_CLOUD_LIKE) SESSION_BOOST else 1.0
                 val w = c.getDouble(2) * decay * session
                 val a = c.getString(0).lowercase()
                 author[a] = (author[a] ?: 0.0) + w

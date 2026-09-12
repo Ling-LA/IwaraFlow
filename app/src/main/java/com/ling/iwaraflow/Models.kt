@@ -70,8 +70,9 @@ data class VideoItem(
     var streamUrl: String? = null,
     var sources: List<VideoSource>? = null,
     var selectedQuality: String? = null,
-    val authorId: String = "",
-    val authorUsername: String = "",
+    /** 作者 id / 用户名。本地下载记录里没有，播放时补拉详情再填，所以是 var。 */
+    var authorId: String = "",
+    var authorUsername: String = "",
     var authorFollowing: Boolean = false,
     val isPrivate: Boolean = false,
     val status: String = "",

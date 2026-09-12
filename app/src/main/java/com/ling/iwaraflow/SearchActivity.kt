@@ -555,12 +555,13 @@ class SearchActivity : AppCompatActivity() {
     @Suppress("DEPRECATION")
     override fun onPictureInPictureModeChanged(isInPictureInPictureMode: Boolean) {
         super.onPictureInPictureModeChanged(isInPictureInPictureMode)
-        if (isInPictureInPictureMode) comments.close()
+        if (isInPictureInPictureMode) { comments.close(); PipRegistry.enter(this) } else PipRegistry.leave(this)
         findViewById<View>(R.id.searchFeedBack).visibility = if (isInPictureInPictureMode) View.GONE else View.VISIBLE
         feedAdapter.setPipMode(isInPictureInPictureMode)
     }
 
     override fun onDestroy() {
+        PipRegistry.leave(this)
         if (::comments.isInitialized) comments.release()
         exiting = true
         feedAdapter.releaseAll()

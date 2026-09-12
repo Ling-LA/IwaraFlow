@@ -137,6 +137,11 @@ class VideoAdapter(
         holders.toList().forEach { it.applyDisplayPrefs() }
     }
 
+    /** 某条视频的数据在外面被补全了（点赞数、作者、关注状态），刷新已绑定卡片的显示。 */
+    fun refreshItem(videoId: String) {
+        holders.toList().forEach { it.refreshIfBound(videoId) }
+    }
+
     /**
      * 评论面板开着时画面要让出的上下留白（像素）。上面留顶栏，下面留面板高度，
      * 画面缩进中间那块，面板不遮画面。两个都传 0 就是关掉，卡片回到各自的默认摆法
@@ -585,6 +590,13 @@ class VideoAdapter(
         fun refreshFollowButton() {
             val item = bound ?: return
             itemView.findViewById<AuthorFollowButton>(R.id.authorFollow)?.render(item.authorFollowing)
+        }
+
+        fun refreshIfBound(videoId: String) {
+            val item = bound ?: return
+            if (item.id != videoId) return
+            updateLikeUi(item)
+            refreshFollowButton()
         }
 
         private fun stopSpeedBoost() {

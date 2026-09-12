@@ -715,8 +715,31 @@ class MainActivityV3 : AppCompatActivity() {
         pagingEnabled = false; mode = "single"; invalidateRequests()
         loading.visibility = View.GONE
         adapter.replace(listOf(item)); pager.setCurrentItem(0, false); adapter.setActive(0)
-        if (!openingInternalPage && lifecycle.currentState.isAtLeast(Lifecycle.State.RESUMED)) adapter.resumeActive()
+        // 这里是从 onResume 直接调过来的，生命周期状态还没翻到 RESUMED，不能拿它当条件——
+        // 否则播放一直处于禁用状态，这一页黑屏，之后切到哪个榜单都黑屏。
+        if (!openingInternalPage) adapter.resumeActive()
+        // 下载记录里只有标题和作者名：后台补拉一次详情，把作者 id、简介、点赞数填上，
+        // 这样评论区、简介页和“进作者主页”都能正常用。拉不到（离线）也不影响播放。
+        val requestSerial = ++localDetailSerial
+        api.getVideo(videoId) { result ->
+            runOnUiThread {
+                if (isFinishing || isDestroyed || requestSerial != localDetailSerial) return@runOnUiThread
+                val current = adapter.items.firstOrNull { it.id == videoId } ?: return@runOnUiThread
+                result.onSuccess { detail ->
+                    current.authorId = detail.authorId
+                    current.authorUsername = detail.authorUsername
+                    current.description = detail.description
+                    current.likes = detail.likes
+                    current.liked = detail.liked
+                    current.authorFollowing = detail.authorFollowing
+                    adapter.refreshItem(videoId)
+                }
+            }
+        }
     }
+
+    /** 本地视频补拉详情的序号：连着点两个下载视频时，只认最后一次的结果。 */
+    private var localDetailSerial = 0
 
     private fun openSingleVideo(videoId: String) {
         loading.visibility = View.VISIBLE
@@ -1072,6 +1095,8 @@ class MainActivityV3 : AppCompatActivity() {
         super.onResume()
         hideStatusBar()
         if (openingInternalPage || isFinishing) return
+        // 作者页 / 搜索页的小窗还在别的任务里放着：把它展开到前台，别在它底下再放一个。
+        if (!isInPictureInPictureMode && PipRegistry.expandInto(this)) return
         val videoId = pendingVideoId
         val localUri = pendingLocalUri
         pendingVideoId = null

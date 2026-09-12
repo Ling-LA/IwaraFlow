@@ -564,10 +564,10 @@ class SearchActivity : AppCompatActivity() {
         findViewById<View>(R.id.searchFeedBack).visibility = if (isInPictureInPictureMode) View.GONE else View.VISIBLE
         feedAdapter.setPipMode(isInPictureInPictureMode)
         // 退出小窗时页面停在后台（不是被展开成全屏）：用户把小窗关掉了。onStop 那会儿还算在
-        // 小窗里没停播，这里停掉并结束本页，主页收到返回结果后才能解开“正在打开内部页面”的锁。
+        // 小窗里没停播，这里必须停。页面本身不结束：下次打开应用时主页会把它拉回前台，
+        // 用户回到的还是刚才小窗里那条视频。
         if (!isInPictureInPictureMode && !lifecycle.currentState.isAtLeast(Lifecycle.State.STARTED)) {
             feedAdapter.pauseAll()
-            finish()
         }
     }
 

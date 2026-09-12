@@ -1133,10 +1133,13 @@ class MainActivityV3 : AppCompatActivity() {
         // 子页面进小窗时主页正是“正在打开内部页面”的状态，被动顶上来的主页不能就这么黑着。
         val fromIcon = launchedFromIcon
         launchedFromIcon = false
-        if (!isInPictureInPictureMode && !isFinishing && PipRegistry.otherPipActivity(this) != null) {
-            if (fromIcon) {
-                // 用户点图标要的是这个视频：把小窗展开到前台。展开成功的话本页马上会被盖住；
-                // 过一会儿还在前台就说明系统没展开，那就关掉小窗，让本页正常用。
+        val pip = PipRegistry.otherPipActivity(this)
+        if (!isInPictureInPictureMode && !isFinishing && pip != null) {
+            // 小窗被关掉后子页面并不结束，只是停在自己的任务里；这时再打开应用，
+            // 回到的应该是刚才小窗里那条视频，而不是推荐页。
+            if (fromIcon || !pip.isInPictureInPictureMode) {
+                // 用户点图标要的是这个视频：把小窗（或停在后台的子页面）展开到前台。展开成功的话
+                // 本页马上会被盖住；过一会儿还在前台就说明系统没展开，那就关掉它，让本页正常用。
                 if (PipRegistry.expandInto(this)) {
                     note("主页从图标打开：展开子页面小窗")
                     pager.postDelayed({ dismissStrandedPip() }, PIP_EXPAND_GRACE_MS)

@@ -148,6 +148,18 @@ class IwaraApi(context: Context, private val apiRoot: String = DEFAULT_API_ROOT)
     }
 
     /**
+     * 某个月（`yyyy-MM`）里点赞最多的视频：视频列表接口的 `date` 过滤 + `sort=likes`。
+     * 调用方要看回报的总数来确认过滤真的生效（生效时是一个月的量，几千条）。
+     */
+    fun getMonthTopBlocking(month: String, page: Int = 0, limit: Int = 24): VideoListPage {
+        val url = "$apiRoot/videos".toHttpUrl().newBuilder()
+            .addQueryParameter("sort", "likes").addQueryParameter("rating", "all")
+            .addQueryParameter("date", month)
+            .addQueryParameter("page", page.toString()).addQueryParameter("limit", limit.toString()).build()
+        return parseVideoListPage(getJsonObject(url.toString(), optionalAuth = true))
+    }
+
+    /**
      * 关注作者的最新作品。Iwara 的订阅流就是视频列表接口加 `subscribed=true`；
      * 万一服务端忽略这个参数，拿回来的也是按时间排序的新视频，不会更差。
      */

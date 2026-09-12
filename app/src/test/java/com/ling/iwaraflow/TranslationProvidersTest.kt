@@ -52,17 +52,38 @@ class TranslationProvidersTest {
         assertEquals("https://api.openai.com/v1/chat/completions", Translator.openAiUrl(""))
         assertEquals("https://api.openai.com/v1/chat/completions", Translator.openAiUrl("https://api.openai.com/v1/"))
         assertEquals("https://relay.example/v1/chat/completions", Translator.openAiUrl("https://relay.example"))
+        assertEquals("https://relay.example/v1/chat/completions", Translator.openAiUrl("https://relay.example/"))
         assertEquals("https://relay.example/api/v3/chat/completions", Translator.openAiUrl("https://relay.example/api/v3"))
         assertEquals("https://relay.example/x/chat/completions", Translator.openAiUrl("https://relay.example/x/chat/completions"))
+        assertEquals(
+            "https://generativelanguage.googleapis.com/v1beta/openai/chat/completions",
+            Translator.openAiUrl("https://generativelanguage.googleapis.com/v1beta/openai")
+        )
     }
 
-    @Test fun openAiRequestCarriesModelAndPrompt() {
+    @Test fun openAiRequestCarriesModelAndPromptButNoSamplingParameters() {
         val body = org.json.JSONObject(Translator.openAiBody("hello", ""))
         assertEquals(Translator.DEFAULT_AI_MODEL, body.getString("model"))
         val messages = body.getJSONArray("messages")
         assertEquals("system", messages.getJSONObject(0).getString("role"))
         assertEquals("hello", messages.getJSONObject(1).getString("content"))
+        assertFalse("推理类模型不接受 temperature，请求里不能带", body.has("temperature"))
         assertEquals("deepseek-chat", org.json.JSONObject(Translator.openAiBody("x", " deepseek-chat ")).getString("model"))
+    }
+
+    @Test fun builtInVendorsNeedOnlyAKeyAndCustomUsesTheTypedAddress() {
+        val deepseek = Translator.aiTarget(TranslationConfig(provider = Translator.PROVIDER_OPENAI, aiVendor = "deepseek", key = "k"))
+        assertEquals("https://api.deepseek.com/v1/chat/completions" to "deepseek-chat", deepseek)
+        val gemini = Translator.aiTarget(TranslationConfig(provider = Translator.PROVIDER_OPENAI, aiVendor = "gemini"))
+        assertEquals("https://generativelanguage.googleapis.com/v1beta/openai/chat/completions", gemini.first)
+        val custom = Translator.aiTarget(TranslationConfig(
+            provider = Translator.PROVIDER_OPENAI, aiVendor = Translator.AI_VENDOR_CUSTOM,
+            endpoint = "https://relay.example/v1", model = "my-model"
+        ))
+        assertEquals("https://relay.example/v1/chat/completions" to "my-model", custom)
+        assertEquals("认不出的服务商退回 OpenAI", Translator.DEFAULT_AI_MODEL, Translator.aiTarget(TranslationConfig(aiVendor = "nope")).second)
+        assertTrue("每家都得有地址和模型", Translator.AI_VENDORS.dropLast(1).all { it.endpoint.isNotBlank() && it.model.isNotBlank() })
+        assertEquals(Translator.AI_VENDOR_CUSTOM, Translator.AI_VENDORS.last().id)
     }
 
     @Test fun openAiResponse() {
@@ -117,7 +138,8 @@ class TranslationProvidersTest {
         assertEquals(Translator.PROVIDER_GOOGLE, prefs.translation.provider)
         val custom = TranslationConfig(
             provider = Translator.PROVIDER_CUSTOM, endpoint = "https://x.example/{text}",
-            customMethod = "POST", customBody = "{}", customHeaders = "A: b", customResultPath = "r.0", model = "gpt-4o-mini"
+            customMethod = "POST", customBody = "{}", customHeaders = "A: b", customResultPath = "r.0", model = "gpt-4o-mini",
+            aiVendor = "deepseek"
         )
         prefs.translation = custom
         assertEquals(custom, AppPrefs(RuntimeEnvironment.getApplication()).translation)

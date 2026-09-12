@@ -10,5 +10,6 @@ class IwaraFlowApplication : Application() {
         val prefs = AppPrefs(this)
         NetworkProxy.apply(prefs)
         Translator.configure(prefs.translation)
+        Translator.onFailure = { NavigationDiagnostics.note(this, it) }
     }
 }

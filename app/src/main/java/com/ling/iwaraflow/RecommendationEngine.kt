@@ -56,6 +56,16 @@ class RecommendationEngine(
     @Volatile var sampledPages: List<Int> = emptyList()
         private set
 
+    /** 本次刷新用到的个性化召回（标签 / 作者）和“当月点赞榜”，只用于诊断。 */
+    @Volatile var recallNote: String = ""
+        private set
+
+    /** 服务端支不支持按月过滤：第一次拿到明显是全站量的总数就关掉，不再白请求。 */
+    @Volatile private var monthFilterSupported = true
+
+    /** 这一轮的口味画像，抽候选和打分共用一份。 */
+    @Volatile private var profile: PreferenceProfile = PreferenceProfile(emptyMap(), emptyMap())
+
     fun load(skipSeen: Boolean, callback: (Result<List<VideoItem>>) -> Unit) {
         io.execute {
             refreshFollowingInBackground()
@@ -75,6 +85,7 @@ class RecommendationEngine(
         // 一轮最多同时发这么多请求：卡住的那个不能把后面排队的也拖住。
         val pool = Executors.newFixedThreadPool(MAX_PARALLEL_REQUESTS)
         try {
+            profile = runCatching { history.preferenceProfile() }.getOrDefault(PreferenceProfile(emptyMap(), emptyMap()))
             val deadline = System.nanoTime() + TimeUnit.MILLISECONDS.toNanos(listBudgetMs)
             val merged = LinkedHashMap<String, Pair<VideoItem, Double>>()
             // 哪些视频来自关注作者的订阅流——最后按位置插进结果里要用。
@@ -145,7 +156,53 @@ class RecommendationEngine(
         val (recent, aged) = splitByAge(ranked, System.currentTimeMillis())
         val feed = if (recent.size >= MIN_RECENT_FEED) recent else recent + aged.take(MIN_RECENT_FEED - recent.size)
         val pool = if (classicsEvery > 0) classics + aged else emptyList()
-        return weaveClassics(interleave(feed, subscribed), pool).take(MAX_RESULTS)
+        return weaveClassics(interleave(spreadAuthors(feed), subscribed), pool).take(MAX_RESULTS)
+    }
+
+    /**
+     * 多样性：同一个作者在任意连续 [AUTHOR_WINDOW] + 1 条里最多出现一次。
+     * 打分高的作者会整段霸屏，看起来像作者页；把它的其余作品往后挪，顺序尽量不动。
+     */
+    internal fun spreadAuthors(items: List<VideoItem>, window: Int = AUTHOR_WINDOW): List<VideoItem> {
+        if (items.size <= 2) return items
+        val pending = ArrayDeque(items)
+        val out = ArrayList<VideoItem>(items.size)
+        while (pending.isNotEmpty()) {
+            val recent = out.takeLast(window)
+            val pick = pending.firstOrNull { candidate ->
+                recent.none { it.author.equals(candidate.author, ignoreCase = true) }
+            } ?: pending.first()
+            pending.remove(pick)
+            out += pick
+        }
+        return out
+    }
+
+    /**
+     * 视频质量分：**平滑点赞率**为主，绝对热度为辅。
+     *
+     * 只看点赞总数，老视频和常年霸榜的天然占优；只看裸点赞率，10 次播放 5 个赞会压过
+     * 十万播放一万赞。所以点赞率按贝叶斯平滑：先假设每条视频有 [QUALITY_PRIOR_VIEWS] 次
+     * 播放、平均点赞率 [QUALITY_PRIOR_RATE]，播放量越大真实数据占比越高。
+     * 结果相对平均水平取对数，再加一点对数热度，量级和原来的“点赞 + 播放”接近。
+     */
+    internal fun qualityScore(likes: Int, views: Int): Double {
+        val l = likes.coerceAtLeast(0).toDouble()
+        val v = views.coerceAtLeast(0).toDouble()
+        val rate = (l + QUALITY_PRIOR_VIEWS * QUALITY_PRIOR_RATE) / (v + QUALITY_PRIOR_VIEWS)
+        val relative = ln(rate / QUALITY_PRIOR_RATE).coerceIn(-1.5, 2.5) * 1.6
+        val heat = ln(l + 1.0) * 0.5 + ln(v + 1.0) * 0.12
+        return relative + heat
+    }
+
+    /** 按月点赞榜要抽的月份：本月和上月（`yyyy-MM`）。 */
+    internal fun monthsToSample(now: Long = System.currentTimeMillis()): List<String> {
+        val format = java.text.SimpleDateFormat("yyyy-MM", java.util.Locale.ROOT)
+        val calendar = java.util.Calendar.getInstance(java.util.TimeZone.getTimeZone("UTC"), java.util.Locale.ROOT)
+        calendar.timeInMillis = now
+        val current = format.also { it.timeZone = calendar.timeZone }.format(calendar.time)
+        calendar.add(java.util.Calendar.MONTH, -1)
+        return listOf(current, format.format(calendar.time))
     }
 
     /** 按发布时间分成（近期，老片）两堆，顺序不变；没有发布时间的算近期。 */
@@ -207,20 +264,40 @@ class RecommendationEngine(
         return out
     }
 
-    /** 一次请求：某个榜单（或订阅流）的某一页。 */
-    internal data class PageRequest(val sort: String, val page: Int, val weight: Double)
+    /**
+     * 一次请求：某个榜单（或订阅流 / 标签召回 / 作者召回）的某一页。
+     * [sort] 以 [TAG_PREFIX] / [AUTHOR_PREFIX] 开头时是个性化召回；[month] 非空时是按月点赞榜。
+     */
+    internal data class PageRequest(val sort: String, val page: Int, val weight: Double, val month: String = "")
 
     /**
      * 这一轮抓哪几页。第 0 轮保证有各榜单的首页（新内容还是要优先，冷启动也要快），
      * 每一轮都额外在存档深处随机抽几页，所以连着刷新两次拿到的不是同一批视频。
+     *
+     * 第 0 轮还带上：本月 / 上月的点赞榜（近期里真正受欢迎的作品，不然近期候选大多是
+     * 按时间随机抽到的、点赞很少的视频）、热门榜首页之外再抽一页，以及按画像做的
+     * 个性化召回——权重最高的标签和作者各拉一页。
      */
     internal fun requestsFor(round: Int): List<PageRequest> {
         val requests = ArrayList<PageRequest>()
         val loggedIn = api.isLoggedIn()
-        if (round == 0) sampledPages = emptyList()
+        if (round == 0) { sampledPages = emptyList(); recallNote = "" }
         if (round == 0) {
             if (loggedIn) requests += PageRequest(SUBSCRIBED, 0, SUBSCRIBED_WEIGHT)
             RANKINGS.forEach { (sort, weight) -> requests += PageRequest(sort, 0, weight) }
+            requests += PageRequest("trending", samplePage("trending", TRENDING_DEPTH), 2.6)
+            if (monthFilterSupported) {
+                monthsToSample().forEachIndexed { index, month ->
+                    requests += PageRequest("likes", random.nextInt(MONTH_TOP_PAGES), if (index == 0) 2.8 else 2.4, month = month)
+                }
+            }
+            val tags = profile.topTags(RECALL_TAGS, RECALL_TAG_MIN_WEIGHT)
+            val authors = profile.topAuthorIds(RECALL_AUTHORS, RECALL_AUTHOR_MIN_WEIGHT)
+            tags.forEach { requests += PageRequest(TAG_PREFIX + it, random.nextInt(2), 2.4) }
+            authors.forEach { requests += PageRequest(AUTHOR_PREFIX + it, 0, 2.3) }
+            if (tags.isNotEmpty() || authors.isNotEmpty()) {
+                recallNote = "标签 ${tags.joinToString(",")} 作者 ${authors.size} 位"
+            }
         } else if (loggedIn) {
             // 关注的作者不是只有最新那一页作品，往前翻同样是没看过的更新。
             // 放在补抽轮里，免得给冷启动再加一次请求。
@@ -279,8 +356,15 @@ class RecommendationEngine(
     ) {
         val sources = requestsFor(round).map { request ->
             request to pool.submit<VideoListPage> {
-                if (request.sort == SUBSCRIBED) api.getSubscribedVideoPageBlocking(request.page, PAGE_SIZE)
-                else api.getVideoListPageBlocking(request.sort, page = request.page, limit = PAGE_SIZE)
+                when {
+                    request.sort == SUBSCRIBED -> api.getSubscribedVideoPageBlocking(request.page, PAGE_SIZE)
+                    request.month.isNotBlank() -> api.getMonthTopBlocking(request.month, request.page, PAGE_SIZE)
+                    request.sort.startsWith(TAG_PREFIX) ->
+                        VideoListPage(api.getVideosByTagBlocking(request.sort.removePrefix(TAG_PREFIX), request.page, PAGE_SIZE), -1)
+                    request.sort.startsWith(AUTHOR_PREFIX) ->
+                        VideoListPage(api.getAuthorVideosBlocking(request.sort.removePrefix(AUTHOR_PREFIX), request.page, PAGE_SIZE), -1)
+                    else -> api.getVideoListPageBlocking(request.sort, page = request.page, limit = PAGE_SIZE)
+                }
             }
         }
         // One stalled ranking endpoint used to hold the whole cold start; a request that
@@ -291,9 +375,14 @@ class RecommendationEngine(
             else runCatching { future.get(remaining, TimeUnit.NANOSECONDS) }
                 .onFailure { lastFailure = (it as? java.util.concurrent.ExecutionException)?.cause ?: it }
                 .getOrNull()) ?: return@forEach
-            noteTotal(request.sort, response.total)
+            if (request.month.isNotBlank()) {
+                // 过滤没生效时回来的是全站总榜（几十万条），那批常年霸榜的老片不能混进来。
+                if (response.total < 0 || response.total > MONTH_FILTER_MAX_TOTAL) { monthFilterSupported = false; return@forEach }
+            } else {
+                noteTotal(request.sort, response.total)
+            }
             val videos = response.videos
-            if (videos.isEmpty()) { noteEmptyPage(request.sort, request.page); return@forEach }
+            if (videos.isEmpty()) { if (request.month.isBlank()) noteEmptyPage(request.sort, request.page); return@forEach }
             if (request.sort == SUBSCRIBED) videos.forEach { subscribed += it.id }
             videos.forEachIndexed { index, item ->
                 val rankBonus = (PAGE_SIZE - index).coerceAtLeast(0) / PAGE_SIZE.toDouble()
@@ -314,23 +403,24 @@ class RecommendationEngine(
     }
 
     private fun rank(merged: Map<String, Pair<VideoItem, Double>>): List<VideoItem> {
-        val profile = history.preferenceProfile()
+        val taste = profile
         val now = System.currentTimeMillis()
         return merged.values
             .asSequence()
             .map { (item, sourceScore) ->
-                val likeScore = ln(item.likes + 1.0) * 0.72
-                val viewScore = ln(item.views + 1.0) * 0.24
+                // 站方数据：平滑点赞率 + 热度，见 qualityScore。
+                val quality = qualityScore(item.likes, item.views)
                 val ageDays = if (item.createdAt > 0L) {
                     ((now - item.createdAt).coerceAtLeast(0L) / 86_400_000.0)
                 } else 30.0
                 // 新片加分，但不能是断崖：候选现在有一大半来自存档，
                 // 按原来的曲线，一个月前的视频就已经被压到几乎没有分了。
                 val freshness = 1.6 / (1.0 + ageDays / 30.0)
-                val affinity = profile.score(item).coerceAtMost(8.0) * 0.38
+                // 本地画像：可正可负（很快划走的作者 / 标签会被压下去）。
+                val affinity = taste.score(item).coerceIn(-6.0, 8.0) * 0.38
                 val stableJitter = ((item.id.hashCode().toLong() and 0xffff) / 65535.0) * 0.15
                 // 关注的作者不在这里加分——加分会让他们整片霸榜。改成排完序之后按位置插入。
-                item to (sourceScore + likeScore + viewScore + freshness + affinity + stableJitter)
+                item to (sourceScore + quality + freshness + affinity + stableJitter)
             }
             .sortedByDescending { it.second }
             .map { it.first }
@@ -436,6 +526,25 @@ class RecommendationEngine(
             "date" to 2.4
         )
         internal const val SUBSCRIBED = "__subscribed__"
+        /** 个性化召回的请求：标签 / 作者 id 接在前缀后面。 */
+        internal const val TAG_PREFIX = "__tag__:"
+        internal const val AUTHOR_PREFIX = "__author__:"
+        internal const val RECALL_TAGS = 2
+        internal const val RECALL_AUTHORS = 1
+        /** 标签 / 作者权重至少到这里才值得专门拉一页（一次本地点赞给作者 2.0、给每个标签 0.9）。 */
+        internal const val RECALL_TAG_MIN_WEIGHT = 1.5
+        internal const val RECALL_AUTHOR_MIN_WEIGHT = 2.5
+        /** 热门榜除了首页再抽一页的范围。 */
+        internal const val TRENDING_DEPTH = 6
+        /** 按月点赞榜在前几页里抽。 */
+        internal const val MONTH_TOP_PAGES = 3
+        /** 按月过滤生效时总数是一个月的量（不到一万）；超过这个数就是全站总榜。 */
+        internal const val MONTH_FILTER_MAX_TOTAL = 60_000
+        /** 质量分的先验：假设每条视频先有 400 次播放、5% 的点赞率。 */
+        internal const val QUALITY_PRIOR_VIEWS = 400.0
+        internal const val QUALITY_PRIOR_RATE = 0.05
+        /** 同一作者两条视频之间至少隔这么多条。 */
+        internal const val AUTHOR_WINDOW = 4
         /** 订阅流只是候选来源之一，不再比别的榜单重——占比由插入间隔决定。 */
         private const val SUBSCRIBED_WEIGHT = 2.8
         /** 每这么多条“发现”配一条关注作者的更新，插在这一组里的随机位置。 */
@@ -452,8 +561,8 @@ class RecommendationEngine(
         const val DEFAULT_CLASSICS_EVERY = 12
         private const val PAGE_SIZE = 36
         private const val MAX_RESULTS = 80
-        /** 首轮 6 个请求 + 点赞同步，留一点余量。 */
-        private const val MAX_PARALLEL_REQUESTS = 8
+        /** 首轮榜单 + 按月榜 + 召回约 12 个请求，再加点赞同步和老片，留一点余量。 */
+        private const val MAX_PARALLEL_REQUESTS = 16
         /**
          * 最新投稿的抽页上限。推荐流主体只要半年内的视频（更老的转进老片池，见 assemble），
          * 按每月约 6000 条、36 条一页算，半年约 1000 页；再往深抽回来的也只会被分流，白费一次请求。
@@ -461,9 +570,9 @@ class RecommendationEngine(
          */
         internal const val ARCHIVE_DEPTH = 1100
         /**
-         * 流行榜排的是同一批视频，越往后越老、越没人看；主体只要近期的，所以也不往深抽。
+         * 流行榜排的是同一批视频，越往后越老、越没人看；主体只要近期的，抽前几十页就够。
          */
-        internal const val POPULAR_DEPTH = 1000
+        internal const val POPULAR_DEPTH = 60
         internal const val SUBSCRIBED_DEPTH = 200
         /** 上限再怎么收也不低于这里，免得一次异常的空页把抽页缩回首页附近。 */
         internal const val MIN_DEPTH = 50

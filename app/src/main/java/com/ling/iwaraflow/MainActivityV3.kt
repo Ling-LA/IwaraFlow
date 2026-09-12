@@ -338,7 +338,8 @@ class MainActivityV3 : AppCompatActivity() {
         if (mode == "recommend" && currentPage == 0) {
             recommender.load(prefs.skipSeen) { result ->
                 result.onSuccess { raw ->
-                    note("推荐候选 ${raw.size} 条（抽页 ${recommender.sampledPages.joinToString(",")}）")
+                    note("推荐候选 ${raw.size} 条（抽页 ${recommender.sampledPages.joinToString(",")}）" +
+                        recommender.recallNote.takeIf { it.isNotBlank() }?.let { " 召回：$it" }.orEmpty())
                     val firstPage = minOf(recommendFirstPage, NetworkProfile.coldStartCandidates(this))
                     val first = raw.take(firstPage)
                     val rest = raw.drop(firstPage)
@@ -876,21 +877,29 @@ class MainActivityV3 : AppCompatActivity() {
         val trHeaders = settingsInput("请求头，一行一个：Authorization: Bearer xxx", translation.customHeaders, InputType.TYPE_CLASS_TEXT, multiline = true)
         val trResultPath = settingsInput("译文字段路径，例如 data.translatedText（留空自动猜）", translation.customResultPath, InputType.TYPE_CLASS_TEXT)
         val trLangPath = settingsInput("源语言字段路径（可留空）", translation.customLangPath, InputType.TYPE_CLASS_TEXT)
+        // AI 翻译：内置服务商只填 Key；选“自定义”才出现地址和模型名。
+        val vendorIds = Translator.AI_VENDORS.map { it.id }
+        val trAiVendor = Spinner(this).apply {
+            adapter = ArrayAdapter(this@MainActivityV3, android.R.layout.simple_spinner_dropdown_item, Translator.AI_VENDORS.map { it.name }.toTypedArray())
+            setSelection(vendorIds.indexOf(translation.aiVendor).coerceAtLeast(0))
+        }
         val trAiBase = settingsInput("接口地址，例如 https://api.openai.com/v1（中转站填它给的地址）", translation.endpoint, InputType.TYPE_CLASS_TEXT or InputType.TYPE_TEXT_VARIATION_URI)
         val trModel = settingsInput("模型名，例如 gpt-4o-mini、deepseek-chat、qwen-plus", translation.model, InputType.TYPE_CLASS_TEXT)
         val trHint = TextView(this).apply {
             textSize = 12f; setTextColor(0xFF607D93.toInt()); setPadding(dp(4), dp(4), 0, dp(8))
         }
-        val translationFields = listOf(trAiBase, trKey, trModel, trRegion, trAppId, trEndpoint, trCustomUrl, trMethod, trBody, trHeaders, trResultPath, trLangPath)
+        val translationFields = listOf(trAiVendor, trAiBase, trKey, trModel, trRegion, trAppId, trEndpoint, trCustomUrl, trMethod, trBody, trHeaders, trResultPath, trLangPath)
         translationFields.forEach { panel.addView(it) }
         panel.addView(trHint)
         fun showTranslationFields(provider: String) {
+            val vendor = Translator.vendor(vendorIds[trAiVendor.selectedItemPosition.coerceAtLeast(0)])
+            val customVendor = vendor.id == Translator.AI_VENDOR_CUSTOM
             val visible: List<View> = when (provider) {
                 Translator.PROVIDER_DEEPL -> listOf(trKey)
                 Translator.PROVIDER_MICROSOFT -> listOf(trKey, trRegion)
                 Translator.PROVIDER_BAIDU -> listOf(trAppId, trKey)
                 Translator.PROVIDER_LIBRE -> listOf(trEndpoint, trKey)
-                Translator.PROVIDER_OPENAI -> listOf(trAiBase, trKey, trModel)
+                Translator.PROVIDER_OPENAI -> if (customVendor) listOf(trAiVendor, trAiBase, trKey, trModel) else listOf(trAiVendor, trKey)
                 Translator.PROVIDER_CUSTOM -> listOf(trCustomUrl, trMethod, trBody, trHeaders, trResultPath, trLangPath)
                 else -> emptyList()
             }
@@ -901,9 +910,17 @@ class MainActivityV3 : AppCompatActivity() {
                 Translator.PROVIDER_MICROSOFT -> "Azure 门户里的 Translator 资源 Key；多区域资源可留空区域。"
                 Translator.PROVIDER_BAIDU -> "fanyi-api.baidu.com 的通用翻译，APP ID 和密钥在开放平台的开发者信息里。"
                 Translator.PROVIDER_LIBRE -> "POST 到 <地址>/translate；公共服务器可能要 API Key。"
-                Translator.PROVIDER_OPENAI -> "POST 到 <地址>/chat/completions，兼容 OpenAI 聊天接口的中转站、DeepSeek、通义、Kimi、硅基流动等都能用；地址写到 /v1 为止即可，留空直连 OpenAI；模型名留空用 ${Translator.DEFAULT_AI_MODEL}。"
+                Translator.PROVIDER_OPENAI ->
+                    if (customVendor) "任何兼容 OpenAI 聊天接口的中转站都能用：地址写到 /v1 为止即可（会自动补成 /chat/completions），模型名留空用 ${Translator.DEFAULT_AI_MODEL}。"
+                    else "只需填 ${vendor.name} 的 API Key。接口 ${vendor.endpoint}，模型 ${vendor.model}。"
                 else -> "返回 JSON 里译文在哪个字段用点分路径写，数字是数组下标；留空会按常见字段名猜。"
             }
+        }
+        trAiVendor.onItemSelectedListener = object : android.widget.AdapterView.OnItemSelectedListener {
+            override fun onItemSelected(parent: android.widget.AdapterView<*>?, view: View?, position: Int, id: Long) {
+                showTranslationFields(providerIds[providerSpinner.selectedItemPosition])
+            }
+            override fun onNothingSelected(parent: android.widget.AdapterView<*>?) {}
         }
         showTranslationFields(translation.provider)
         providerSpinner.onItemSelectedListener = object : android.widget.AdapterView.OnItemSelectedListener {
@@ -984,7 +1001,8 @@ class MainActivityV3 : AppCompatActivity() {
                 customHeaders = trHeaders.text.toString(),
                 customResultPath = trResultPath.text.toString().trim(),
                 customLangPath = trLangPath.text.toString().trim(),
-                model = trModel.text.toString().trim()
+                model = trModel.text.toString().trim(),
+                aiVendor = vendorIds[trAiVendor.selectedItemPosition.coerceAtLeast(0)]
             )
             prefs.translation = newTranslation
             Translator.configure(newTranslation)

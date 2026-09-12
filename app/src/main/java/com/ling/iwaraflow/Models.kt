@@ -88,13 +88,26 @@ data class LoginResult(
     val message: String
 )
 
+/**
+ * 本地口味画像：作者（按名字和 id 两套键）、标签各自的权重。权重可以为负——
+ * 起播后很快划走会往下压，所以既有“喜欢什么”也有“不喜欢什么”。
+ */
 data class PreferenceProfile(
     val authorWeights: Map<String, Double>,
-    val tagWeights: Map<String, Double>
+    val tagWeights: Map<String, Double>,
+    val authorIdWeights: Map<String, Double> = emptyMap()
 ) {
     fun score(item: VideoItem): Double {
-        val author = authorWeights[item.author.lowercase()] ?: 0.0
+        val byId = item.authorId.takeIf { it.isNotBlank() }?.let { authorIdWeights[it] }
+        val author = byId ?: authorWeights[item.author.lowercase()] ?: 0.0
         val tags = item.tags.sumOf { tagWeights[it.lowercase()] ?: 0.0 }
         return author + tags
     }
+
+    /** 权重最高的几个标签（至少 [minWeight]），给个性化召回用。 */
+    fun topTags(count: Int, minWeight: Double): List<String> =
+        tagWeights.entries.filter { it.value >= minWeight }.sortedByDescending { it.value }.take(count).map { it.key }
+
+    fun topAuthorIds(count: Int, minWeight: Double): List<String> =
+        authorIdWeights.entries.filter { it.value >= minWeight }.sortedByDescending { it.value }.take(count).map { it.key }
 }

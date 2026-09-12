@@ -47,6 +47,8 @@ class LikedVideoSync(
         while (!closed && page < MAX_PAGES) {
             val result = runCatching { api.getFavoritesPageBlocking(page) }.getOrNull() ?: return marked
             history.markSeen(result.videos.map { it.id })
+            // 最近的几百个点赞同时作为口味画像的种子（作者、标签），新装的用户马上有偏好可推。
+            if (page < SEED_PAGES) history.seedCloudLikes(result.videos)
             marked += result.videos.size
             if (!result.hasMore) break
             page += 1
@@ -63,6 +65,8 @@ class LikedVideoSync(
     companion object {
         /** 50 条一页，最多读到 5000 个点赞。 */
         const val MAX_PAGES = 100
+        /** 前几页（最近 500 个点赞）种进画像；再往前的只标记已看。 */
+        const val SEED_PAGES = 10
         const val SYNC_INTERVAL_MS = 6L * 60L * 60L * 1000L
     }
 }

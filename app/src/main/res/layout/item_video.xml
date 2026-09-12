@@ -295,6 +295,41 @@
         android:layout_marginEnd="16dp"
         android:visibility="gone" />
 
+    <!-- 暂停时进度条右上方的剩余时长；位置由 PauseSeekBar 跟着进度条摆。 -->
+    <TextView
+        android:id="@+id/pauseRemaining"
+        android:layout_width="wrap_content"
+        android:layout_height="wrap_content"
+        android:layout_gravity="top|end"
+        android:layout_marginEnd="16dp"
+        android:background="@drawable/bg_pause_controls"
+        android:includeFontPadding="false"
+        android:paddingStart="8dp"
+        android:paddingTop="3dp"
+        android:paddingEnd="8dp"
+        android:paddingBottom="3dp"
+        android:textColor="#FFFFFFFF"
+        android:textSize="11sp"
+        android:visibility="gone" />
+
+    <!-- 拖动进度条时屏幕下方居中显示「当前位置 / 总时长」。 -->
+    <TextView
+        android:id="@+id/seekPreview"
+        android:layout_width="wrap_content"
+        android:layout_height="wrap_content"
+        android:layout_gravity="bottom|center_horizontal"
+        android:layout_marginBottom="150dp"
+        android:background="#99000000"
+        android:includeFontPadding="false"
+        android:paddingStart="16dp"
+        android:paddingTop="8dp"
+        android:paddingEnd="16dp"
+        android:paddingBottom="8dp"
+        android:textColor="#FFFFFFFF"
+        android:textSize="17sp"
+        android:textStyle="bold"
+        android:visibility="gone" />
+
     <!-- 排在最后：动画要盖在操作栏上面，否则在按钮位置播就被按钮挡住了。
          它不可点击，触摸事件照常穿过去。 -->
     <com.ling.iwaraflow.ReactionBurstView

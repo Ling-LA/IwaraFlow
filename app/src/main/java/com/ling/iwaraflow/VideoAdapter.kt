@@ -84,6 +84,10 @@ class VideoAdapter(
 
     fun setActive(position: Int) {
         if (released) return
+        if (position != activePosition) {
+            // 翻页离开的那张卡片：在停播之前先记下“看了多久 / 是不是很快划走”。
+            holders.toList().forEach { if (it.bindingAdapterPosition == activePosition) it.noteSwipedAway() }
+        }
         activePosition = position
         if (!playbackEnabled) return
         claimPlaybackOwnership(this)
@@ -278,6 +282,8 @@ class VideoAdapter(
         private var lastTap = 0L
 
         private val touchSlop = ViewConfiguration.get(itemView.context).scaledTouchSlop
+        /** 加速进行中允许手指挪动的距离：约 48dp，比点按阈值宽得多。 */
+        private val boostSlop = touchSlop * 6
         private var downX = 0f
         private var downY = 0f
         private var touchMoved = false
@@ -297,10 +303,58 @@ class VideoAdapter(
                         p.setPlaybackSpeed(2f)
                         speedBoosting = true
                         speedIndicator.visibility = View.VISIBLE
+                        // 加速已经开始：这根手指归本卡片管，翻页控件不许再抢走
+                        // （抢走就是一个 CANCEL，加速立刻停）。
+                        itemView.parent?.requestDisallowInterceptTouchEvent(true)
                     }
                 }
             }
         }
+
+        // ---------------------------------------------------------------- 观看行为
+
+        /** 这次绑定里真正播出画面的累计毫秒数（按墙钟算，暂停不计）。 */
+        private var playedMs = 0L
+        private var playingSince = 0L
+        private var readyOnce = false
+        private var endedOnce = false
+        private var hadError = false
+        private var signalsDone = false
+
+        private fun resetWatchSignals() {
+            playedMs = 0L; playingSince = 0L
+            readyOnce = false; endedOnce = false; hadError = false; signalsDone = false
+        }
+
+        private fun notePlaying(isPlaying: Boolean) {
+            val now = System.currentTimeMillis()
+            if (isPlaying) playingSince = now
+            else if (playingSince > 0L) { playedMs += now - playingSince; playingSince = 0L }
+        }
+
+        /**
+         * 离开这条视频时把观看行为记进画像：看得久（或看过一半）算喜欢，起播后很快划走算不喜欢。
+         * 只有播放器真的 READY 过、没有报错才算数——加载失败后划走不是态度，是网络问题。
+         * [swipedAway] 为 false 时（切后台、开别的页面）只记正面信号，不记划走。
+         */
+        private fun recordWatchSignals(swipedAway: Boolean) {
+            val item = bound ?: return
+            if (signalsDone) return
+            signalsDone = true
+            val p = player
+            if (p?.isPlaying == true) notePlaying(false)
+            val duration = p?.duration?.takeIf { it > 0L } ?: 0L
+            val position = p?.currentPosition?.coerceAtLeast(0L) ?: 0L
+            val ratio = if (duration > 0L) position.toDouble() / duration else 0.0
+            when {
+                hadError || !readyOnce || endedOnce -> Unit
+                playedMs >= LONG_WATCH_MS || ratio >= 0.5 -> history.recordInteraction(item, "watch", 0.8)
+                swipedAway && playedMs < QUICK_SKIP_MS && ratio < 0.2 -> history.recordInteraction(item, "skip", -0.5)
+            }
+        }
+
+        /** 用户把这张卡片划走了（翻页），在停播之前先记下行为。 */
+        fun noteSwipedAway() = recordWatchSignals(swipedAway = true)
 
         fun bind(item: VideoItem) {
             release()
@@ -311,8 +365,13 @@ class VideoAdapter(
             applyVideoInsets()
             comments.visibility = if (onComments == null) View.GONE else View.VISIBLE
             comments.setOnClickListener { onComments?.invoke(item) }
-            title.setOnClickListener(onInfo?.let { open -> View.OnClickListener { open(item) } })
+            // 标题和标签行都能打开简介。
+            val openInfo = onInfo?.let { open -> View.OnClickListener { open(item) } }
+            title.setOnClickListener(openInfo)
             title.isClickable = onInfo != null
+            tags.setOnClickListener(openInfo)
+            tags.isClickable = onInfo != null
+            resetWatchSignals()
             item.localFavorite = history.isLocalFavorite(item.id)
             applyDisplayPrefs()
             skipBack.setOnClickListener { skipBy(-prefs.skipSeconds * 1000L) }
@@ -380,20 +439,31 @@ class VideoAdapter(
                         true
                     }
                     MotionEvent.ACTION_MOVE -> {
-                        if (!touchMoved && (abs(event.x - downX) > touchSlop || abs(event.y - downY) > touchSlop)) {
+                        val dx = abs(event.x - downX)
+                        val dy = abs(event.y - downY)
+                        if (speedBoosting) {
+                            // 长按加速时手指难免慢慢挪动，按普通的点按阈值判“移动”会把加速掐掉。
+                            // 放宽到大得多的距离，真的想滑走再停。
+                            if (dx > boostSlop || dy > boostSlop) {
+                                touchMoved = true
+                                stopSpeedBoost()
+                                itemView.parent?.requestDisallowInterceptTouchEvent(false)
+                            }
+                        } else if (!touchMoved && (dx > touchSlop || dy > touchSlop)) {
                             touchMoved = true
                             tapHandler.removeCallbacks(holdToSpeed)
-                            if (speedBoosting) stopSpeedBoost()
                         }
                         true
                     }
                     MotionEvent.ACTION_UP -> {
                         tapHandler.removeCallbacks(holdToSpeed)
+                        itemView.parent?.requestDisallowInterceptTouchEvent(false)
                         if (speedBoosting) stopSpeedBoost() else if (!touchMoved) v.performClick()
                         true
                     }
                     MotionEvent.ACTION_CANCEL -> {
                         tapHandler.removeCallbacks(holdToSpeed)
+                        itemView.parent?.requestDisallowInterceptTouchEvent(false)
                         if (speedBoosting) stopSpeedBoost()
                         touchMoved = true
                         true
@@ -415,7 +485,12 @@ class VideoAdapter(
                 playWhenReady = false
                 volume = 0f
                 addListener(object : Player.Listener {
+                    override fun onIsPlayingChanged(isPlaying: Boolean) {
+                        if (bound?.id == item.id) notePlaying(isPlaying)
+                    }
+
                     override fun onPlayerError(error: PlaybackException) {
+                        hadError = true
                         // 记进诊断：黑屏、播不出来这类反馈要靠它看出是解码、地址还是文件的问题。
                         val cause = error.cause
                         NavigationDiagnostics.note(
@@ -439,7 +514,8 @@ class VideoAdapter(
                     }
 
                     override fun onPlaybackStateChanged(playbackState: Int) {
-                        if (playbackState == Player.STATE_READY) recoveryAttempts = 0
+                        if (playbackState == Player.STATE_READY) { recoveryAttempts = 0; readyOnce = true }
+                        if (playbackState == Player.STATE_ENDED) endedOnce = true
                         if (playbackState == Player.STATE_READY && active) {
                             val pos = bindingAdapterPosition
                             if (pos != RecyclerView.NO_POSITION) scheduleIdlePreload(pos)
@@ -508,7 +584,7 @@ class VideoAdapter(
                 startWatchdog()
             } else {
                 if (!active && player == null) return
-                if (active) persistHistory(completed = false)
+                if (active) { recordWatchSignals(swipedAway = false); persistHistory(completed = false) }
                 active = false
                 generation++
                 pendingSingleTap?.let { tapHandler.removeCallbacks(it) }
@@ -791,6 +867,7 @@ class VideoAdapter(
         fun isPlaying(): Boolean = active && player?.isPlaying == true
 
         fun release() {
+            if (active) recordWatchSignals(swipedAway = false)
             persistHistory(completed = false)
             active = false
             tapHandler.removeCallbacks(holdToSpeed)
@@ -865,6 +942,10 @@ class VideoAdapter(
         const val LANDSCAPE_LIFT = 0.24f
         /** 同一条视频最多自动刷新几次播放地址，避免真的放不了时无限重试。 */
         const val MAX_ERROR_RECOVERIES = 2
+        /** 起播后不到这么久就划走算“快速划走”（负反馈）。 */
+        const val QUICK_SKIP_MS = 4_000L
+        /** 真播了这么久算“看得久”（正反馈），看过一半也算。 */
+        const val LONG_WATCH_MS = 45_000L
         const val MIN_BUFFER_MS = 12_000
         const val MAX_BUFFER_MS = 25_000
         const val BUFFER_FOR_PLAYBACK_MS = 1_200

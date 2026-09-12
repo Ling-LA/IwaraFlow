@@ -107,7 +107,9 @@
         android:layout_height="1dp"
         android:background="#FFEEF2F6" />
 
-    <FrameLayout
+    <!-- 两个页签的内容区：左右滑动切换简介 / 评论。 -->
+    <com.ling.iwaraflow.SwipeTabsLayout
+        android:id="@+id/panelPages"
         android:layout_width="match_parent"
         android:layout_height="0dp"
         android:layout_weight="1">
@@ -193,7 +195,7 @@
                     android:textSize="14sp" />
             </LinearLayout>
         </ScrollView>
-    </FrameLayout>
+    </com.ling.iwaraflow.SwipeTabsLayout>
 
     <!-- 正在回复谁。点“回复”后出现，点 ✕ 取消回到发评论。 -->
     <LinearLayout

@@ -29,8 +29,10 @@ data class TranslationConfig(
     val customHeaders: String = "",
     val customResultPath: String = "",
     val customLangPath: String = "",
-    /** AI 翻译用的模型名，留空用 [Translator.DEFAULT_AI_MODEL]。 */
-    val model: String = ""
+    /** AI 翻译用的模型名（只在自定义服务商时生效），留空用 [Translator.DEFAULT_AI_MODEL]。 */
+    val model: String = "",
+    /** AI 翻译选的服务商，见 [Translator.AI_VENDORS]；内置服务商只要填 Key。 */
+    val aiVendor: String = Translator.AI_VENDOR_OPENAI
 )
 
 /**
@@ -78,6 +80,38 @@ object Translator {
     /** AI 翻译的默认接口和模型：不填地址就直连 OpenAI。 */
     const val DEFAULT_AI_ENDPOINT = "https://api.openai.com/v1"
     const val DEFAULT_AI_MODEL = "gpt-4o-mini"
+
+    /** 一家 AI 服务商：接口地址和默认模型都定好，用户只填 Key。 */
+    data class AiVendor(val id: String, val name: String, val endpoint: String, val model: String)
+
+    const val AI_VENDOR_OPENAI = "openai"
+    const val AI_VENDOR_CUSTOM = "custom"
+
+    /** 内置的主流服务商（都是 OpenAI 兼容的聊天接口），最后一项是自定义。 */
+    val AI_VENDORS = listOf(
+        AiVendor(AI_VENDOR_OPENAI, "OpenAI", DEFAULT_AI_ENDPOINT, DEFAULT_AI_MODEL),
+        AiVendor("deepseek", "DeepSeek", "https://api.deepseek.com/v1", "deepseek-chat"),
+        AiVendor("qwen", "通义千问（阿里云百炼）", "https://dashscope.aliyuncs.com/compatible-mode/v1", "qwen-plus"),
+        AiVendor("moonshot", "Kimi（Moonshot）", "https://api.moonshot.cn/v1", "moonshot-v1-8k"),
+        AiVendor("zhipu", "智谱 GLM", "https://open.bigmodel.cn/api/paas/v4", "glm-4-flash"),
+        AiVendor("siliconflow", "硅基流动 SiliconFlow", "https://api.siliconflow.cn/v1", "Qwen/Qwen2.5-7B-Instruct"),
+        AiVendor("gemini", "Google Gemini", "https://generativelanguage.googleapis.com/v1beta/openai", "gemini-2.0-flash"),
+        AiVendor("xai", "xAI Grok", "https://api.x.ai/v1", "grok-3-mini"),
+        AiVendor("openrouter", "OpenRouter", "https://openrouter.ai/api/v1", "openai/gpt-4o-mini"),
+        AiVendor(AI_VENDOR_CUSTOM, "自定义（OpenAI 兼容接口）", "", "")
+    )
+
+    fun vendor(id: String): AiVendor = AI_VENDORS.firstOrNull { it.id == id } ?: AI_VENDORS.first()
+
+    /** 这份配置实际会请求的接口地址和模型：内置服务商用预设，自定义用用户填的。 */
+    internal fun aiTarget(c: TranslationConfig): Pair<String, String> {
+        val v = vendor(c.aiVendor)
+        return if (v.id == AI_VENDOR_CUSTOM) openAiUrl(c.endpoint) to c.model.trim().ifBlank { DEFAULT_AI_MODEL }
+        else openAiUrl(v.endpoint) to v.model
+    }
+
+    /** 翻译失败时把原因交给页面记进诊断（不含原文）。 */
+    @Volatile var onFailure: ((String) -> Unit)? = null
 
     /** 发给模型的系统提示：只要译文，别的都不要。 */
     const val AI_PROMPT = "你是翻译引擎。把用户发来的内容翻译成简体中文：保留原有的换行、表情、链接和 @用户名；" +
@@ -144,6 +178,10 @@ object Translator {
         io.execute {
             val result = runCatching { fetch(text, snapshot) }
             result.onSuccess { if (snapshot == config) synchronized(cache) { cache[text] = it } }
+            result.onFailure { error ->
+                val where = if (snapshot.provider == PROVIDER_OPENAI) "${snapshot.provider}/${snapshot.aiVendor} ${aiTarget(snapshot).first.substringAfter("://").substringBefore('/')}" else snapshot.provider
+                onFailure?.invoke("翻译失败（$where）：${error.javaClass.simpleName} ${error.message?.take(160)}")
+            }
             main.post { callback(result) }
         }
     }
@@ -323,22 +361,26 @@ object Translator {
     // ---- AI 翻译（OpenAI 兼容的聊天接口）
 
     /**
-     * 把用户填的地址补成 `…/chat/completions`：填到域名、填到 `/v1`、填完整路径都行。
-     * 中转站大多照搬 OpenAI 的路径；个别自定义前缀（比如 `/api/v3`）也按“版本号结尾”处理。
+     * 把用户填的地址补成 `…/chat/completions`：只填域名就按 OpenAI 的 `/v1` 路径；
+     * 带了路径（`/v1`、`/api/v3`、`/v1beta/openai` 这类）就在后面直接接上；填了完整路径原样用。
      */
     internal fun openAiUrl(base: String): String {
         val trimmed = base.trim().ifBlank { DEFAULT_AI_ENDPOINT }.trimEnd('/')
+        val path = trimmed.substringAfter("://", trimmed).substringAfter('/', "")
         return when {
             trimmed.endsWith("/chat/completions") -> trimmed
-            Regex("/v\\d+(beta)?$").containsMatchIn(trimmed) -> "$trimmed/chat/completions"
+            path.isNotBlank() -> "$trimmed/chat/completions"
             else -> "$trimmed/v1/chat/completions"
         }
     }
 
+    /**
+     * 请求体只带模型和消息：不带 temperature 之类的采样参数——推理类模型（o 系列、gpt-5 等）
+     * 不接受非默认的 temperature，带上就是 400。
+     */
     internal fun openAiBody(text: String, model: String): String =
         JSONObject()
             .put("model", model.trim().ifBlank { DEFAULT_AI_MODEL })
-            .put("temperature", 0.2)
             .put("messages", JSONArray()
                 .put(JSONObject().put("role", "system").put("content", AI_PROMPT))
                 .put(JSONObject().put("role", "user").put("content", text)))
@@ -346,9 +388,10 @@ object Translator {
 
     private fun fetchOpenAi(text: String, c: TranslationConfig): Translation {
         requireKey(c.key, "AI 接口的 API Key")
-        val request = Request.Builder().url(openAiUrl(c.endpoint))
+        val (url, model) = aiTarget(c)
+        val request = Request.Builder().url(url)
             .header("Authorization", "Bearer ${c.key.trim()}")
-            .post(openAiBody(text, c.model).toRequestBody(jsonType))
+            .post(openAiBody(text, model).toRequestBody(jsonType))
             .build()
         return parseOpenAi(execute(request))
     }

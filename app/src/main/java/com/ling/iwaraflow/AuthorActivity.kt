@@ -47,7 +47,6 @@ class AuthorActivity : AppCompatActivity() {
     private var loadingPage = false
     private var noMore = false
     private var inFeed = false
-    private var adjustingLoopEdge = false
     private var exiting = false
     private var descriptionExpanded = false
     private val pageSize = 36
@@ -125,14 +124,12 @@ class AuthorActivity : AppCompatActivity() {
         pager.registerOnPageChangeCallback(object : ViewPager2.OnPageChangeCallback() {
             override fun onPageSelected(position: Int) {
                 comments.close()
-                if (!adjustingLoopEdge) feedAdapter.setActive(position)
+                feedAdapter.setActive(position)
                 if (!noMore && !loadingPage && position >= feedAdapter.itemCount - 5) loadNextPage()
             }
-
-            override fun onPageScrollStateChanged(state: Int) {
-                if (state == ViewPager2.SCROLL_STATE_IDLE) normalizeLoopEdge()
-            }
         })
+        // 最后一条再往上拉：明确提示没有更多作品，而不是绕回第一条。
+        EndOfFeedHint.install(pager) { !noMore }
 
         findViewById<View>(R.id.authorBack).setOnClickListener { handleBack() }
         findViewById<View>(R.id.authorShare).setOnClickListener { shareAuthor() }
@@ -253,27 +250,12 @@ class AuthorActivity : AppCompatActivity() {
         }
     }
 
-    private fun buildFeedItems(): List<VideoItem> {
-        if (!noMore || playableWorks.size <= 1) return playableWorks.toList()
-        return buildList {
-            add(playableWorks.last())
-            addAll(playableWorks)
-            add(playableWorks.first())
-        }
-    }
-
-    private fun realAdapterPosition(videoId: String): Int {
-        val realIndex = playableWorks.indexOfFirst { it.id == videoId }
-        if (realIndex < 0) return 0
-        return if (noMore && playableWorks.size > 1) realIndex + 1 else realIndex
-    }
-
     private fun rebuildFeed(currentId: String?) {
-        val list = buildFeedItems()
+        val list = playableWorks.toList()
         feedAdapter.replace(list)
         if (list.isEmpty()) return
-        val desiredId = currentId ?: playableWorks.firstOrNull()?.id.orEmpty()
-        val position = realAdapterPosition(desiredId).coerceIn(0, list.lastIndex)
+        val desiredId = currentId ?: list.first().id
+        val position = list.indexOfFirst { it.id == desiredId }.coerceIn(0, list.lastIndex)
         pager.setCurrentItem(position, false)
         feedAdapter.setActive(position)
     }
@@ -283,31 +265,14 @@ class AuthorActivity : AppCompatActivity() {
         rebuildFeed(currentId)
     }
 
-    private fun normalizeLoopEdge() {
-        if (!inFeed || !noMore || playableWorks.size <= 1 || adjustingLoopEdge || exiting) return
-        val current = pager.currentItem
-        val lastSentinel = feedAdapter.itemCount - 1
-        val target = when (current) {
-            0 -> playableWorks.size
-            lastSentinel -> 1
-            else -> return
-        }
-        adjustingLoopEdge = true
-        pager.setCurrentItem(target, false)
-        feedAdapter.setActive(target)
-        adjustingLoopEdge = false
-    }
-
     private fun openWork(item: VideoItem) {
         if (exiting) return
-        val realIndex = playableWorks.indexOfFirst { it.id == item.id }
-        if (realIndex < 0) return
+        val index = playableWorks.indexOfFirst { it.id == item.id }
+        if (index < 0) return
         inFeed = true
         listPage.visibility = View.GONE
         feedPage.visibility = View.VISIBLE
-        val feed = buildFeedItems()
-        feedAdapter.replace(feed)
-        val index = if (noMore && playableWorks.size > 1) realIndex + 1 else realIndex
+        feedAdapter.replace(playableWorks.toList())
         pager.setCurrentItem(index, false)
         feedAdapter.setActive(index)
         if (lifecycle.currentState.isAtLeast(Lifecycle.State.RESUMED)) feedAdapter.resumeActive()
@@ -359,11 +324,12 @@ class AuthorActivity : AppCompatActivity() {
         finish()
     }
 
+    /** 一条播完自动下一条；已经是最后一条就停在这里并提示，不绕回开头。 */
     private fun nextWork(position: Int) {
         if (exiting) return
         if (position + 1 < feedAdapter.itemCount) pager.setCurrentItem(position + 1, true)
         else if (!noMore) loadNextPage()
-        else if (feedAdapter.itemCount > 0) pager.setCurrentItem(if (playableWorks.size > 1) 1 else 0, true)
+        else EndOfFeedHint.show(this)
     }
 
     /** 分享作者名片：资料还没回来时先用进入本页时带过来的名字和用户名。 */

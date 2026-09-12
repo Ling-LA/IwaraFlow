@@ -4,6 +4,7 @@ import android.content.Context
 import android.content.res.ColorStateList
 import android.util.AttributeSet
 import android.view.View
+import android.widget.TextView
 import androidx.appcompat.widget.AppCompatSeekBar
 import androidx.media3.common.Player
 import androidx.media3.ui.PlayerView
@@ -49,7 +50,11 @@ class PauseSeekBar @JvmOverloads constructor(
                 if (!fromUser) return
                 val p = observedPlayer ?: findPlayer()
                 val duration = p?.duration ?: 0L
-                if (duration > 0L) p?.seekTo((duration * value / max.toDouble()).toLong())
+                if (duration > 0L) {
+                    val target = (duration * value / max.toDouble()).toLong()
+                    p?.seekTo(target)
+                    showSeekPreview(target, duration)
+                }
             }
 
             override fun onStartTrackingTouch(seekBar: android.widget.SeekBar?) {
@@ -58,9 +63,42 @@ class PauseSeekBar @JvmOverloads constructor(
 
             override fun onStopTrackingTouch(seekBar: android.widget.SeekBar?) {
                 dragging = false
+                preview(cardRoot())?.visibility = View.GONE
                 refreshFromPlayer()
             }
         })
+    }
+
+    /** 拖动时屏幕下方居中：当前位置 / 总时长。 */
+    private fun showSeekPreview(position: Long, duration: Long) {
+        val view = preview(cardRoot()) ?: return
+        view.text = "${formatTime(position)} / ${formatTime(duration)}"
+        if (view.visibility != View.VISIBLE) view.visibility = View.VISIBLE
+    }
+
+    /** 暂停时进度条右上方：还剩多久。 */
+    private fun placeRemaining(root: View, position: Long, duration: Long) {
+        val label = remaining(root) ?: return
+        label.text = "-${formatTime((duration - position).coerceAtLeast(0L))}"
+        if (label.visibility != View.VISIBLE) label.visibility = View.VISIBLE
+        var labelHeight = label.height
+        if (labelHeight <= 0) {
+            label.measure(
+                View.MeasureSpec.makeMeasureSpec(root.width, View.MeasureSpec.AT_MOST),
+                View.MeasureSpec.makeMeasureSpec(root.height, View.MeasureSpec.AT_MOST)
+            )
+            labelHeight = label.measuredHeight
+        }
+        val gap = (4f * resources.displayMetrics.density).roundToInt()
+        label.translationY = (translationY - labelHeight - gap).coerceAtLeast(0f)
+    }
+
+    private fun remaining(root: View?): TextView? = root?.findViewById(R.id.pauseRemaining)
+    private fun preview(root: View?): TextView? = root?.findViewById(R.id.seekPreview)
+
+    private fun hideExtras(root: View?) {
+        remaining(root)?.visibility = View.GONE
+        preview(root)?.visibility = View.GONE
     }
 
     override fun onAttachedToWindow() {
@@ -74,6 +112,7 @@ class PauseSeekBar @JvmOverloads constructor(
         observedPlayer = null
         visibility = View.GONE
         controls(cardRoot())?.visibility = View.GONE
+        hideExtras(cardRoot())
         restoreChrome()
         super.onDetachedFromWindow()
     }
@@ -88,6 +127,7 @@ class PauseSeekBar @JvmOverloads constructor(
         if (root == null || !paused || duration <= 0L) {
             visibility = View.GONE
             controls(root)?.visibility = View.GONE
+            hideExtras(root)
             restoreChrome()
             return
         }
@@ -95,6 +135,7 @@ class PauseSeekBar @JvmOverloads constructor(
         if (root.findViewById<View>(R.id.infoPanel)?.visibility == View.GONE) {
             visibility = View.GONE
             controls(root)?.visibility = View.GONE
+            hideExtras(root)
             chromeHidden = false
             return
         }
@@ -103,10 +144,19 @@ class PauseSeekBar @JvmOverloads constructor(
         placeUnderTags(root)
         placeControls(root)
         visibility = View.VISIBLE
+        val position = p!!.currentPosition.coerceIn(0L, duration)
         if (!dragging) {
-            val position = p!!.currentPosition.coerceIn(0L, duration)
             progress = ((position * max.toDouble()) / duration).roundToInt().coerceIn(0, max)
         }
+        placeRemaining(root, position, duration)
+    }
+
+    private fun formatTime(ms: Long): String {
+        val totalSeconds = (ms.coerceAtLeast(0L) + 500L) / 1000L
+        val hours = totalSeconds / 3600
+        val minutes = (totalSeconds % 3600) / 60
+        val seconds = totalSeconds % 60
+        return if (hours > 0) "%d:%02d:%02d".format(hours, minutes, seconds) else "%d:%02d".format(minutes, seconds)
     }
 
     /** 停在标签下面那一行，够不到时退回到底部固定位置。 */

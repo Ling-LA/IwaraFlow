@@ -94,6 +94,10 @@ class CommentsPanel(
         root.findViewById<View>(R.id.panelHeader).setOnTouchListener(drag)
         tabInfo.setOnClickListener { selectTab(Tab.INFO) }
         tabComments.setOnClickListener { selectTab(Tab.COMMENTS) }
+        // 内容区左右滑：向左是下一个页签（评论），向右回到简介。
+        root.findViewById<SwipeTabsLayout>(R.id.panelPages).onSwipe = { direction ->
+            selectTab(if (direction < 0) Tab.COMMENTS else Tab.INFO)
+        }
         input.setOnClickListener { openInput() }
         renderInput()
     }

@@ -8,7 +8,7 @@ import android.database.sqlite.SQLiteOpenHelper
 /** 一条下载记录：哪个视频、哪个清晰度、系统下载器给的编号。 */
 data class DownloadRecord(val item: VideoItem, val quality: String, val downloadId: Long)
 
-class HistoryStore(context: Context) : SQLiteOpenHelper(context, "iwaraflow.db", null, 5) {
+class HistoryStore(context: Context) : SQLiteOpenHelper(context, "iwaraflow.db", null, 6) {
     override fun onCreate(db: SQLiteDatabase) {
         db.execSQL(
             """CREATE TABLE history(
@@ -39,7 +39,8 @@ class HistoryStore(context: Context) : SQLiteOpenHelper(context, "iwaraflow.db",
                 author TEXT NOT NULL,
                 tags TEXT NOT NULL,
                 weight REAL NOT NULL,
-                created_at INTEGER NOT NULL
+                created_at INTEGER NOT NULL,
+                author_id TEXT NOT NULL DEFAULT ''
             )""".trimIndent()
         )
         db.execSQL(
@@ -82,6 +83,10 @@ class HistoryStore(context: Context) : SQLiteOpenHelper(context, "iwaraflow.db",
             for (column in listOf("author_id TEXT NOT NULL DEFAULT ''", "author_username TEXT NOT NULL DEFAULT ''", "description TEXT NOT NULL DEFAULT ''")) {
                 try { db.execSQL("ALTER TABLE downloads ADD COLUMN $column") } catch (_: Throwable) { }
             }
+        }
+        if (oldVersion < 6) {
+            // 5 → 6：行为记录带上作者 id，画像才能按作者 id 去召回作品。
+            try { db.execSQL("ALTER TABLE interactions ADD COLUMN author_id TEXT NOT NULL DEFAULT ''") } catch (_: Throwable) { }
         }
     }
 
@@ -247,18 +252,57 @@ class HistoryStore(context: Context) : SQLiteOpenHelper(context, "iwaraflow.db",
 
     @Synchronized
     fun recordInteraction(item: VideoItem, action: String, weight: Double) {
+        writableDatabase.insert("interactions", null, interactionValues(item, action, weight, System.currentTimeMillis()))
+        trimInteractions()
+    }
+
+    private fun trimInteractions() {
+        writableDatabase.execSQL(
+            "DELETE FROM interactions WHERE id NOT IN (SELECT id FROM interactions ORDER BY created_at DESC LIMIT $MAX_INTERACTIONS)"
+        )
+    }
+
+    /**
+     * 把 Iwara 官方的历史点赞作为画像的种子：一个用了 Iwara 多年的账号第一次装上就有准确的偏好。
+     * 权重比本地实时点赞低，每条视频只记一次（同步是反复跑的）。返回新记入的条数。
+     */
+    @Synchronized
+    fun seedCloudLikes(items: List<VideoItem>): Int {
+        if (items.isEmpty()) return 0
+        val db = writableDatabase
+        val now = System.currentTimeMillis()
+        var added = 0
+        db.beginTransaction()
+        try {
+            items.forEach { item ->
+                if (item.id.isBlank()) return@forEach
+                val exists = db.query(
+                    "interactions", arrayOf("id"), "video_id=? AND action=?", arrayOf(item.id, ACTION_CLOUD_LIKE),
+                    null, null, null, "1"
+                ).use { it.moveToFirst() }
+                if (exists) return@forEach
+                db.insert("interactions", null, interactionValues(item, ACTION_CLOUD_LIKE, CLOUD_LIKE_WEIGHT, now))
+                added++
+            }
+            db.setTransactionSuccessful()
+        } finally {
+            db.endTransaction()
+        }
+        if (added > 0) trimInteractions()
+        return added
+    }
+
+    private fun interactionValues(item: VideoItem, action: String, weight: Double, now: Long): ContentValues {
         val values = ContentValues().apply {
             put("video_id", item.id)
             put("action", action)
             put("author", item.author)
+            put("author_id", item.authorId)
             put("tags", item.tags.joinToString("\u001F"))
             put("weight", weight)
-            put("created_at", System.currentTimeMillis())
+            put("created_at", now)
         }
-        writableDatabase.insert("interactions", null, values)
-        writableDatabase.execSQL(
-            "DELETE FROM interactions WHERE id NOT IN (SELECT id FROM interactions ORDER BY created_at DESC LIMIT 1000)"
-        )
+        return values
     }
 
     @Synchronized
@@ -304,29 +348,38 @@ class HistoryStore(context: Context) : SQLiteOpenHelper(context, "iwaraflow.db",
         return out
     }
 
+    /**
+     * 长期口味 + 当前这一会儿的兴趣。所有行为按时间衰减（一个月折半）；最近 [SESSION_WINDOW_MS]
+     * 里发生的再乘 [SESSION_BOOST]——连着看了几条同一主题，后面的推荐就该马上跟上。
+     * 官方点赞的种子不算“当前兴趣”，否则一次同步进来几百条就把画像冲成旧口味。
+     */
     @Synchronized
-    fun preferenceProfile(): PreferenceProfile {
+    fun preferenceProfile(now: Long = System.currentTimeMillis()): PreferenceProfile {
         val author = HashMap<String, Double>()
+        val authorIds = HashMap<String, Double>()
         val tags = HashMap<String, Double>()
         readableDatabase.query(
             "interactions",
-            arrayOf("author", "tags", "weight", "created_at"),
-            null, null, null, null, "created_at DESC", "500"
+            arrayOf("author", "tags", "weight", "created_at", "author_id", "action"),
+            null, null, null, null, "created_at DESC", PROFILE_ROWS.toString()
         ).use { c ->
-            val now = System.currentTimeMillis()
             while (c.moveToNext()) {
-                val ageDays = ((now - c.getLong(3)).coerceAtLeast(0) / 86_400_000.0)
+                val at = c.getLong(3)
+                val ageDays = ((now - at).coerceAtLeast(0) / 86_400_000.0)
                 val decay = 1.0 / (1.0 + ageDays / 30.0)
-                val w = c.getDouble(2) * decay
+                val session = if (now - at in 0..SESSION_WINDOW_MS && c.getString(5) != ACTION_CLOUD_LIKE) SESSION_BOOST else 1.0
+                val w = c.getDouble(2) * decay * session
                 val a = c.getString(0).lowercase()
                 author[a] = (author[a] ?: 0.0) + w
+                val id = c.getString(4).orEmpty()
+                if (id.isNotBlank()) authorIds[id] = (authorIds[id] ?: 0.0) + w
                 splitTags(c.getString(1)).forEach { tag ->
                     val key = tag.lowercase()
                     tags[key] = (tags[key] ?: 0.0) + w * 0.45
                 }
             }
         }
-        return PreferenceProfile(author, tags)
+        return PreferenceProfile(author, tags, authorIds)
     }
 
     /**
@@ -341,6 +394,17 @@ class HistoryStore(context: Context) : SQLiteOpenHelper(context, "iwaraflow.db",
         raw?.split("\u001F")?.filter { it.isNotBlank() } ?: emptyList()
 
     companion object {
+        /** 官方历史点赞种进画像时用的动作名和权重（低于本地点赞的 2.0）。 */
+        const val ACTION_CLOUD_LIKE = "cloud_like"
+        const val CLOUD_LIKE_WEIGHT = 1.2
+        /** 行为表最多留多少条；官方点赞种子可能一次进来几百条，所以比以前放宽。 */
+        const val MAX_INTERACTIONS = 3000
+        /** 算画像时读多少条最近的行为。 */
+        const val PROFILE_ROWS = 2000
+        /** 最近这么久里的行为算“当前兴趣”，权重再乘 [SESSION_BOOST]。 */
+        const val SESSION_WINDOW_MS = 45L * 60L * 1000L
+        const val SESSION_BOOST = 2.5
+
         /** 同一个视频的不同清晰度各算一条，所以主键是视频加清晰度。 */
         private val DOWNLOADS_TABLE = """CREATE TABLE IF NOT EXISTS downloads(
                 video_id TEXT NOT NULL,

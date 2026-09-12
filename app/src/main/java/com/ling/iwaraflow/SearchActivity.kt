@@ -563,6 +563,12 @@ class SearchActivity : AppCompatActivity() {
         if (isInPictureInPictureMode) { comments.close(); PipRegistry.enter(this) } else PipRegistry.leave(this)
         findViewById<View>(R.id.searchFeedBack).visibility = if (isInPictureInPictureMode) View.GONE else View.VISIBLE
         feedAdapter.setPipMode(isInPictureInPictureMode)
+        // 退出小窗时页面停在后台（不是被展开成全屏）：用户把小窗关掉了。onStop 那会儿还算在
+        // 小窗里没停播，这里停掉并结束本页，主页收到返回结果后才能解开“正在打开内部页面”的锁。
+        if (!isInPictureInPictureMode && !lifecycle.currentState.isAtLeast(Lifecycle.State.STARTED)) {
+            feedAdapter.pauseAll()
+            finish()
+        }
     }
 
     override fun onDestroy() {

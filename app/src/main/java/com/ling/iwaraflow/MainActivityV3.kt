@@ -1113,6 +1113,12 @@ class MainActivityV3 : AppCompatActivity() {
         if (isInPictureInPictureMode) comments.close()
         topBar.visibility = if (isInPictureInPictureMode) View.GONE else View.VISIBLE
         adapter.setPipMode(isInPictureInPictureMode)
+        // 退出小窗时页面已经停在后台（没有被展开成全屏）：是用户把小窗关掉了。
+        // onStop 那会儿还算在小窗里没停播，这里必须停，否则没画面还一直出声。
+        if (!isInPictureInPictureMode && !lifecycle.currentState.isAtLeast(Lifecycle.State.STARTED)) {
+            note("小窗被关闭：停止播放")
+            adapter.pauseAll()
+        }
     }
 
     override fun onStart() {
@@ -1129,8 +1135,15 @@ class MainActivityV3 : AppCompatActivity() {
         launchedFromIcon = false
         if (!isInPictureInPictureMode && !isFinishing && PipRegistry.otherPipActivity(this) != null) {
             if (fromIcon) {
-                // 用户点图标要的是这个视频：把小窗展开到前台。
-                if (PipRegistry.expandInto(this)) return
+                // 用户点图标要的是这个视频：把小窗展开到前台。展开成功的话本页马上会被盖住；
+                // 过一会儿还在前台就说明系统没展开，那就关掉小窗，让本页正常用。
+                if (PipRegistry.expandInto(this)) {
+                    note("主页从图标打开：展开子页面小窗")
+                    pager.postDelayed({ dismissStrandedPip() }, PIP_EXPAND_GRACE_MS)
+                    return
+                }
+                if (PipRegistry.dismiss(this)) note("主页从图标打开：小窗展开失败，已关闭小窗")
+                openingInternalPage = false
             } else {
                 // 是小窗把子页面带走、主页被动露出来的：退到后台，露出桌面，和按了 Home 一样。
                 moveTaskToBack(true)
@@ -1145,6 +1158,19 @@ class MainActivityV3 : AppCompatActivity() {
         if (videoId != null && localUri != null) openLocalVideo(videoId, localUri, pendingTitle)
         else if (videoId != null) openSingleVideo(videoId)
         else adapter.resumeActive()
+    }
+
+    /**
+     * 点图标展开子页面小窗之后本页还留在前台：系统没有把小窗展开。关掉小窗，
+     * 把“正在打开内部页面”的锁解开，本页接着播自己的视频，菜单里的页面也都能开了。
+     */
+    private fun dismissStrandedPip() {
+        if (isFinishing || isDestroyed || isInPictureInPictureMode) return
+        if (!lifecycle.currentState.isAtLeast(Lifecycle.State.RESUMED)) return
+        if (!PipRegistry.dismiss(this)) return
+        note("主页从图标打开：小窗没有展开，已关闭小窗")
+        openingInternalPage = false
+        adapter.resumeActive()
     }
 
     override fun onPause() {
@@ -1185,5 +1211,7 @@ class MainActivityV3 : AppCompatActivity() {
         const val COMMENTS_PANEL_GAP_DP = 20
         /** 已下载视频的播放源名字，画质按钮上显示它。 */
         const val LOCAL_SOURCE_NAME = "本地文件"
+        /** 点图标展开子页面小窗后，等多久还没被盖住就当作展开失败。 */
+        const val PIP_EXPAND_GRACE_MS = 1200L
     }
 }

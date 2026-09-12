@@ -560,14 +560,16 @@ class SearchActivity : AppCompatActivity() {
     @Suppress("DEPRECATION")
     override fun onPictureInPictureModeChanged(isInPictureInPictureMode: Boolean) {
         super.onPictureInPictureModeChanged(isInPictureInPictureMode)
-        if (isInPictureInPictureMode) { comments.close(); PipRegistry.enter(this) } else PipRegistry.leave(this)
         findViewById<View>(R.id.searchFeedBack).visibility = if (isInPictureInPictureMode) View.GONE else View.VISIBLE
         feedAdapter.setPipMode(isInPictureInPictureMode)
-        // 退出小窗时页面停在后台（不是被展开成全屏）：用户把小窗关掉了。onStop 那会儿还算在
-        // 小窗里没停播，这里必须停。页面本身不结束：下次打开应用时主页会把它拉回前台，
-        // 用户回到的还是刚才小窗里那条视频。
-        if (!isInPictureInPictureMode && !lifecycle.currentState.isAtLeast(Lifecycle.State.STARTED)) {
-            feedAdapter.pauseAll()
+        when {
+            isInPictureInPictureMode -> { comments.close(); PipRegistry.enter(this) }
+            // 被展开成全屏：回到了正常页面，登记撤掉。
+            lifecycle.currentState.isAtLeast(Lifecycle.State.STARTED) -> PipRegistry.leave(this)
+            // 退出小窗时页面停在后台：用户把小窗关掉了。onStop 那会儿还算在小窗里没停播，这里必须停。
+            // 页面本身不结束、登记也保留：下次打开应用时主页靠这条登记把它拉回前台，
+            // 用户回到的还是刚才小窗里那条视频。
+            else -> { feedAdapter.pauseAll(); NavigationDiagnostics.note(this, "搜索页小窗被关闭：停播，页面留在后台") }
         }
     }
 

@@ -104,7 +104,7 @@ class RecommendationEngine(
 
             if (!skipSeen) {
                 val classics = classicsFuture?.let { awaitClassics(it, deadline, skipSeen = false) }.orEmpty()
-                return weaveClassics(interleave(rank(merged), subscribed), classics).take(MAX_RESULTS)
+                return assemble(rank(merged), subscribed, classics)
             }
 
             var buckets = split(rank(merged))
@@ -126,10 +126,32 @@ class RecommendationEngine(
                 else -> buckets.all()
             }
             val classics = classicsFuture?.let { awaitClassics(it, deadline, skipSeen = true) }.orEmpty()
-            return weaveClassics(interleave(result, subscribed), classics).take(MAX_RESULTS)
+            return assemble(result, subscribed, classics)
         } finally {
             pool.shutdownNow()
         }
+    }
+
+    /**
+     * 把候选装配成最终的推荐流：**主体只放近期视频，老视频只按设置的间隔穿插**。
+     *
+     * 抽页会抽到存档深处，候选里混着不少发布好几年的视频；它们点赞、播放量都高，
+     * 打分后经常排在前面，结果整屏都是老片，设置里的“每 N 条一条老片”形同虚设。
+     * 所以先按发布时间分两堆：半年内的（以及接口没给时间的）留在主流里，更老的并进老片池，
+     * 和专门抓的老片一起，每 [classicsEvery] 条塞一条；关了穿插就不出现。
+     * 近期的实在不够（网络差、只抓到深页）时才用老的补到 [MIN_RECENT_FEED] 条，不给空页。
+     */
+    internal fun assemble(ranked: List<VideoItem>, subscribed: Set<String>, classics: List<VideoItem>): List<VideoItem> {
+        val (recent, aged) = splitByAge(ranked, System.currentTimeMillis())
+        val feed = if (recent.size >= MIN_RECENT_FEED) recent else recent + aged.take(MIN_RECENT_FEED - recent.size)
+        val pool = if (classicsEvery > 0) classics + aged else emptyList()
+        return weaveClassics(interleave(feed, subscribed), pool).take(MAX_RESULTS)
+    }
+
+    /** 按发布时间分成（近期，老片）两堆，顺序不变；没有发布时间的算近期。 */
+    internal fun splitByAge(items: List<VideoItem>, now: Long): Pair<List<VideoItem>, List<VideoItem>> {
+        val cutoff = now - CLASSIC_MIN_AGE_MS
+        return items.partition { it.createdAt <= 0L || it.createdAt >= cutoff }
     }
 
     /**
@@ -422,8 +444,10 @@ class RecommendationEngine(
         internal const val CLASSICS_SORT = "likes"
         internal const val CLASSICS_MIN_PAGE = 8
         internal const val CLASSICS_DEPTH = 300
-        /** 发布不满半年的不算老片。 */
-        private const val CLASSIC_MIN_AGE_MS = 180L * 24 * 60 * 60 * 1000
+        /** 发布不满半年的不算老片；反过来，超过半年的也不进推荐流主体，只按间隔穿插。 */
+        internal const val CLASSIC_MIN_AGE_MS = 180L * 24 * 60 * 60 * 1000
+        /** 近期视频至少凑到这么多条，不够才拿老的补。 */
+        internal const val MIN_RECENT_FEED = 24
         /** 设置里的默认：每 12 条穿插一条。 */
         const val DEFAULT_CLASSICS_EVERY = 12
         private const val PAGE_SIZE = 36
@@ -431,18 +455,15 @@ class RecommendationEngine(
         /** 首轮 6 个请求 + 点赞同步，留一点余量。 */
         private const val MAX_PARALLEL_REQUESTS = 8
         /**
-         * 随机抽页的初始上限，给得比实际存量宽——抽空了会自动往回收。
-         *
-         * 真实页数由服务端回报的总条数算出（noteTotal），这里只是第一次请求回来之前的兜底值。
-         * 实测：网页端按发布时间翻到底是第 10147 页、一页 32 条，即全站约 32.5 万个视频，
-         * 换成 App 的 36 条一页约 9000 页；给 11000 是留出余量。
+         * 最新投稿的抽页上限。推荐流主体只要半年内的视频（更老的转进老片池，见 assemble），
+         * 按每月约 6000 条、36 条一页算，半年约 1000 页；再往深抽回来的也只会被分流，白费一次请求。
+         * 真实页数由服务端回报的总条数算出（noteTotal），取两者中小的。
          */
-        internal const val ARCHIVE_DEPTH = 11000
+        internal const val ARCHIVE_DEPTH = 1100
         /**
-         * 流行榜排的是同一批视频，页数也一样多，但越往后越是没人看的作品，
-         * 再深就没有质量可言了，所以不跟着放到底。
+         * 流行榜排的是同一批视频，越往后越老、越没人看；主体只要近期的，所以也不往深抽。
          */
-        internal const val POPULAR_DEPTH = 3000
+        internal const val POPULAR_DEPTH = 1000
         internal const val SUBSCRIBED_DEPTH = 200
         /** 上限再怎么收也不低于这里，免得一次异常的空页把抽页缩回首页附近。 */
         internal const val MIN_DEPTH = 50

@@ -65,4 +65,43 @@ class ClassicsWeaveTest {
     @Test fun theDefaultSpacingIsTwelve() {
         assertEquals(12, RecommendationEngine.DEFAULT_CLASSICS_EVERY)
     }
+
+    // ---------------------------------------------------------------- 近期优先
+
+    private val now = 1_800_000_000_000L
+    private val day = 86_400_000L
+    private fun dated(id: String, ageDays: Int) = VideoItem(id, id, "作者", emptyList(), 1, createdAt = now - ageDays * day)
+
+    @Test fun videosOlderThanHalfAYearAreSplitOffInOrder() {
+        val items = listOf(dated("a", 10), dated("old-1", 400), dated("b", 170), VideoItem("c", "c", "作者", emptyList(), 1), dated("old-2", 181))
+        val (recent, aged) = engine(12).splitByAge(items, now)
+        assertEquals("没有发布时间的算近期", listOf("a", "b", "c"), recent.map { it.id })
+        assertEquals(listOf("old-1", "old-2"), aged.map { it.id })
+    }
+
+    @Test fun oldCandidatesOnlyAppearAsWovenClassics() {
+        val engine = engine(12)
+        val ranked = (0 until 40).map { dated("old-aged-$it", 365 + it) } + (0 until 48).map { dated("new-$it", it % 100) }
+        val out = engine.assemble(ranked, emptySet(), classics(3))
+        val groups = out.chunked(13)
+        groups.forEachIndexed { index, group ->
+            assertEquals("第 $index 组只能有一条老片：${group.map { it.id }}", 1, group.count(::isClassic))
+        }
+        assertEquals("近期视频一条不少、顺序不变", (0 until 48).map { "new-$it" }, out.filter { !isClassic(it) }.map { it.id })
+        assertEquals("专门抓的老片排在候选里分流出来的老片前面", listOf("old-0", "old-1", "old-2", "old-aged-0"), out.filter(::isClassic).take(4).map { it.id })
+    }
+
+    @Test fun withClassicsOffOldCandidatesAreDropped() {
+        val ranked = (0 until 30).map { dated("old-$it", 400) } + (0 until 30).map { dated("new-$it", 3) }
+        val out = engine(0).assemble(ranked, emptySet(), emptyList())
+        assertEquals(30, out.size)
+        assertTrue(out.none(::isClassic))
+    }
+
+    @Test fun tooFewRecentVideosAreToppedUpWithOldOnes() {
+        val ranked = (0 until 5).map { dated("new-$it", 3) } + (0 until 40).map { dated("old-$it", 400) }
+        val out = engine(0).assemble(ranked, emptySet(), emptyList())
+        assertEquals("补到最低条数，不给空页", RecommendationEngine.MIN_RECENT_FEED, out.size)
+        assertEquals((0 until 5).map { "new-$it" }, out.take(5).map { it.id })
+    }
 }

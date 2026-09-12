@@ -28,7 +28,9 @@ data class TranslationConfig(
     val customBody: String = "",
     val customHeaders: String = "",
     val customResultPath: String = "",
-    val customLangPath: String = ""
+    val customLangPath: String = "",
+    /** AI 翻译用的模型名，留空用 [Translator.DEFAULT_AI_MODEL]。 */
+    val model: String = ""
 )
 
 /**
@@ -57,6 +59,7 @@ object Translator {
     const val PROVIDER_MICROSOFT = "microsoft"
     const val PROVIDER_BAIDU = "baidu"
     const val PROVIDER_LIBRE = "libre"
+    const val PROVIDER_OPENAI = "openai"
     const val PROVIDER_CUSTOM = "custom"
 
     /** 设置页里的顺序和名字。 */
@@ -66,10 +69,19 @@ object Translator {
         PROVIDER_MICROSOFT to "微软翻译（Azure Key + 区域）",
         PROVIDER_BAIDU to "百度翻译开放平台（APP ID + 密钥）",
         PROVIDER_LIBRE to "LibreTranslate（自建 / 公共服务器）",
+        PROVIDER_OPENAI to "AI 翻译（OpenAI 兼容接口：中转站 / DeepSeek / 通义 / Kimi 等）",
         PROVIDER_CUSTOM to "自定义接口"
     )
 
     const val TARGET = "zh-CN"
+
+    /** AI 翻译的默认接口和模型：不填地址就直连 OpenAI。 */
+    const val DEFAULT_AI_ENDPOINT = "https://api.openai.com/v1"
+    const val DEFAULT_AI_MODEL = "gpt-4o-mini"
+
+    /** 发给模型的系统提示：只要译文，别的都不要。 */
+    const val AI_PROMPT = "你是翻译引擎。把用户发来的内容翻译成简体中文：保留原有的换行、表情、链接和 @用户名；" +
+        "不要解释，不要加引号，不要输出译文以外的任何内容。"
 
     @Volatile var config = TranslationConfig()
         private set
@@ -143,6 +155,7 @@ object Translator {
         PROVIDER_MICROSOFT -> fetchMicrosoft(text, c)
         PROVIDER_BAIDU -> fetchBaidu(text, c)
         PROVIDER_LIBRE -> fetchLibre(text, c)
+        PROVIDER_OPENAI -> fetchOpenAi(text, c)
         PROVIDER_CUSTOM -> fetchCustom(text, c)
         else -> fetchGoogle(text)
     }
@@ -155,11 +168,20 @@ object Translator {
                     401, 403 -> "密钥无效或没有权限（${response.code}）"
                     429 -> "请求太频繁（429），稍后再试"
                     456 -> "DeepL 额度已用完（456）"
-                    else -> "HTTP ${response.code}"
+                    else -> "HTTP ${response.code}" + (errorDetail(raw)?.let { "：$it" } ?: "")
                 })
             }
             return raw
         }
+    }
+
+    /** 出错时返回体里常带着原因（`error.message` 或 `message`），带上它比光一个状态码有用。 */
+    internal fun errorDetail(raw: String): String? {
+        val root = runCatching { JSONObject(raw.trim()) }.getOrNull() ?: return null
+        val message = root.optJSONObject("error")?.optString("message").orEmpty().ifBlank {
+            root.optString("error").takeIf { it.isNotBlank() && it != "null" && !it.startsWith("{") }.orEmpty()
+        }.ifBlank { root.optString("message") }
+        return message.takeIf { it.isNotBlank() && it != "null" }?.take(160)
     }
 
     private fun requireKey(value: String, what: String) {
@@ -296,6 +318,64 @@ object Translator {
         if (text.isBlank()) throw IOException(root.optString("error").ifBlank { "没有翻出内容" })
         val lang = root.optJSONObject("detectedLanguage")?.optString("language").orEmpty().ifBlank { "auto" }
         return Translation(text, lang)
+    }
+
+    // ---- AI 翻译（OpenAI 兼容的聊天接口）
+
+    /**
+     * 把用户填的地址补成 `…/chat/completions`：填到域名、填到 `/v1`、填完整路径都行。
+     * 中转站大多照搬 OpenAI 的路径；个别自定义前缀（比如 `/api/v3`）也按“版本号结尾”处理。
+     */
+    internal fun openAiUrl(base: String): String {
+        val trimmed = base.trim().ifBlank { DEFAULT_AI_ENDPOINT }.trimEnd('/')
+        return when {
+            trimmed.endsWith("/chat/completions") -> trimmed
+            Regex("/v\\d+(beta)?$").containsMatchIn(trimmed) -> "$trimmed/chat/completions"
+            else -> "$trimmed/v1/chat/completions"
+        }
+    }
+
+    internal fun openAiBody(text: String, model: String): String =
+        JSONObject()
+            .put("model", model.trim().ifBlank { DEFAULT_AI_MODEL })
+            .put("temperature", 0.2)
+            .put("messages", JSONArray()
+                .put(JSONObject().put("role", "system").put("content", AI_PROMPT))
+                .put(JSONObject().put("role", "user").put("content", text)))
+            .toString()
+
+    private fun fetchOpenAi(text: String, c: TranslationConfig): Translation {
+        requireKey(c.key, "AI 接口的 API Key")
+        val request = Request.Builder().url(openAiUrl(c.endpoint))
+            .header("Authorization", "Bearer ${c.key.trim()}")
+            .post(openAiBody(text, c.model).toRequestBody(jsonType))
+            .build()
+        return parseOpenAi(execute(request))
+    }
+
+    /**
+     * 标准返回是 `choices[0].message.content`；有些服务把 content 拆成分段数组，把文字段拼起来。
+     * 模型偶尔会把整段译文包在引号里，去掉。
+     */
+    internal fun parseOpenAi(raw: String): Translation {
+        val root = JSONObject(raw)
+        root.optJSONObject("error")?.let { error ->
+            throw IOException("AI 接口返回错误：${error.optString("message").ifBlank { error.toString() }.take(160)}")
+        }
+        val message = root.optJSONArray("choices")?.optJSONObject(0)?.optJSONObject("message")
+            ?: throw IOException("返回格式不对")
+        val content = when (val node = message.opt("content")) {
+            is String -> node
+            is JSONArray -> (0 until node.length()).joinToString("") { i ->
+                node.optJSONObject(i)?.optString("text").orEmpty()
+            }
+            else -> ""
+        }.trim().let { text ->
+            if (text.length >= 2 && ((text.startsWith("\"") && text.endsWith("\"")) || (text.startsWith("“") && text.endsWith("”"))))
+                text.substring(1, text.length - 1).trim() else text
+        }
+        if (content.isBlank()) throw IOException("没有翻出内容")
+        return Translation(content, "auto")
     }
 
     // ---- 自定义接口

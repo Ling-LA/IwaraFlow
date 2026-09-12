@@ -49,7 +49,8 @@ class AppPrefs(context: Context) {
             customBody = prefs.getString("tr_custom_body", "") ?: "",
             customHeaders = prefs.getString("tr_custom_headers", "") ?: "",
             customResultPath = prefs.getString("tr_custom_result_path", "") ?: "",
-            customLangPath = prefs.getString("tr_custom_lang_path", "") ?: ""
+            customLangPath = prefs.getString("tr_custom_lang_path", "") ?: "",
+            model = prefs.getString("tr_model", "") ?: ""
         )
         set(value) = prefs.edit()
             .putString("tr_provider", value.provider)
@@ -62,6 +63,7 @@ class AppPrefs(context: Context) {
             .putString("tr_custom_headers", value.customHeaders)
             .putString("tr_custom_result_path", value.customResultPath)
             .putString("tr_custom_lang_path", value.customLangPath)
+            .putString("tr_model", value.model)
             .apply()
 
     companion object {

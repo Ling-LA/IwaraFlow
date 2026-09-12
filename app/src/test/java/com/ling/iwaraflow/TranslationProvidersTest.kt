@@ -48,6 +48,39 @@ class TranslationProvidersTest {
         assertEquals("en", t.sourceLang)
     }
 
+    @Test fun openAiUrlIsCompletedFromWhateverTheUserTyped() {
+        assertEquals("https://api.openai.com/v1/chat/completions", Translator.openAiUrl(""))
+        assertEquals("https://api.openai.com/v1/chat/completions", Translator.openAiUrl("https://api.openai.com/v1/"))
+        assertEquals("https://relay.example/v1/chat/completions", Translator.openAiUrl("https://relay.example"))
+        assertEquals("https://relay.example/api/v3/chat/completions", Translator.openAiUrl("https://relay.example/api/v3"))
+        assertEquals("https://relay.example/x/chat/completions", Translator.openAiUrl("https://relay.example/x/chat/completions"))
+    }
+
+    @Test fun openAiRequestCarriesModelAndPrompt() {
+        val body = org.json.JSONObject(Translator.openAiBody("hello", ""))
+        assertEquals(Translator.DEFAULT_AI_MODEL, body.getString("model"))
+        val messages = body.getJSONArray("messages")
+        assertEquals("system", messages.getJSONObject(0).getString("role"))
+        assertEquals("hello", messages.getJSONObject(1).getString("content"))
+        assertEquals("deepseek-chat", org.json.JSONObject(Translator.openAiBody("x", " deepseek-chat ")).getString("model"))
+    }
+
+    @Test fun openAiResponse() {
+        val t = Translator.parseOpenAi("""{"choices":[{"message":{"role":"assistant","content":"\"你好\""}}]}""")
+        assertEquals("引号是模型多加的，去掉", "你好", t.text)
+        val parts = Translator.parseOpenAi("""{"choices":[{"message":{"content":[{"type":"text","text":"你"},{"type":"text","text":"好"}]}}]}""")
+        assertEquals("你好", parts.text)
+        val error = runCatching { Translator.parseOpenAi("""{"error":{"message":"model not found","type":"invalid_request_error"}}""") }.exceptionOrNull()
+        assertTrue(error!!.message!!.contains("model not found"))
+    }
+
+    @Test fun httpErrorsCarryTheServersReason() {
+        assertEquals("Incorrect API key", Translator.errorDetail("""{"error":{"message":"Incorrect API key","type":"x"}}"""))
+        assertEquals("quota", Translator.errorDetail("""{"error":"quota"}"""))
+        assertEquals("nope", Translator.errorDetail("""{"message":"nope"}"""))
+        assertNull(Translator.errorDetail("<html>502</html>"))
+    }
+
     @Test fun customUrlAndBodyTemplatesAreFilledIn() {
         assertEquals(
             "https://x.example/api?q=hello+%26+bye&to=zh-CN",
@@ -84,7 +117,7 @@ class TranslationProvidersTest {
         assertEquals(Translator.PROVIDER_GOOGLE, prefs.translation.provider)
         val custom = TranslationConfig(
             provider = Translator.PROVIDER_CUSTOM, endpoint = "https://x.example/{text}",
-            customMethod = "POST", customBody = "{}", customHeaders = "A: b", customResultPath = "r.0"
+            customMethod = "POST", customBody = "{}", customHeaders = "A: b", customResultPath = "r.0", model = "gpt-4o-mini"
         )
         prefs.translation = custom
         assertEquals(custom, AppPrefs(RuntimeEnvironment.getApplication()).translation)

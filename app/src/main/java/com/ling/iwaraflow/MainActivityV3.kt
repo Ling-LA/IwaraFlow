@@ -702,10 +702,15 @@ class MainActivityV3 : AppCompatActivity() {
             setPadding(dp(16), dp(12), dp(16), dp(12))
         }
         container.addView(email); container.addView(View(this).apply { layoutParams = LinearLayout.LayoutParams(1, dp(10)) }); container.addView(password)
-        val dialog = AlertDialog.Builder(this).setTitle("登录 Iwara").setMessage("密码只用于登录请求；登录 Token 使用 Android 加密存储。")
-            .setView(container).setNegativeButton("取消", null).setPositiveButton("登录", null).create()
+        val dialog = AlertDialog.Builder(this).setTitle("登录 Iwara")
+            .setMessage("密码只用于登录请求；登录 Token 使用 Android 加密存储。没有账号可点“注册”，在应用内打开官网注册页。")
+            .setView(container).setNeutralButton("注册", null).setNegativeButton("取消", null).setPositiveButton("登录", null).create()
         dialog.setOnShowListener {
             styleDialogButtons(dialog)
+            dialog.getButton(AlertDialog.BUTTON_NEUTRAL).setOnClickListener {
+                dialog.dismiss()
+                startActivity(Intent(this, RegisterActivity::class.java))
+            }
             val confirm = dialog.getButton(AlertDialog.BUTTON_POSITIVE)
             confirm.setOnClickListener {
                 val mail = email.text.toString().trim(); val pass = password.text.toString()
@@ -845,7 +850,7 @@ class MainActivityV3 : AppCompatActivity() {
 
         panel.addView(sectionTitle("翻译"))
         panel.addView(TextView(this).apply {
-            text = "简介和评论自动翻成中文用哪家服务。默认的谷歌免费接口不用密钥；其它几家填上自己的密钥。"
+            text = "简介和评论自动翻成中文用哪家服务。默认的谷歌免费接口不用密钥；其它几家填上自己的密钥，也可以接 AI 中转站。"
             textSize = 12f; setTextColor(0xFF607D93.toInt()); setPadding(dp(4), 0, 0, dp(6))
         })
         val translation = prefs.translation
@@ -869,28 +874,32 @@ class MainActivityV3 : AppCompatActivity() {
         val trHeaders = settingsInput("请求头，一行一个：Authorization: Bearer xxx", translation.customHeaders, InputType.TYPE_CLASS_TEXT, multiline = true)
         val trResultPath = settingsInput("译文字段路径，例如 data.translatedText（留空自动猜）", translation.customResultPath, InputType.TYPE_CLASS_TEXT)
         val trLangPath = settingsInput("源语言字段路径（可留空）", translation.customLangPath, InputType.TYPE_CLASS_TEXT)
+        val trAiBase = settingsInput("接口地址，例如 https://api.openai.com/v1（中转站填它给的地址）", translation.endpoint, InputType.TYPE_CLASS_TEXT or InputType.TYPE_TEXT_VARIATION_URI)
+        val trModel = settingsInput("模型名，例如 gpt-4o-mini、deepseek-chat、qwen-plus", translation.model, InputType.TYPE_CLASS_TEXT)
         val trHint = TextView(this).apply {
             textSize = 12f; setTextColor(0xFF607D93.toInt()); setPadding(dp(4), dp(4), 0, dp(8))
         }
-        listOf(trKey, trRegion, trAppId, trEndpoint, trCustomUrl, trMethod, trBody, trHeaders, trResultPath, trLangPath, trHint)
-            .forEach { panel.addView(it) }
+        val translationFields = listOf(trAiBase, trKey, trModel, trRegion, trAppId, trEndpoint, trCustomUrl, trMethod, trBody, trHeaders, trResultPath, trLangPath)
+        translationFields.forEach { panel.addView(it) }
+        panel.addView(trHint)
         fun showTranslationFields(provider: String) {
             val visible: List<View> = when (provider) {
                 Translator.PROVIDER_DEEPL -> listOf(trKey)
                 Translator.PROVIDER_MICROSOFT -> listOf(trKey, trRegion)
                 Translator.PROVIDER_BAIDU -> listOf(trAppId, trKey)
                 Translator.PROVIDER_LIBRE -> listOf(trEndpoint, trKey)
+                Translator.PROVIDER_OPENAI -> listOf(trAiBase, trKey, trModel)
                 Translator.PROVIDER_CUSTOM -> listOf(trCustomUrl, trMethod, trBody, trHeaders, trResultPath, trLangPath)
                 else -> emptyList()
             }
-            listOf(trKey, trRegion, trAppId, trEndpoint, trCustomUrl, trMethod, trBody, trHeaders, trResultPath, trLangPath)
-                .forEach { it.visibility = if (it in visible) View.VISIBLE else View.GONE }
+            translationFields.forEach { it.visibility = if (it in visible) View.VISIBLE else View.GONE }
             trHint.text = when (provider) {
                 Translator.PROVIDER_GOOGLE -> "走 translate.googleapis.com，在国内需要代理。"
                 Translator.PROVIDER_DEEPL -> "免费版 Key 以 :fx 结尾，会自动走 api-free.deepl.com。"
                 Translator.PROVIDER_MICROSOFT -> "Azure 门户里的 Translator 资源 Key；多区域资源可留空区域。"
                 Translator.PROVIDER_BAIDU -> "fanyi-api.baidu.com 的通用翻译，APP ID 和密钥在开放平台的开发者信息里。"
                 Translator.PROVIDER_LIBRE -> "POST 到 <地址>/translate；公共服务器可能要 API Key。"
+                Translator.PROVIDER_OPENAI -> "POST 到 <地址>/chat/completions，兼容 OpenAI 聊天接口的中转站、DeepSeek、通义、Kimi、硅基流动等都能用；地址写到 /v1 为止即可，留空直连 OpenAI；模型名留空用 ${Translator.DEFAULT_AI_MODEL}。"
                 else -> "返回 JSON 里译文在哪个字段用点分路径写，数字是数组下标；留空会按常见字段名猜。"
             }
         }
@@ -963,12 +972,17 @@ class MainActivityV3 : AppCompatActivity() {
                 key = trKey.text.toString().trim(),
                 region = trRegion.text.toString().trim(),
                 appId = trAppId.text.toString().trim(),
-                endpoint = (if (provider == Translator.PROVIDER_CUSTOM) trCustomUrl else trEndpoint).text.toString().trim(),
+                endpoint = when (provider) {
+                    Translator.PROVIDER_CUSTOM -> trCustomUrl
+                    Translator.PROVIDER_OPENAI -> trAiBase
+                    else -> trEndpoint
+                }.text.toString().trim(),
                 customMethod = methodValues[trMethod.selectedItemPosition],
                 customBody = trBody.text.toString(),
                 customHeaders = trHeaders.text.toString(),
                 customResultPath = trResultPath.text.toString().trim(),
-                customLangPath = trLangPath.text.toString().trim()
+                customLangPath = trLangPath.text.toString().trim(),
+                model = trModel.text.toString().trim()
             )
             prefs.translation = newTranslation
             Translator.configure(newTranslation)

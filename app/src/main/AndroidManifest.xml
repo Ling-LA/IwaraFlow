@@ -41,6 +41,10 @@
             android:screenOrientation="portrait"
             android:exported="false" />
         <activity
+            android:name=".RegisterActivity"
+            android:screenOrientation="portrait"
+            android:exported="false" />
+        <activity
             android:name=".SearchActivity"
             android:screenOrientation="portrait"
             android:supportsPictureInPicture="true"

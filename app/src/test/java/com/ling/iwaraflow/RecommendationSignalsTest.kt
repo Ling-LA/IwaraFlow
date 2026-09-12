@@ -42,8 +42,8 @@ class RecommendationSignalsTest {
     @Test fun recentBehaviourWeighsMoreThanOldBehaviour() {
         val now = System.currentTimeMillis()
         history.recordInteraction(video("v1", "Recent", listOf("a")), "like", 2.0)
-        val fresh = history.preferenceProfile(now).authorWeights["recent"]!!
-        val later = history.preferenceProfile(now + HistoryStore.SESSION_WINDOW_MS + 60_000L).authorWeights["recent"]!!
+        val fresh = history.preferenceProfileAt(now).authorWeights["recent"]!!
+        val later = history.preferenceProfileAt(now + HistoryStore.SESSION_WINDOW_MS + 60_000L).authorWeights["recent"]!!
         assertTrue("刚发生的行为按当前兴趣加倍：$fresh vs $later", fresh > later * 2)
     }
 

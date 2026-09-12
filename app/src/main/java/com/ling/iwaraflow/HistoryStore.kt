@@ -353,8 +353,10 @@ class HistoryStore(context: Context) : SQLiteOpenHelper(context, "iwaraflow.db",
      * 里发生的再乘 [SESSION_BOOST]——连着看了几条同一主题，后面的推荐就该马上跟上。
      * 官方点赞的种子不算“当前兴趣”，否则一次同步进来几百条就把画像冲成旧口味。
      */
+    fun preferenceProfile(): PreferenceProfile = preferenceProfileAt(System.currentTimeMillis())
+
     @Synchronized
-    fun preferenceProfile(now: Long = System.currentTimeMillis()): PreferenceProfile {
+    internal fun preferenceProfileAt(now: Long): PreferenceProfile {
         val author = HashMap<String, Double>()
         val authorIds = HashMap<String, Double>()
         val tags = HashMap<String, Double>()

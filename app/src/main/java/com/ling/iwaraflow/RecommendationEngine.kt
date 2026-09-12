@@ -85,7 +85,8 @@ class RecommendationEngine(
         // 一轮最多同时发这么多请求：卡住的那个不能把后面排队的也拖住。
         val pool = Executors.newFixedThreadPool(MAX_PARALLEL_REQUESTS)
         try {
-            profile = runCatching { history.preferenceProfile() }.getOrDefault(PreferenceProfile(emptyMap(), emptyMap()))
+            // 测试里的 mock 可能给 null，兜一下。
+            profile = runCatching { history.preferenceProfile() }.getOrNull() ?: PreferenceProfile(emptyMap(), emptyMap())
             val deadline = System.nanoTime() + TimeUnit.MILLISECONDS.toNanos(listBudgetMs)
             val merged = LinkedHashMap<String, Pair<VideoItem, Double>>()
             // 哪些视频来自关注作者的订阅流——最后按位置插进结果里要用。

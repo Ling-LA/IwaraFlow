@@ -315,7 +315,7 @@ class CommentsPanel(
                     renderDescription(item)
                 }.onFailure {
                     detailRequested = false
-                    infoBody.text = "简介读取失败：${it.message}"
+                    infoBody.text = "简介读取失败：${IwaraApi.explainError(it)}"
                 }
             }
         }

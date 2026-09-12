@@ -40,6 +40,28 @@ class DownloadLibraryTest {
         assertEquals(42L, records[0].downloadId)
     }
 
+    @Test fun aDownloadKeepsTheAuthorAndDescription() {
+        val item = video("v1").apply {
+            authorId = "author-1"; authorUsername = "someone"; description = "简介正文"
+        }
+        history.recordDownload(item, "1080p", 1L)
+        val stored = history.downloadRecords().single().item
+        assertEquals("author-1", stored.authorId)
+        assertEquals("someone", stored.authorUsername)
+        assertEquals("简介正文", stored.description)
+    }
+
+    @Test fun aRecordWithoutAuthorIsBackfilledLaterButNeverBlanked() {
+        history.recordDownload(video("v1"), "540p", 1L)
+        history.recordDownload(video("v1"), "1080p", 2L)
+        history.updateDownloadDetail("v1", "author-1", "someone", "简介")
+        history.updateDownloadDetail("v1", "", "", "")
+        val stored = history.downloadRecords()
+        assertEquals(2, stored.size)
+        assertTrue("两个清晰度的记录都要补上", stored.all { it.item.authorId == "author-1" && it.item.authorUsername == "someone" })
+        assertTrue(stored.all { it.item.description == "简介" })
+    }
+
     @Test fun theSameVideoAtTwoQualitiesIsTwoEntries() {
         history.recordDownload(video("v1"), "540p", 1L)
         history.recordDownload(video("v1"), "1080p", 2L)

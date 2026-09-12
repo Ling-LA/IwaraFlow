@@ -573,9 +573,10 @@ class VideoAdapter(
                 landscape -> (height * LANDSCAPE_LIFT).toInt()
                 else -> 0
             }
-            // 留白不能超过卡片本身：窗口再小也得给画面留一半以上。
-            val cappedBottom = bottom.coerceAtMost(height / 2)
+            // 留白不能把画面挤没：上下加起来至少给画面留卡片的 1/6。面板高度本来就能到
+            // 七成屏，所以不能按“一半”硬砍——砍了画面会被居中回面板底下，反而被遮住。
             val cappedTop = top.coerceAtMost(height / 4)
+            val cappedBottom = bottom.coerceAtMost((height - cappedTop - height / 6).coerceAtLeast(0))
             if (playerView.paddingBottom != cappedBottom || playerView.paddingTop != cappedTop) {
                 playerView.setPadding(0, cappedTop, 0, cappedBottom)
             }

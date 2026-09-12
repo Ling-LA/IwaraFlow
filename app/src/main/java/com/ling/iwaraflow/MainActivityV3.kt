@@ -208,8 +208,13 @@ class MainActivityV3 : AppCompatActivity() {
     override fun onNewIntent(intent: Intent) {
         super.onNewIntent(intent)
         setIntent(intent)
+        // 从桌面图标再次打开：singleTop 的主页收到的是启动器的 intent。
+        if (intent.hasCategory(Intent.CATEGORY_LAUNCHER) || intent.action == Intent.ACTION_MAIN) launchedFromIcon = true
         if (intent.getBooleanExtra("return_recommend", false)) returnToRecommend()
     }
+
+    /** 这次 onResume 是不是用户点桌面图标带来的（而不是子页面进小窗把主页顶出来）。 */
+    private var launchedFromIcon = false
 
     private fun hideStatusBar() {
         if (Build.VERSION.SDK_INT >= 30) window.insetsController?.hide(WindowInsets.Type.statusBars())
@@ -572,6 +577,27 @@ class MainActivityV3 : AppCompatActivity() {
     @Suppress("UNUSED_PARAMETER")
     fun openAuthorProfile(view: View) {
         val item = adapter.items.getOrNull(pager.currentItem) ?: return
+        if (item.authorId.isBlank() && item.authorUsername.isBlank() && item.id.isNotBlank()) {
+            // 本地下载记录里没有作者 id：现拉一次详情再进。
+            Toast.makeText(this, "正在读取作者资料…", Toast.LENGTH_SHORT).show()
+            api.getVideo(item.id) { result ->
+                runOnUiThread {
+                    if (isFinishing || isDestroyed) return@runOnUiThread
+                    result.onSuccess { detail ->
+                        item.authorId = detail.authorId
+                        item.authorUsername = detail.authorUsername
+                        if (item.description.isBlank()) item.description = detail.description
+                        note("补拉详情 ${item.id}：作者 id=${detail.authorId.take(8)} 用户名=${detail.authorUsername}")
+                        history.updateDownloadDetail(item.id, detail.authorId, detail.authorUsername, detail.description)
+                        openAuthor(item.authorId, item.author, item.authorUsername)
+                    }.onFailure {
+                        note("补拉详情失败 ${item.id}：${it.message?.take(80)}")
+                        Toast.makeText(this, "读取作者资料失败：${IwaraApi.explainError(it)}", Toast.LENGTH_LONG).show()
+                    }
+                }
+            }
+            return
+        }
         openAuthor(item.authorId, item.author, item.authorUsername)
     }
 
@@ -725,13 +751,16 @@ class MainActivityV3 : AppCompatActivity() {
             runOnUiThread {
                 if (isFinishing || isDestroyed || requestSerial != localDetailSerial) return@runOnUiThread
                 val current = adapter.items.firstOrNull { it.id == videoId } ?: return@runOnUiThread
+                result.onFailure { note("本地视频补拉详情失败 $videoId：${it.message?.take(80)}") }
                 result.onSuccess { detail ->
+                    note("本地视频补拉详情 $videoId：作者 id=${detail.authorId.take(8)} 用户名=${detail.authorUsername} 简介 ${detail.description.length} 字")
                     current.authorId = detail.authorId
                     current.authorUsername = detail.authorUsername
                     current.description = detail.description
                     current.likes = detail.likes
                     current.liked = detail.liked
                     current.authorFollowing = detail.authorFollowing
+                    history.updateDownloadDetail(videoId, detail.authorId, detail.authorUsername, detail.description)
                     adapter.refreshItem(videoId)
                 }
             }
@@ -1094,9 +1123,21 @@ class MainActivityV3 : AppCompatActivity() {
     override fun onResume() {
         super.onResume()
         hideStatusBar()
+        // 作者页 / 搜索页的小窗还在别的任务里放着。这个判断要放在 openingInternalPage 之前：
+        // 子页面进小窗时主页正是“正在打开内部页面”的状态，被动顶上来的主页不能就这么黑着。
+        val fromIcon = launchedFromIcon
+        launchedFromIcon = false
+        if (!isInPictureInPictureMode && !isFinishing && PipRegistry.otherPipActivity(this) != null) {
+            if (fromIcon) {
+                // 用户点图标要的是这个视频：把小窗展开到前台。
+                if (PipRegistry.expandInto(this)) return
+            } else {
+                // 是小窗把子页面带走、主页被动露出来的：退到后台，露出桌面，和按了 Home 一样。
+                moveTaskToBack(true)
+                return
+            }
+        }
         if (openingInternalPage || isFinishing) return
-        // 作者页 / 搜索页的小窗还在别的任务里放着：把它展开到前台，别在它底下再放一个。
-        if (!isInPictureInPictureMode && PipRegistry.expandInto(this)) return
         val videoId = pendingVideoId
         val localUri = pendingLocalUri
         pendingVideoId = null

@@ -8,7 +8,7 @@ import android.database.sqlite.SQLiteOpenHelper
 /** 一条下载记录：哪个视频、哪个清晰度、系统下载器给的编号。 */
 data class DownloadRecord(val item: VideoItem, val quality: String, val downloadId: Long)
 
-class HistoryStore(context: Context) : SQLiteOpenHelper(context, "iwaraflow.db", null, 4) {
+class HistoryStore(context: Context) : SQLiteOpenHelper(context, "iwaraflow.db", null, 5) {
     override fun onCreate(db: SQLiteDatabase) {
         db.execSQL(
             """CREATE TABLE history(
@@ -76,6 +76,13 @@ class HistoryStore(context: Context) : SQLiteOpenHelper(context, "iwaraflow.db",
             )
         }
         if (oldVersion < 4) db.execSQL(DOWNLOADS_TABLE)
+        if (oldVersion < 5) {
+            // 4 → 5：下载记录带上作者 id / 用户名 / 简介，已下载的视频离线也能进作者主页、看简介。
+            // 从 <4 直接升上来的表建出来就带这几列，ALTER 会报重复，所以逐条兜住。
+            for (column in listOf("author_id TEXT NOT NULL DEFAULT ''", "author_username TEXT NOT NULL DEFAULT ''", "description TEXT NOT NULL DEFAULT ''")) {
+                try { db.execSQL("ALTER TABLE downloads ADD COLUMN $column") } catch (_: Throwable) { }
+            }
+        }
     }
 
     /** 下载的时候记一笔，"已下载"那一页读的就是这张表。 */
@@ -89,8 +96,26 @@ class HistoryStore(context: Context) : SQLiteOpenHelper(context, "iwaraflow.db",
             put("tags", item.tags.joinToString("\u001F"))
             put("download_id", downloadId)
             put("created_at", System.currentTimeMillis())
+            put("author_id", item.authorId)
+            put("author_username", item.authorUsername)
+            put("description", item.description)
         }
         writableDatabase.insertWithOnConflict("downloads", null, values, SQLiteDatabase.CONFLICT_REPLACE)
+    }
+
+    /**
+     * 给已有的下载记录补上作者 id / 用户名 / 简介。旧版本下载的、或从系统下载器补录的记录
+     * 没有这些字段，播放时联网拉到一次详情就回写，之后视频变私密或者离线也还能用。
+     * 传空串的字段不覆盖已有的值。
+     */
+    @Synchronized
+    fun updateDownloadDetail(videoId: String, authorId: String, authorUsername: String, description: String) {
+        val values = ContentValues()
+        if (authorId.isNotBlank()) values.put("author_id", authorId)
+        if (authorUsername.isNotBlank()) values.put("author_username", authorUsername)
+        if (description.isNotBlank()) values.put("description", description)
+        if (values.size() == 0) return
+        writableDatabase.update("downloads", values, "video_id=?", arrayOf(videoId))
     }
 
     @Synchronized
@@ -98,7 +123,7 @@ class HistoryStore(context: Context) : SQLiteOpenHelper(context, "iwaraflow.db",
         val out = ArrayList<DownloadRecord>()
         readableDatabase.query(
             "downloads",
-            arrayOf("video_id", "quality", "title", "author", "tags", "download_id"),
+            arrayOf("video_id", "quality", "title", "author", "tags", "download_id", "author_id", "author_username", "description"),
             null, null, null, null, "created_at DESC", limit.toString()
         ).use { c ->
             while (c.moveToNext()) {
@@ -108,7 +133,10 @@ class HistoryStore(context: Context) : SQLiteOpenHelper(context, "iwaraflow.db",
                         title = c.getString(2),
                         author = c.getString(3),
                         tags = splitTags(c.getString(4)),
-                        likes = 0
+                        likes = 0,
+                        authorId = c.getString(6).orEmpty(),
+                        authorUsername = c.getString(7).orEmpty(),
+                        description = c.getString(8).orEmpty()
                     ),
                     quality = c.getString(1),
                     downloadId = c.getLong(5)
@@ -322,6 +350,9 @@ class HistoryStore(context: Context) : SQLiteOpenHelper(context, "iwaraflow.db",
                 tags TEXT NOT NULL,
                 download_id INTEGER NOT NULL,
                 created_at INTEGER NOT NULL,
+                author_id TEXT NOT NULL DEFAULT '',
+                author_username TEXT NOT NULL DEFAULT '',
+                description TEXT NOT NULL DEFAULT '',
                 PRIMARY KEY(video_id, quality)
             )""".trimIndent()
     }

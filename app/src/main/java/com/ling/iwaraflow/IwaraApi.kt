@@ -583,6 +583,22 @@ class IwaraApi(context: Context, private val apiRoot: String = DEFAULT_API_ROOT)
 
         /** Iwara 列表接口的服务端上限，请求更大的 limit 也只会返回这么多。 */
         const val MAX_PAGE_LIMIT = 50
+
+        /**
+         * 把服务端的错误码（形如 `errors.privateVideo`）翻成能看懂的话；认不出的原样返回。
+         */
+        fun explainError(error: Throwable): String {
+            val raw = error.message?.trim().orEmpty()
+            return when (raw) {
+                "errors.privateVideo" -> "视频已被作者设为私密"
+                "errors.notFound", "errors.videoNotFound" -> "视频已被删除或不存在"
+                "errors.unauthorized", "errors.tokenExpired" -> "需要登录后才能查看"
+                "errors.forbidden" -> "没有权限查看"
+                "errors.tooManyRequests" -> "请求太频繁，稍后再试"
+                "" -> "未知错误"
+                else -> raw
+            }
+        }
     }
 }
 

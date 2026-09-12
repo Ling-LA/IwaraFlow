@@ -542,8 +542,13 @@ class SearchActivity : AppCompatActivity() {
     private fun enterPip() {
         if (!inFeed || exiting) return
         comments.close()
-        runCatching { enterPictureInPictureMode(pipParams()) }
-            .onFailure { Toast.makeText(this, "画中画启动失败：${it.message}", Toast.LENGTH_SHORT).show() }
+        // 先登记再进：系统把本页挪进独立任务时主页会被顶上来，那一刻它就得知道有小窗。
+        PipRegistry.enter(this)
+        val entered = runCatching { enterPictureInPictureMode(pipParams()) }.getOrDefault(false)
+        if (!entered) {
+            PipRegistry.leave(this)
+            Toast.makeText(this, "画中画启动失败", Toast.LENGTH_SHORT).show()
+        }
     }
 
     override fun onUserLeaveHint() {

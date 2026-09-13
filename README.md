@@ -90,6 +90,8 @@ Android 原生的 Iwara 竖屏短视频流播放器，提供类似短视频 App 
 ### 应用内更新
 
 - 启动后后台检查 GitHub 最新 Release，约 6 小时一次；主菜单可手动检查
+- 先走 GitHub API（`/repos/…/releases/latest`，带更新说明）；API 连不上或被限流（未登录每小时 60 次，共用出口 IP 时容易碰到）时退到发布页 `github.com/…/releases/latest` 的 302 跳转地址，从 `/releases/tag/vX.Y.Z` 取版本号，APK 地址按固定文件名拼出
+- 检查结果、失败原因、更新包下载开始 / 失败（含 DownloadManager 原因码）都写入诊断信息；连接层错误提示为“连不上 GitHub，请检查代理 / VPN”
 - 显示当前版本、新版本号和更新内容；下载固定签名的 `IwaraFlow-signed.apk` 后拉起系统安装
 - Android 8+ 未授权“安装未知应用”时自动进入授权页，返回后继续安装
 
@@ -275,6 +277,10 @@ gradlew.bat assembleDebug
 > 发布新版本时必须同时提高 `versionCode` 与 `versionName`，否则已安装相同版本号的客户端不会收到更新提示。
 
 ## 更新日志
+
+### v0.11.5
+
+- 检查更新：GitHub API 连不上或被限流时退到发布页跳转地址取版本号，APK 地址按固定文件名拼出；检查结果和失败原因写入诊断信息；连接层错误提示改为“连不上 GitHub，请检查代理 / VPN”；更新包下载失败时给出原因码
 
 ### v0.11.4
 

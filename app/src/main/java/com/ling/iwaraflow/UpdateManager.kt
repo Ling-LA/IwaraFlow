@@ -27,7 +27,8 @@ import java.util.concurrent.Executors
 import java.util.concurrent.TimeUnit
 
 class UpdateManager(private val activity: Activity) {
-    private val latestReleaseApi = "https://api.github.com/repos/Ling-LA/IwaraFlow/releases/latest"
+    private val latestReleaseApi = "https://api.github.com/repos/$REPO/releases/latest"
+    private val latestReleasePage = "https://github.com/$REPO/releases/latest"
     private val prefs = activity.getSharedPreferences("iwaraflow_updates", Context.MODE_PRIVATE)
     private val executor = Executors.newSingleThreadExecutor()
     private val client = OkHttpClient.Builder()
@@ -35,6 +36,8 @@ class UpdateManager(private val activity: Activity) {
         .readTimeout(20, TimeUnit.SECONDS)
         .followRedirects(true)
         .build()
+    /** 备用通道要看跳转地址本身，不能自动跟随。 */
+    private val noRedirectClient by lazy { client.newBuilder().followRedirects(false).followSslRedirects(false).build() }
 
     private var downloadId = prefs.getLong(KEY_PENDING_DOWNLOAD_ID, -1L)
     private var downloadedUri: Uri? = null
@@ -45,7 +48,9 @@ class UpdateManager(private val activity: Activity) {
         val title: String,
         val notes: String,
         val apkUrl: String,
-        val publishedAt: String
+        val publishedAt: String,
+        /** 这条信息是从哪来的（API / 发布页跳转），只用于诊断。 */
+        val source: String = ""
     )
 
     private val receiver = object : BroadcastReceiver() {
@@ -87,23 +92,68 @@ class UpdateManager(private val activity: Activity) {
                     if (generated.isBlank()) release else release.copy(notes = generated)
                 }
             }
+            result.onSuccess { NavigationDiagnostics.note(activity, "检查更新：最新 v${it.version}（${it.source}），当前 v$current") }
+            result.onFailure { NavigationDiagnostics.note(activity, "检查更新失败：${it.message?.take(200)}") }
             activity.runOnUiThread {
                 waiting?.dismiss()
                 result.onSuccess { release ->
                     if (isNewer(release.version, current)) showUpdateDialog(release, current)
                     else if (manual) Toast.makeText(activity, "当前已是最新版本 v$current", Toast.LENGTH_SHORT).show()
                 }.onFailure {
-                    if (manual) Toast.makeText(activity, "检查更新失败：${it.message}", Toast.LENGTH_LONG).show()
+                    if (manual) Toast.makeText(activity, "检查更新失败：${explain(it)}", Toast.LENGTH_LONG).show()
                 }
             }
         }
     }
 
+    /** 把连接层的错误说成人话；GitHub 在国内经常连不上，提示里直接点出代理。 */
+    private fun explain(error: Throwable): String {
+        val message = error.message.orEmpty()
+        NetworkProxy.explain(message)?.let { return "连不上 GitHub，请检查代理 / VPN 是否对本应用生效" }
+        return message.ifBlank { error.javaClass.simpleName }
+    }
+
+    /**
+     * 先走 GitHub API（有完整的更新说明和资源列表）；API 连不上或被限流（未登录每小时 60 次，
+     * 共用出口 IP 时很容易碰到）就退到发布页的跳转地址：`/releases/latest` 会 302 到
+     * `/releases/tag/vX.Y.Z`，版本号就在里面，APK 地址按固定的文件名拼出来。
+     */
     private fun fetchLatestRelease(): ReleaseInfo {
+        val viaApi = runCatching { fetchLatestViaApi() }
+        viaApi.getOrNull()?.let { return it }
+        val viaPage = runCatching { fetchLatestViaRedirect() }
+        viaPage.getOrNull()?.let { return it }
+        val apiReason = viaApi.exceptionOrNull()?.message ?: "未知"
+        val pageReason = viaPage.exceptionOrNull()?.message ?: "未知"
+        throw IllegalStateException("$apiReason；备用通道：$pageReason", viaApi.exceptionOrNull())
+    }
+
+    private fun fetchLatestViaRedirect(): ReleaseInfo {
+        val request = Request.Builder().url(latestReleasePage).header("User-Agent", "IwaraFlow-Android").build()
+        noRedirectClient.newCall(request).execute().use { response ->
+            val location = response.header("Location").orEmpty()
+            if (response.code !in 300..399 || location.isBlank()) throw IllegalStateException("发布页 HTTP ${response.code}")
+            val version = normalizeVersion(location.substringAfterLast("/tag/", "").substringBefore('?').trim())
+            if (version.isBlank() || version.none { it.isDigit() }) throw IllegalStateException("跳转地址里没有版本号")
+            return ReleaseInfo(
+                version = version,
+                title = "IwaraFlow v$version",
+                notes = "修复问题并改进使用体验。",
+                apkUrl = "https://github.com/$REPO/releases/download/v$version/$RELEASE_APK_NAME",
+                publishedAt = "",
+                source = "发布页跳转"
+            )
+        }
+    }
+
+    private fun fetchLatestViaApi(): ReleaseInfo {
         val request = githubRequest(latestReleaseApi)
         client.newCall(request).execute().use { response ->
             val raw = response.body?.string().orEmpty()
-            if (!response.isSuccessful) throw IllegalStateException("GitHub HTTP ${response.code}")
+            if (!response.isSuccessful) {
+                val limited = response.code == 403 && response.header("X-RateLimit-Remaining") == "0"
+                throw IllegalStateException(if (limited) "GitHub 接口限流（HTTP 403）" else "GitHub HTTP ${response.code}")
+            }
             val json = JSONObject(raw)
             val version = normalizeVersion(json.optString("tag_name"))
             if (version.isBlank()) throw IllegalStateException("Release 缺少版本号")
@@ -124,7 +174,8 @@ class UpdateManager(private val activity: Activity) {
                 title = json.optString("name").ifBlank { "IwaraFlow v$version" },
                 notes = cleanReleaseNotes(json.optString("body")),
                 apkUrl = apkUrl,
-                publishedAt = json.optString("published_at")
+                publishedAt = json.optString("published_at"),
+                source = "GitHub API"
             )
         }
     }
@@ -133,7 +184,7 @@ class UpdateManager(private val activity: Activity) {
     private fun fetchGeneratedNotes(current: String, remote: String): String {
         val from = URLEncoder.encode("v${normalizeVersion(current)}", "UTF-8")
         val to = URLEncoder.encode("v${normalizeVersion(remote)}", "UTF-8")
-        val url = "https://api.github.com/repos/Ling-LA/IwaraFlow/compare/$from...$to"
+        val url = "https://api.github.com/repos/$REPO/compare/$from...$to"
         return runCatching {
             client.newCall(githubRequest(url)).execute().use { response ->
                 if (!response.isSuccessful) return@use ""
@@ -263,8 +314,10 @@ class UpdateManager(private val activity: Activity) {
             downloadId = dm.enqueue(request)
             downloadedUri = null
             prefs.edit().putLong(KEY_PENDING_DOWNLOAD_ID, downloadId).apply()
+            NavigationDiagnostics.note(activity, "更新包开始下载 v${release.version}")
             Toast.makeText(activity, "更新包开始下载，完成后会自动打开安装界面", Toast.LENGTH_LONG).show()
         } catch (e: Exception) {
+            NavigationDiagnostics.note(activity, "更新包下载失败：${e.message?.take(160)}")
             Toast.makeText(activity, "更新下载失败：${e.message}", Toast.LENGTH_LONG).show()
         }
     }
@@ -296,7 +349,10 @@ class UpdateManager(private val activity: Activity) {
                     installDownloadedApk()
                 }
                 DownloadManager.STATUS_FAILED -> {
-                    if (showFailure) Toast.makeText(activity, "更新包下载失败，请重新检查更新", Toast.LENGTH_LONG).show()
+                    val reasonIndex = cursor.getColumnIndex(DownloadManager.COLUMN_REASON)
+                    val reason = if (reasonIndex >= 0) cursor.getInt(reasonIndex) else -1
+                    NavigationDiagnostics.note(activity, "更新包下载失败：DownloadManager reason=$reason")
+                    if (showFailure) Toast.makeText(activity, "更新包下载失败（原因码 $reason），请重新检查更新", Toast.LENGTH_LONG).show()
                     clearPendingDownload()
                 }
             }
@@ -380,6 +436,9 @@ class UpdateManager(private val activity: Activity) {
     }
 
     companion object {
+        private const val REPO = "Ling-LA/IwaraFlow"
+        /** CI 固定上传的资源名，备用通道靠它拼下载地址。 */
+        private const val RELEASE_APK_NAME = "IwaraFlow-signed.apk"
         private const val AUTO_CHECK_INTERVAL_MS = 6 * 60 * 60 * 1000L
         private const val KEY_PENDING_DOWNLOAD_ID = "pending_download_id"
         private const val UPDATE_APK_NAME = "IwaraFlow-update.apk"

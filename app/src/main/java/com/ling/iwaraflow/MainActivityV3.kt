@@ -165,7 +165,8 @@ class MainActivityV3 : AppCompatActivity() {
             onShare = ::shareVideo,
             onComments = ::openComments,
             onInfo = { item -> if (!isInPictureInPictureMode) comments.open(item, CommentsPanel.Tab.INFO) },
-            onSignal = { _, action -> if (action != "comments") rerankQueue() }
+            onSignal = { _, action -> if (action != "comments") rerankQueue() },
+            onDisliked = { item, _ -> afterDislike(item) }
         )
         pager.adapter = adapter
         pager.offscreenPageLimit = 1
@@ -180,8 +181,7 @@ class MainActivityV3 : AppCompatActivity() {
             onNeedLogin = ::showLoginDialog,
             onOpenAuthor = { author -> openAuthor(author.id, author.name, author.username) },
             onOpenChanged = { open -> closeCommentsOnBack.isEnabled = open },
-            onCommentPosted = { item -> history.recordInteraction(item, "comment", 1.5); rerankQueue() },
-            onDislike = ::dislike
+            onCommentPosted = { item -> history.recordInteraction(item, "comment", 1.5); rerankQueue() }
         )
         onBackPressedDispatcher.addCallback(this, closeCommentsOnBack)
         pager.registerOnPageChangeCallback(object : ViewPager2.OnPageChangeCallback() {
@@ -517,12 +517,10 @@ class MainActivityV3 : AppCompatActivity() {
         }
     }
 
-    /** 简介页的“不感兴趣”：作者和标签记负反馈、标记已看、跳到下一条，剩余候选重排。 */
-    private fun dislike(item: VideoItem) {
-        history.recordInteraction(item, "dislike", -2.0)
-        history.markSeen(item.id)
-        Toast.makeText(this, "已减少此类推荐", Toast.LENGTH_SHORT).show()
+    /** 长按上半区选了“不感兴趣”（画像已经记好）：剩余候选重排，推荐流里跳到下一条。 */
+    private fun afterDislike(item: VideoItem) {
         rerankQueue()
+        if (mode != "recommend") return
         val position = pager.currentItem
         if (adapter.items.getOrNull(position)?.id == item.id && position + 1 < adapter.itemCount) {
             pager.setCurrentItem(position + 1, true)

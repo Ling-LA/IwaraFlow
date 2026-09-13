@@ -172,22 +172,6 @@
                     android:layout_marginTop="8dp"
                     android:textColor="#FF285C7B"
                     android:textSize="13sp" />
-
-                <!-- 负反馈入口：这个作者 / 这些标签以后少推。 -->
-                <TextView
-                    android:id="@+id/infoDislike"
-                    android:layout_width="wrap_content"
-                    android:layout_height="wrap_content"
-                    android:layout_marginTop="10dp"
-                    android:background="@drawable/bg_reply_toggle"
-                    android:paddingStart="12dp"
-                    android:paddingTop="6dp"
-                    android:paddingEnd="12dp"
-                    android:paddingBottom="6dp"
-                    android:text="不感兴趣 · 减少此类推荐"
-                    android:textColor="#FF607D93"
-                    android:textSize="12sp" />
-
                 <TextView
                     android:id="@+id/infoTranslate"
                     android:layout_width="wrap_content"

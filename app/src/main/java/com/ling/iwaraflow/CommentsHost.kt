@@ -21,9 +21,8 @@ class CommentsHost(
     onOpenAuthor: ((IwaraAuthor) -> Unit)? = null,
     /** 面板开合时通知页面（比如切换返回键的处理）。 */
     private val onOpenChanged: ((Boolean) -> Unit)? = null,
-    /** 评论发送成功 / 点了“不感兴趣”：交给页面记画像。 */
-    onCommentPosted: ((VideoItem) -> Unit)? = null,
-    onDislike: ((VideoItem) -> Unit)? = null
+    /** 评论发送成功：交给页面记画像。 */
+    onCommentPosted: ((VideoItem) -> Unit)? = null
 ) {
     val panel = CommentsPanel(
         root = panelRoot,
@@ -35,8 +34,7 @@ class CommentsHost(
             onOpenChanged?.invoke(open)
         },
         onOpenAuthor = onOpenAuthor,
-        onCommentPosted = onCommentPosted,
-        onDislike = onDislike
+        onCommentPosted = onCommentPosted
     )
 
     init {

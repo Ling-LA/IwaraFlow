@@ -120,12 +120,7 @@ class AuthorActivity : AppCompatActivity() {
             gapPx = (20 * density).toInt(),
             onNeedLogin = { Toast.makeText(this, "请先在主页登录 Iwara", Toast.LENGTH_SHORT).show() },
             onOpenAuthor = ::openAnotherAuthor,
-            onCommentPosted = { history.recordInteraction(it, "comment", 1.5) },
-            onDislike = { item ->
-                history.recordInteraction(item, "dislike", -2.0)
-                history.markSeen(item.id)
-                Toast.makeText(this, "已减少此类推荐", Toast.LENGTH_SHORT).show()
-            }
+            onCommentPosted = { history.recordInteraction(it, "comment", 1.5) }
         )
         pager.registerOnPageChangeCallback(object : ViewPager2.OnPageChangeCallback() {
             override fun onPageSelected(position: Int) {

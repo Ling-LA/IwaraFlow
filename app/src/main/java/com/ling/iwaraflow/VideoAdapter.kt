@@ -41,7 +41,9 @@ class VideoAdapter(
     /** 点了视频标题：打开简介。不传标题就只是文字。 */
     private val onInfo: ((VideoItem) -> Unit)? = null,
     /** 记下了一条明确的行为（like / favorite / comments / share）：页面可据此重排剩余候选。 */
-    private val onSignal: ((VideoItem, String) -> Unit)? = null
+    private val onSignal: ((VideoItem, String) -> Unit)? = null,
+    /** 长按画面上半区选了“不感兴趣”并已写进画像：页面可以跳过这条、重排候选。 */
+    private val onDisliked: ((VideoItem, DislikeSheet.Kind) -> Unit)? = null
 ) : RecyclerView.Adapter<VideoAdapter.Holder>() {
 
     val items = mutableListOf<VideoItem>()
@@ -298,17 +300,29 @@ class VideoAdapter(
             }
         }
 
+        /**
+         * 长按：画面分上下两半——上半区弹“不感兴趣”面板，下半区临时 2× 加速。
+         * 小窗里两样都不做。
+         */
         private val holdToSpeed = Runnable {
-            if (active && !touchMoved) {
-                player?.let { p ->
-                    if (p.playbackState != Player.STATE_IDLE) {
-                        p.setPlaybackSpeed(2f)
-                        speedBoosting = true
-                        speedIndicator.visibility = View.VISIBLE
-                        // 加速已经开始：这根手指归本卡片管，翻页控件不许再抢走
-                        // （抢走就是一个 CANCEL，加速立刻停）。
-                        itemView.parent?.requestDisallowInterceptTouchEvent(true)
-                    }
+            if (!active || touchMoved || pipMode) return@Runnable
+            if (downY < itemView.height / 2f) {
+                // 当作已经“移动”了：松手时不能再触发单击（暂停）。
+                touchMoved = true
+                pendingSingleTap?.let { tapHandler.removeCallbacks(it) }
+                pendingSingleTap = null
+                lastTap = 0L
+                bound?.let { item -> DislikeSheet.show(itemView.context, item, history) { target, kind -> onDisliked?.invoke(target, kind) } }
+                return@Runnable
+            }
+            player?.let { p ->
+                if (p.playbackState != Player.STATE_IDLE) {
+                    p.setPlaybackSpeed(2f)
+                    speedBoosting = true
+                    speedIndicator.visibility = View.VISIBLE
+                    // 加速已经开始：这根手指归本卡片管，翻页控件不许再抢走
+                    // （抢走就是一个 CANCEL，加速立刻停）。
+                    itemView.parent?.requestDisallowInterceptTouchEvent(true)
                 }
             }
         }

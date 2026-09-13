@@ -214,6 +214,13 @@ class VideoAdapter(
         holders.toList().forEach {
             it.setChromeVisible(!enabled)
             it.applyVideoInsets()
+            // 信息栏刚从 GONE 回到 VISIBLE，得重新量一次，进度条才知道该停在哪一行。
+            it.itemView.requestLayout()
+        }
+        // 退出全屏时接着播：退出按钮只有暂停时才露出来，用户是为了够到它才按的暂停。
+        // 不接着播的话会停在“只有进度条、没有信息栏”的样子，像是卡住了。
+        if (!enabled) holders.toList().forEach { holder ->
+            if (holder.bindingAdapterPosition == activePosition) holder.resumePlayback()
         }
     }
 
@@ -813,6 +820,14 @@ class VideoAdapter(
             }
         }
 
+        /** 继续播这张卡片（退出全屏时用）；卡片没在播放状态就不动。 */
+        fun resumePlayback() {
+            val p = player ?: return
+            if (!active || p.playbackState == Player.STATE_IDLE || p.playbackState == Player.STATE_ENDED) return
+            p.playWhenReady = true
+            p.play()
+        }
+
         fun videoAspect(): Float? = aspect.takeIf { it > 0f }
 
         fun readyForIdlePreload(): Boolean = active && player?.playbackState == Player.STATE_READY
@@ -1022,6 +1037,15 @@ class VideoAdapter(
         fun setChromeVisible(visible: Boolean) {
             infoPanel.visibility = if (visible) View.VISIBLE else View.GONE
             actionPanel.visibility = if (visible) View.VISIBLE else View.GONE
+            // 时间牌在普通模式下要让开底下的信息栏；全屏没有那一栏，就往下挪到贴近底边。
+            (seekPreview.layoutParams as? ViewGroup.MarginLayoutParams)?.let { lp ->
+                val dp = itemView.resources.displayMetrics.density
+                val wanted = ((if (fullscreenMode) SEEK_PREVIEW_BOTTOM_FULLSCREEN_DP else SEEK_PREVIEW_BOTTOM_DP) * dp).toInt()
+                if (lp.bottomMargin != wanted) {
+                    lp.bottomMargin = wanted
+                    seekPreview.layoutParams = lp
+                }
+            }
             // 进度条那一套要知道现在是普通、全屏还是小窗：小窗里它整个不出现，
             // 全屏里它反而是唯一的控制入口。
             itemView.setTag(R.id.chrome_mode, when {
@@ -1123,6 +1147,9 @@ class VideoAdapter(
         const val MAX_SEEK_RANGE_MS = 5 * 60 * 1000L
         /** 拖动中位置变化不到这么多就不重新定位，免得每个触摸事件都让播放器忙一次。 */
         const val SEEK_STEP_MS = 250L
+        /** 时间牌离底边多远（dp）：普通模式要让开信息栏，全屏没有那一栏就贴得低一些。 */
+        const val SEEK_PREVIEW_BOTTOM_DP = 150f
+        const val SEEK_PREVIEW_BOTTOM_FULLSCREEN_DP = 56f
 
         /**
          * 按住画面左右滑动时该跳到哪一毫秒。

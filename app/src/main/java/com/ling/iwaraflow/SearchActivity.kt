@@ -397,7 +397,8 @@ class SearchActivity : AppCompatActivity() {
                 runOnUiThread {
                     if (isStale(serial)) return@runOnUiThread
                     state.loading = false
-                    state.failure = e.message
+                    // 状态栏里写原因，不是 errors.serverError 这种码。
+                    state.failure = IwaraApi.explainError(e)
                     updateStatus()
                 }
             }
@@ -429,7 +430,7 @@ class SearchActivity : AppCompatActivity() {
                     if (currentTab == Tab.AUTHORS) authorAdapter.notifyDataSetChanged()
                     state.page += 1
                     state.noMore = users.size < pageSize
-                }.onFailure { state.failure = it.message }
+                }.onFailure { state.failure = IwaraApi.explainError(it) }
                 updateStatus()
             }
         }
@@ -470,7 +471,7 @@ class SearchActivity : AppCompatActivity() {
             append("$subject · $label · $sortHint")
             when {
                 failure != null && count == 0 -> append("  ·  加载失败：$failure")
-                failure != null -> append("  ·  $count 条 · 后续加载失败")
+                failure != null -> append("  ·  $count 条 · 后续加载失败：$failure")
                 loading && count == 0 -> append("  ·  正在搜索…")
                 count == 0 && noMore -> append(if (currentTab == Tab.TAGS) "  ·  没有找到带这个标签的视频" else "  ·  没有找到结果")
                 count == 0 -> append("  ·  正在搜索…")

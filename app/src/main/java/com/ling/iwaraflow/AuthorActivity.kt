@@ -193,7 +193,7 @@ class AuthorActivity : AppCompatActivity() {
                         }
                     }
                     loadNextPage()
-                }.onFailure { statusView.text = "作者资料加载失败：${it.message}" }
+                }.onFailure { statusView.text = "作者资料加载失败：${IwaraApi.explainError(it)}" }
             }
         }
     }
@@ -236,7 +236,7 @@ class AuthorActivity : AppCompatActivity() {
                 runOnUiThread {
                     if (isFinishing || isDestroyed || exiting) return@runOnUiThread
                     loadingPage = false
-                    statusView.text = "作品加载失败：${it.message}"
+                    statusView.text = "作品加载失败：${IwaraApi.explainError(it)}"
                 }
             }
         }

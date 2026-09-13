@@ -64,7 +64,7 @@ class FollowingActivity : AppCompatActivity() {
             result.onSuccess { me -> loadFollowingPage(me.id, 0) }
                 .onFailure { e -> runOnUiThread {
                     if (closed) return@runOnUiThread
-                    status.text = "关注列表加载失败：${e.message}"
+                    status.text = "关注列表加载失败：${IwaraApi.explainError(e)}"
                 } }
         }
     }
@@ -86,7 +86,8 @@ class FollowingActivity : AppCompatActivity() {
                 if (more) loadFollowingPage(userId, page + 1)
             }.onFailure { e -> runOnUiThread {
                 if (closed) return@runOnUiThread
-                status.text = if (items.isEmpty()) "关注列表加载失败：${e.message}" else "已关注 ${items.size} 位作者 · 后续加载失败"
+                status.text = if (items.isEmpty()) "关注列表加载失败：${IwaraApi.explainError(e)}"
+                else "已关注 ${items.size} 位作者 · 后续加载失败：${IwaraApi.explainError(e)}"
             } }
         }
     }

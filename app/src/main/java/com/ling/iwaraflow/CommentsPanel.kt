@@ -383,9 +383,9 @@ class CommentsPanel(
                     if (adapter.itemCount == 0) showStatus("还没有评论，来说第一句") else hideStatus()
                 }.onFailure {
                     if (adapter.itemCount == 0) {
-                        showStatus(NetworkProxy.explain(it.message) ?: "评论加载失败：${it.message}")
+                        showStatus(NetworkProxy.explain(it.message) ?: "评论加载失败：${IwaraApi.explainError(it)}")
                     } else {
-                        Toast.makeText(root.context, "评论加载失败：${it.message}", Toast.LENGTH_SHORT).show()
+                        Toast.makeText(root.context, "评论加载失败：${IwaraApi.explainError(it)}", Toast.LENGTH_SHORT).show()
                     }
                 }
             }

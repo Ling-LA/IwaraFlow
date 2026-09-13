@@ -261,6 +261,11 @@ Iwara 官方点赞会完整同步进 `seen_videos`（服务端一页最多 50 �
 
 - 手动代理通过 `ProxySelector.setDefault` 设为进程级默认，OkHttp、Media3 的 HTTP 数据源和 Coil 全部经过；本机地址不走代理
 - 连接层错误（`Connection reset`、超时、DNS 失败、TLS 握手失败）在视频流的错误提示和诊断中统一翻译为“连不上 Iwara，请检查代理 / VPN 是否对本应用生效”。这类错误表示 Iwara 在当前网络下不可直达，不是应用故障
+- 页面上的失败提示统一走 `IwaraApi.explainError`，给用户看的是原因不是错误码：
+  - 服务端错误码（`errors.serverError`、`errors.notFound`、`errors.tooManyRequests` 等）各有对应说法，认不出的码也写成“Iwara 拒绝了这次请求（…）”
+  - 服务端没给错误码、只剩状态码时按 HTTP 码解释（400 / 401 / 403 / 404 / 429 / 5xx）
+  - 压根没连上时按异常类型和消息解释（DNS 失败、超时、TLS 握手、连接被重置 / 拒绝），并提示检查代理 / VPN
+  - 本来就是中文的提示（如“请先登录 Iwara”）原样显示
 
 ### 界面
 
@@ -289,6 +294,11 @@ gradlew.bat assembleDebug
 > 发布新版本时必须同时提高 `versionCode` 与 `versionName`，否则已安装相同版本号的客户端不会收到更新提示。
 
 ## 更新日志
+
+### v0.12.3
+
+- 加载失败不再显示 `errors.serverError` 这类错误码，改成显示具体原因：服务端错误码、只剩状态码的 HTTP 失败、连不上网的各类异常各有说法，认不出的错误码也带一句解释
+- 搜索页、作者页、关注列表、评论区的失败提示都走同一套说法；搜索页已有结果时后续加载失败也会写明原因
 
 ### v0.12.2
 

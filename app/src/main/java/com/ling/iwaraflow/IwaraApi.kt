@@ -638,19 +638,69 @@ class IwaraApi(context: Context, private val apiRoot: String = DEFAULT_API_ROOT)
         /** 关注（粉丝）数在各个接口里用过的字段名。 */
         private val FOLLOWER_KEYS = listOf("numFollowers", "followers", "followerCount")
 
+        /** 服务端错误码（形如 `errors.privateVideo`）对应的说法。 */
+        private val CODE_REASONS = mapOf(
+            "errors.privateVideo" to "视频已被作者设为私密",
+            "errors.notFound" to "内容已被删除或不存在",
+            "errors.videoNotFound" to "视频已被删除或不存在",
+            "errors.userNotFound" to "找不到这个作者",
+            "errors.unauthorized" to "需要登录后才能查看",
+            "errors.tokenExpired" to "登录已过期，请重新登录",
+            "errors.forbidden" to "没有权限查看",
+            "errors.tooManyRequests" to "请求太频繁，稍后再试",
+            "errors.rateLimit" to "请求太频繁，稍后再试",
+            "errors.serverError" to "Iwara 服务器处理这次请求时出错，稍后再试或换个关键词",
+            "errors.internalServerError" to "Iwara 服务器处理这次请求时出错，稍后再试或换个关键词",
+            "errors.maintenance" to "Iwara 正在维护，稍后再试",
+            "errors.badRequest" to "Iwara 不接受这次请求，换个关键词或写法再试",
+            "errors.invalidRequest" to "Iwara 不接受这次请求，换个关键词或写法再试",
+            "errors.invalidParams" to "Iwara 不接受这次请求的参数，换个关键词或写法再试"
+        )
+
         /**
-         * 把服务端的错误码（形如 `errors.privateVideo`）翻成能看懂的话；认不出的原样返回。
+         * 把失败原因翻成能看懂的话：服务端错误码、纯 HTTP 状态码、连不上网的异常各有说法，
+         * 本来就是中文的提示原样用，实在认不出的错误码也带一句解释而不是光甩一个码。
          */
         fun explainError(error: Throwable): String {
             val raw = error.message?.trim().orEmpty()
-            return when (raw) {
-                "errors.privateVideo" -> "视频已被作者设为私密"
-                "errors.notFound", "errors.videoNotFound" -> "视频已被删除或不存在"
-                "errors.unauthorized", "errors.tokenExpired" -> "需要登录后才能查看"
-                "errors.forbidden" -> "没有权限查看"
-                "errors.tooManyRequests" -> "请求太频繁，稍后再试"
-                "" -> "未知错误"
-                else -> raw
+            CODE_REASONS[raw]?.let { return it }
+            networkReason(error, raw)?.let { return it }
+            if (raw.isBlank()) return "未知错误（${error.javaClass.simpleName}）"
+            // 已经是中文提示（比如“请先登录 Iwara”）就原样用。
+            if (raw.any { it.code in 0x4E00..0x9FFF }) return raw
+            httpReason(raw)?.let { return it }
+            if (raw.startsWith("errors.")) return "Iwara 拒绝了这次请求（${raw.removePrefix("errors.")}）"
+            return raw
+        }
+
+        /** 只剩一个状态码的失败（服务端没给错误码时的兜底消息）。 */
+        private fun httpReason(raw: String): String? {
+            val code = Regex("^HTTP (\\d{3})$").find(raw)?.groupValues?.get(1)?.toIntOrNull() ?: return null
+            return when (code) {
+                400 -> "Iwara 不接受这次请求（HTTP 400），换个关键词或写法再试"
+                401 -> "需要登录后才能查看（HTTP 401）"
+                403 -> "没有权限查看，或该内容在当前地区不可用（HTTP 403）"
+                404 -> "内容不存在或已被删除（HTTP 404）"
+                429 -> "请求太频繁，稍后再试（HTTP 429）"
+                in 500..599 -> "Iwara 服务器出错（HTTP $code），稍后再试"
+                else -> "Iwara 返回了 HTTP $code"
+            }
+        }
+
+        /** 压根没连上服务端的失败：异常类名往往比消息更能说明问题，一起看。 */
+        private fun networkReason(error: Throwable, message: String): String? {
+            val causes = generateSequence(error) { it.cause }.take(5)
+            val text = message + " " + causes.joinToString(" ") { it.javaClass.simpleName }
+            fun has(vararg keys: String) = keys.any { text.contains(it, ignoreCase = true) }
+            return when {
+                has("UnknownHost", "Unable to resolve host", "No address associated") ->
+                    "连不上 iwara.tv（域名解析失败），请检查网络或代理 / VPN"
+                has("timeout", "timed out") -> "连接 Iwara 超时，请稍后再试或检查代理 / VPN"
+                has("SSL", "Handshake") -> "与 Iwara 的加密连接建立失败，请检查代理 / VPN"
+                has("Connection reset", "ECONNRESET", "Connection refused", "Network is unreachable",
+                    "connection abort", "Failed to connect") ->
+                    "连不上 Iwara，请检查代理 / VPN 是否已开启并对本应用生效"
+                else -> null
             }
         }
     }

@@ -670,21 +670,23 @@ class MainActivityV3 : AppCompatActivity() {
     }
 
     /** 搜索结果改成独立页面：视频名 / 标签 / 作者名分别成列表，而不是直接顶掉首页视频流。 */
-    private fun openSearchPage(query: String, asTag: Boolean = false) {
-        if (openingInternalPage || isFinishing || isDestroyed) return
-        openingInternalPage = true
-        adapter.pauseAll()
-        searchLauncher.launch(Intent(this, SearchActivity::class.java)
-            .putExtra(SearchActivity.EXTRA_QUERY, query)
-            .putExtra(SearchActivity.EXTRA_AS_TAG, asTag))
-    }
+    private fun openSearchPage(query: String) = launchSearch(query, asTag = false)
 
     /** 简介页点了标签：收起面板去搜这个标签，并记一笔兴趣。 */
     private fun openTagSearch(tag: String) {
         if (tag.isBlank()) return
         history.recordInteraction(VideoItem("tag:$tag", tag, "", listOf(tag), 0), "search", 1.2)
         comments.close()
-        openSearchPage(tag, asTag = true)
+        launchSearch(tag, asTag = true)
+    }
+
+    private fun launchSearch(query: String, asTag: Boolean) {
+        if (openingInternalPage || isFinishing || isDestroyed) return
+        openingInternalPage = true
+        adapter.pauseAll()
+        searchLauncher.launch(Intent(this, SearchActivity::class.java)
+            .putExtra(SearchActivity.EXTRA_QUERY, query)
+            .putExtra(SearchActivity.EXTRA_AS_TAG, asTag))
     }
 
     private fun openFollowingPage() {

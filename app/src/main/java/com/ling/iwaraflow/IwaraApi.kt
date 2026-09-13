@@ -194,13 +194,21 @@ class IwaraApi(context: Context, private val apiRoot: String = DEFAULT_API_ROOT)
         } }
     }
 
-    fun searchVideos(query: String, page: Int = 0, limit: Int = 32, callback: (Result<List<VideoItem>>) -> Unit) {
-        enqueue(callback) { runCatching { searchVideosBlocking(query, page, limit) } }
+    fun searchVideos(
+        query: String,
+        page: Int = 0,
+        limit: Int = 32,
+        sort: String = "date",
+        callback: (Result<List<VideoItem>>) -> Unit
+    ) {
+        enqueue(callback) { runCatching { searchVideosBlocking(query, page, limit, sort) } }
     }
 
-    fun searchVideosBlocking(query: String, page: Int = 0, limit: Int = 32): List<VideoItem> {
+    /** [sort] 是搜索结果页的排序键（date / views / likes）；服务端忽略它时本地还会再排一次。 */
+    fun searchVideosBlocking(query: String, page: Int = 0, limit: Int = 32, sort: String = "date"): List<VideoItem> {
         val url = "$apiRoot/search".toHttpUrl().newBuilder()
             .addQueryParameter("query", query).addQueryParameter("type", "videos")
+            .addQueryParameter("sort", sort)
             .addQueryParameter("page", page.toString()).addQueryParameter("limit", limit.toString()).build()
         return parseVideoPage(getJsonObject(url.toString(), optionalAuth = true))
     }
@@ -219,21 +227,28 @@ class IwaraApi(context: Context, private val apiRoot: String = DEFAULT_API_ROOT)
             for (i in 0 until results.length()) {
                 val wrapper = results.optJSONObject(i) ?: continue
                 val user = wrapper.optJSONObject("user") ?: wrapper
-                val author = parseAuthor(user)
+                // 关注数可能挂在外层的结果对象上，也可能在 user 里。
+                val author = parseAuthor(user, followers = followerCount(user, wrapper))
                 if (author.id.isNotBlank() || author.username.isNotBlank()) add(author)
             }
         }
     }
 
     /** 标签检索：Iwara 的标签是视频列表接口的 tags 过滤，多个标签用逗号连接表示同时命中。 */
-    fun getVideosByTag(tag: String, page: Int = 0, limit: Int = 24, callback: (Result<List<VideoItem>>) -> Unit) {
-        enqueue(callback) { runCatching { getVideosByTagBlocking(tag, page, limit) } }
+    fun getVideosByTag(
+        tag: String,
+        page: Int = 0,
+        limit: Int = 24,
+        sort: String = "date",
+        callback: (Result<List<VideoItem>>) -> Unit
+    ) {
+        enqueue(callback) { runCatching { getVideosByTagBlocking(tag, page, limit, sort) } }
     }
 
-    fun getVideosByTagBlocking(tag: String, page: Int = 0, limit: Int = 24): List<VideoItem> {
+    fun getVideosByTagBlocking(tag: String, page: Int = 0, limit: Int = 24, sort: String = "date"): List<VideoItem> {
         val url = "$apiRoot/videos".toHttpUrl().newBuilder()
             .addQueryParameter("tags", tag).addQueryParameter("rating", "all")
-            .addQueryParameter("sort", "date")
+            .addQueryParameter("sort", sort)
             .addQueryParameter("page", page.toString())
             .addQueryParameter("limit", limit.coerceAtMost(MAX_PAGE_LIMIT).toString()).build()
         return parseVideoPage(getJsonObject(url.toString(), optionalAuth = true))
@@ -371,7 +386,7 @@ class IwaraApi(context: Context, private val apiRoot: String = DEFAULT_API_ROOT)
         enqueue(callback) { runCatching {
             val root = getJsonObject("$apiRoot/profile/${UriEncoder.encodePath(username)}", optionalAuth = true)
             val user = root.optJSONObject("user") ?: throw IOException("作者资料不存在")
-            parseAuthor(user, root.optString("body"))
+            parseAuthor(user, root.optString("body"), followerCount(root, user))
         } }
     }
 
@@ -546,7 +561,7 @@ class IwaraApi(context: Context, private val apiRoot: String = DEFAULT_API_ROOT)
         return "$imageRoot/image/thumbnail/$fileId/thumbnail-$frame.jpg"
     }
 
-    private fun parseAuthor(user: JSONObject, body: String = ""): IwaraAuthor = IwaraAuthor(
+    private fun parseAuthor(user: JSONObject, body: String = "", followers: Int = -1): IwaraAuthor = IwaraAuthor(
         id = user.optString("id"),
         name = user.optString("name").ifBlank { user.optString("username") },
         username = user.optString("username"),
@@ -554,8 +569,26 @@ class IwaraApi(context: Context, private val apiRoot: String = DEFAULT_API_ROOT)
         avatarUrl = buildAvatarUrl(user),
         following = user.optBoolean("following", false),
         friend = user.optBoolean("friend", false),
-        friendStatus = if (user.optBoolean("friend", false)) "friends" else "none"
+        friendStatus = if (user.optBoolean("friend", false)) "friends" else "none",
+        followers = if (followers >= 0) followers else followerCount(user)
     )
+
+    /**
+     * 关注（粉丝）数。不同接口把它放在不同层级、用过不同字段名，按顺序试一遍；
+     * 都没有就返回 -1，排序时当作未知。布尔值的同名字段（比如“他是否关注了我”）
+     * 取不出整数，会自动跳过。
+     */
+    private fun followerCount(vararg sources: JSONObject?): Int {
+        for (source in sources) {
+            if (source == null) continue
+            for (key in FOLLOWER_KEYS) {
+                if (!source.has(key)) continue
+                val value = source.optInt(key, -1)
+                if (value >= 0) return value
+            }
+        }
+        return -1
+    }
 
     /**
      * 还有没有下一整页。用服务端真实生效的 limit 和总数判断，而不是我们请求的 limit：
@@ -595,6 +628,9 @@ class IwaraApi(context: Context, private val apiRoot: String = DEFAULT_API_ROOT)
 
         /** Iwara 列表接口的服务端上限，请求更大的 limit 也只会返回这么多。 */
         const val MAX_PAGE_LIMIT = 50
+
+        /** 关注（粉丝）数在各个接口里用过的字段名。 */
+        private val FOLLOWER_KEYS = listOf("numFollowers", "followers", "followerCount")
 
         /**
          * 把服务端的错误码（形如 `errors.privateVideo`）翻成能看懂的话；认不出的原样返回。

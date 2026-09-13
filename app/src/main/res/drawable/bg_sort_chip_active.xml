@@ -1,0 +1,6 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- 搜索结果排序入口的选中底：和标题同色系的深胶囊。 -->
+<shape xmlns:android="http://schemas.android.com/apk/res/android" android:shape="rectangle">
+    <solid android:color="#FF285C7B" />
+    <corners android:radius="16dp" />
+</shape>

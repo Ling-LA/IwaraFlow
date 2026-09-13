@@ -14,7 +14,9 @@ data class IwaraAuthor(
     val avatarUrl: String = "",
     var following: Boolean = false,
     var friend: Boolean = false,
-    var friendStatus: String = "none"
+    var friendStatus: String = "none",
+    /** 关注（粉丝）数；服务端没给就是 -1，搜索结果按这个排序时排在后面。 */
+    val followers: Int = -1
 )
 
 /** 关注列表的一页；[total] 是服务端回报的关注总数，[hasMore] 表示后面还有整页数据。 */

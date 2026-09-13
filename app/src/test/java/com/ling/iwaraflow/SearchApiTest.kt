@@ -33,6 +33,7 @@ class SearchApiTest {
                         JSONObject().put("count", 1).put("results", JSONArray().put(
                             JSONObject().put("user", JSONObject()
                                 .put("id", "user-1").put("name", "Fixture 作者").put("username", "fixture")
+                                .put("numFollowers", 1234)
                                 .put("avatar", JSONObject().put("id", "avatar-1").put("name", "face")))
                         ))
                     url.encodedPath.endsWith("/search") ->
@@ -68,6 +69,29 @@ class SearchApiTest {
             assertEquals("Fixture 作者", authors.single().name)
             assertEquals("fixture", authors.single().username)
             assertTrue(authors.single().avatarUrl.endsWith("/image/avatar/avatar-1/face.jpg"))
+            // 作者结果按关注数排序，所以关注数必须解析出来。
+            assertEquals(1234, authors.single().followers)
+        } finally { api.close() }
+    }
+
+    @Test fun bothVideoSearchesCarryTheChosenSortKey() {
+        val api = api()
+        try {
+            api.searchVideosBlocking("fixture", 0, 24, "views")
+            api.getVideosByTagBlocking("ganyu", 0, 24, "likes")
+            assertEquals(
+                listOf("views", "likes"),
+                requests.map { it.requestUrl!!.queryParameter("sort") }
+            )
+        } finally { api.close() }
+    }
+
+    @Test fun videoSearchesDefaultToNewestFirst() {
+        val api = api()
+        try {
+            api.searchVideosBlocking("fixture", 0, 24)
+            api.getVideosByTagBlocking("ganyu", 0, 24)
+            assertEquals(listOf("date", "date"), requests.map { it.requestUrl!!.queryParameter("sort") })
         } finally { api.close() }
     }
 

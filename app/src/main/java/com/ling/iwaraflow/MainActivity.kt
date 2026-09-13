@@ -173,7 +173,7 @@ class MainActivity : AppCompatActivity() {
 
         val query = searchQuery
         if (!query.isNullOrBlank()) {
-            api.searchVideos(query, currentPage, pageSize, callback)
+            api.searchVideos(query, currentPage, pageSize, callback = callback)
         } else {
             val sort = if (mode == "recommend") "trending" else mode
             api.getVideos(sort, currentPage, pageSize, callback)

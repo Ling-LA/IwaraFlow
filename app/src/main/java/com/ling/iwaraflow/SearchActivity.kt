@@ -29,6 +29,8 @@ class SearchActivity : AppCompatActivity() {
     private enum class Tab { VIDEOS, TAGS, AUTHORS }
 
     private class VideoTab {
+        /** 服务端给回来的原始顺序；[items] 是按当前排序重排后给列表看的那份。 */
+        val loaded = mutableListOf<VideoItem>()
         val items = mutableListOf<VideoItem>()
         val playable = mutableListOf<VideoItem>()
         val seenIds = mutableSetOf<String>()
@@ -40,12 +42,13 @@ class SearchActivity : AppCompatActivity() {
         var failure: String? = null
 
         fun reset() {
-            items.clear(); playable.clear(); seenIds.clear()
+            loaded.clear(); items.clear(); playable.clear(); seenIds.clear()
             page = 0; attempt = 0; loading = false; noMore = false; started = false; failure = null
         }
     }
 
     private class AuthorTab {
+        val loaded = mutableListOf<IwaraAuthor>()
         val items = mutableListOf<IwaraAuthor>()
         val seenIds = mutableSetOf<String>()
         var page = 0
@@ -55,7 +58,7 @@ class SearchActivity : AppCompatActivity() {
         var failure: String? = null
 
         fun reset() {
-            items.clear(); seenIds.clear()
+            loaded.clear(); items.clear(); seenIds.clear()
             page = 0; loading = false; noMore = false; started = false; failure = null
         }
     }
@@ -73,6 +76,9 @@ class SearchActivity : AppCompatActivity() {
     private lateinit var statusView: TextView
     private lateinit var input: EditText
     private lateinit var tabViews: Map<Tab, TextView>
+    private lateinit var sortRow: View
+    private lateinit var sortChips: Map<SearchSort.Key, TextView>
+    private lateinit var orderToggle: TextView
 
     private lateinit var videoAdapter: AuthorVideoListAdapter
     private lateinit var tagAdapter: AuthorVideoListAdapter
@@ -86,6 +92,8 @@ class SearchActivity : AppCompatActivity() {
     private var query = ""
     private var querySerial = 0
     private var currentTab = Tab.VIDEOS
+    private var sortKey = SearchSort.DEFAULT_KEY
+    private var sortDescending = SearchSort.DEFAULT_DESCENDING
     private var feedTab: Tab? = null
     private var inFeed = false
     private var exiting = false
@@ -118,6 +126,13 @@ class SearchActivity : AppCompatActivity() {
             Tab.TAGS to findViewById<TextView>(R.id.tabTags),
             Tab.AUTHORS to findViewById<TextView>(R.id.tabAuthors)
         )
+        sortRow = findViewById(R.id.searchSortRow)
+        sortChips = mapOf(
+            SearchSort.Key.DATE to findViewById<TextView>(R.id.sortDate),
+            SearchSort.Key.VIEWS to findViewById<TextView>(R.id.sortViews),
+            SearchSort.Key.LIKES to findViewById<TextView>(R.id.sortLikes)
+        )
+        orderToggle = findViewById(R.id.sortOrder)
 
         videoAdapter = AuthorVideoListAdapter(videoTab.items) { item -> openWork(Tab.VIDEOS, item) }
         tagAdapter = AuthorVideoListAdapter(tagTab.items) { item -> openWork(Tab.TAGS, item) }
@@ -186,7 +201,10 @@ class SearchActivity : AppCompatActivity() {
             if (actionId == EditorInfo.IME_ACTION_SEARCH) { runSearch(input.text.toString()); true } else false
         }
         tabViews.forEach { (tab, view) -> view.setOnClickListener { showTab(tab) } }
+        sortChips.forEach { (key, view) -> view.setOnClickListener { chooseSort(key) } }
+        orderToggle.setOnClickListener { toggleOrder() }
         styleTabs()
+        styleSort()
 
         val initial = intent.getStringExtra(EXTRA_QUERY).orEmpty()
         input.setText(initial)
@@ -222,6 +240,7 @@ class SearchActivity : AppCompatActivity() {
         if (currentTab == tab && resultList.adapter != null) return
         currentTab = tab
         styleTabs()
+        styleSort()
         resultList.adapter = when (tab) {
             Tab.VIDEOS -> videoAdapter
             Tab.TAGS -> tagAdapter
@@ -248,6 +267,60 @@ class SearchActivity : AppCompatActivity() {
             view.setTextColor(if (selected) 0xFF17324A.toInt() else 0xFF607D93.toInt())
             view.setTypeface(null, if (selected) android.graphics.Typeface.BOLD else android.graphics.Typeface.NORMAL)
         }
+    }
+
+    private fun styleSort() {
+        // 作者名一栏固定按关注数多的优先，没有可调的排序。
+        sortRow.visibility = if (currentTab == Tab.AUTHORS) View.GONE else View.VISIBLE
+        sortChips.forEach { (key, view) ->
+            val selected = key == sortKey
+            view.setBackgroundResource(if (selected) R.drawable.bg_sort_chip_active else R.drawable.bg_sort_chip)
+            view.setTextColor(if (selected) 0xFFFFFFFF.toInt() else 0xFF285C7B.toInt())
+            view.setTypeface(null, if (selected) android.graphics.Typeface.BOLD else android.graphics.Typeface.NORMAL)
+        }
+        orderToggle.text = if (sortDescending) "倒序 ↓" else "顺序 ↑"
+    }
+
+    /**
+     * 换排序键。排序键会带给服务端，所以整批结果都要按新规则重新翻一次页，
+     * 不然「按播放量」只会把已经加载的那几十条换个次序。
+     */
+    private fun chooseSort(key: SearchSort.Key) {
+        if (sortKey == key) return
+        sortKey = key
+        styleSort()
+        if (inFeed) showList()
+        if (query.isBlank()) { updateStatus(); return }
+        querySerial++
+        videoTab.reset(); tagTab.reset()
+        videoAdapter.notifyDataSetChanged()
+        tagAdapter.notifyDataSetChanged()
+        feedTab = null
+        feedAdapter.replace(emptyList())
+        resultList.scrollToPosition(0)
+        if (currentTab != Tab.AUTHORS) loadNextPage(currentTab)
+        updateStatus()
+    }
+
+    /** 顺序 / 倒序。Iwara 没有升序参数，所以这一下只把已加载的结果换个方向。 */
+    private fun toggleOrder() {
+        sortDescending = !sortDescending
+        styleSort()
+        resort(videoTab, Tab.VIDEOS)
+        resort(tagTab, Tab.TAGS)
+        if (currentTab != Tab.AUTHORS) resultList.scrollToPosition(0)
+        updateStatus()
+    }
+
+    /** 按当前排序重建展示用的列表；适配器和 playable 都指着这两个 list。 */
+    private fun resort(state: VideoTab, tab: Tab) {
+        val currentId = if (inFeed && feedTab == tab) feedAdapter.items.getOrNull(pager.currentItem)?.id else null
+        state.items.clear()
+        state.items += SearchSort.sorted(state.loaded, sortKey, sortDescending)
+        state.playable.clear()
+        state.playable += state.items.filter { it.playbackIssue == null }
+        if (currentTab == tab) adapterFor(tab).notifyDataSetChanged()
+        if (inFeed && feedTab == tab) rebuildFeed(currentId)
     }
 
     private fun currentCount(): Int = when (currentTab) {
@@ -308,19 +381,14 @@ class SearchActivity : AppCompatActivity() {
                         if (isStale(serial)) return@inspectAll
                         runOnUiThread {
                             if (isStale(serial)) return@runOnUiThread
-                            val currentId = if (inFeed && feedTab == tab) {
-                                feedAdapter.items.getOrNull(pager.currentItem)?.id
-                            } else null
                             val fresh = checked.filter { state.seenIds.add(it.id) }
                             fresh.forEach { it.localFavorite = history.isLocalFavorite(it.id) }
-                            val start = state.items.size
-                            state.items += fresh
-                            state.playable += fresh.filter { it.playbackIssue == null }
-                            if (currentTab == tab) adapterFor(tab).notifyItemRangeInserted(start, fresh.size)
+                            state.loaded += fresh
                             state.page += 1
                             state.noMore = raw.size < pageSize
                             state.loading = false
-                            if (inFeed && feedTab == tab) rebuildFeed(currentId)
+                            // 新一页进来后整份结果重排一次，排序才是对整批结果生效的。
+                            resort(state, tab)
                             updateStatus()
                         }
                     }
@@ -335,8 +403,8 @@ class SearchActivity : AppCompatActivity() {
             }
         }
         updateStatus()
-        if (tab == Tab.TAGS) api.getVideosByTag(candidates[state.attempt], state.page, pageSize, handler)
-        else api.searchVideos(query, state.page, pageSize, handler)
+        if (tab == Tab.TAGS) api.getVideosByTag(candidates[state.attempt], state.page, pageSize, sortKey.api, handler)
+        else api.searchVideos(query, state.page, pageSize, sortKey.api, handler)
     }
 
     private fun loadAuthorPage() {
@@ -354,9 +422,11 @@ class SearchActivity : AppCompatActivity() {
                 state.loading = false
                 result.onSuccess { users ->
                     val fresh = users.filter { state.seenIds.add(it.id.ifBlank { it.username }) }
-                    val start = state.items.size
-                    state.items += fresh
-                    if (currentTab == Tab.AUTHORS) authorAdapter.notifyItemRangeInserted(start, fresh.size)
+                    state.loaded += fresh
+                    // 作者名固定按关注数多的优先：每来一页都把整份结果重排。
+                    state.items.clear()
+                    state.items += SearchSort.sortedAuthors(state.loaded)
+                    if (currentTab == Tab.AUTHORS) authorAdapter.notifyDataSetChanged()
                     state.page += 1
                     state.noMore = users.size < pageSize
                 }.onFailure { state.failure = it.message }
@@ -395,8 +465,9 @@ class SearchActivity : AppCompatActivity() {
         }
         val count = currentCount()
         val subject = if (currentTab == Tab.TAGS) activeTags().ifBlank { query } else "“$query”"
+        val sortHint = if (currentTab == Tab.AUTHORS) "关注数优先" else SearchSort.label(sortKey, sortDescending)
         statusView.text = buildString {
-            append("$subject · $label")
+            append("$subject · $label · $sortHint")
             when {
                 failure != null && count == 0 -> append("  ·  加载失败：$failure")
                 failure != null -> append("  ·  $count 条 · 后续加载失败")

@@ -191,6 +191,7 @@ class RecommendationEngine(
      * 负反馈只降权，不永久屏蔽。画像明显不喜欢的（作者 / 标签合计低于 [EXPLORE_NEGATIVE_THRESHOLD]）
      * 打分后沉在候选底部，正常情况下永远露不出来；这里从中挑几条作为**探索位**，
      * 每 [EXPLORE_EVERY] 条塞一条到随机位置——口味变了还有机会被重新发现，其余照旧留在底部。
+     * 正常内容不足一个间隔时也给一条，探索位不会因为候选少而消失。
      */
     internal fun exploreDisliked(feed: List<VideoItem>): List<VideoItem> {
         val taste = profile
@@ -602,7 +603,7 @@ class RecommendationEngine(
         /** 画像分低于这个值算“明显不喜欢”，只以探索位的形式偶尔出现。 */
         internal const val EXPLORE_NEGATIVE_THRESHOLD = -1.0
         /** 每这么多条正常推荐配一条探索位。 */
-        internal const val EXPLORE_EVERY = 15
+        internal const val EXPLORE_EVERY = 30
         /** 订阅流只是候选来源之一，不再比别的榜单重——占比由插入间隔决定。 */
         private const val SUBSCRIBED_WEIGHT = 2.8
         /** 每这么多条“发现”配一条关注作者的更新，插在这一组里的随机位置。 */

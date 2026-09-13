@@ -68,13 +68,14 @@ class RecommendationQualityTest {
     @Test fun dislikedContentStillSurfacesOccasionallyAsExploration() {
         val e = engine()
         e.useProfile(PreferenceProfile(mapOf("bad" to -5.0), emptyMap()))
-        val feed = (0 until 45).map { by("ok$it", 0) } + (0 until 10).map { by("bad", it) }
+        val feed = (0 until 60).map { by("ok$it", 0) } + (0 until 10).map { by("bad", it) }
         val out = e.exploreDisliked(feed)
         assertEquals(feed.size, out.size)
-        val shown = out.take(48).filter { it.author == "bad" }
-        assertEquals("45 条正常内容配 3 个探索位", 3, shown.size)
-        assertTrue("其余不喜欢的仍沉在底部", out.takeLast(7).all { it.author == "bad" })
-        assertEquals("正常内容顺序不变", (0 until 45).map { "ok$it-0" }, out.filter { it.author != "bad" }.map { it.id })
+        val shown = out.take(62).filter { it.author == "bad" }
+        assertEquals("60 条正常内容配 2 个探索位", 2, shown.size)
+        assertTrue("其余不喜欢的仍沉在底部", out.takeLast(8).all { it.author == "bad" })
+        assertEquals("正常内容顺序不变", (0 until 60).map { "ok$it-0" }, out.filter { it.author != "bad" }.map { it.id })
+        assertEquals(30, RecommendationEngine.EXPLORE_EVERY)
     }
 
     @Test fun rerankMovesLikedAuthorsUpAndDislikedOnesDown() {

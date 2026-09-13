@@ -232,11 +232,11 @@ object Translator {
 
     // ---- 谷歌免费网页接口
 
-    internal fun endpoint(text: String): HttpUrl =
+    internal fun endpoint(text: String, target: String = TARGET): HttpUrl =
         "https://translate.googleapis.com/translate_a/single".toHttpUrl().newBuilder()
             .addQueryParameter("client", "gtx")
             .addQueryParameter("sl", "auto")
-            .addQueryParameter("tl", TARGET)
+            .addQueryParameter("tl", target)
             .addQueryParameter("dt", "t")
             .addQueryParameter("q", text)
             .build()
@@ -382,13 +382,36 @@ object Translator {
      * 请求体只带模型和消息：不带 temperature 之类的采样参数——推理类模型（o 系列、gpt-5 等）
      * 不接受非默认的 temperature，带上就是 400。
      */
-    internal fun openAiBody(text: String, model: String): String =
+    internal fun openAiBody(text: String, model: String, prompt: String = AI_PROMPT): String =
         JSONObject()
             .put("model", model.trim().ifBlank { DEFAULT_AI_MODEL })
             .put("messages", JSONArray()
-                .put(JSONObject().put("role", "system").put("content", AI_PROMPT))
+                .put(JSONObject().put("role", "system").put("content", prompt))
                 .put(JSONObject().put("role", "user").put("content", text)))
             .toString()
+
+    /** 按自己的提示词问一次 AI，拿回原始回答（搜索词互译要的是多行，不能走译文那套解析）。 */
+    internal fun askAiBlocking(text: String, prompt: String): String {
+        val c = config
+        requireKey(c.key, "AI 接口的 API Key")
+        val (url, model) = aiTarget(c)
+        val request = Request.Builder().url(url)
+            .header("Authorization", "Bearer ${c.key.trim()}")
+            .post(openAiBody(text, model, prompt).toRequestBody(jsonType))
+            .build()
+        return openAiContent(execute(request))
+    }
+
+    /** 这份配置能不能直接问 AI：选了 AI 翻译并且填了 Key。 */
+    fun aiReady(): Boolean = config.provider == PROVIDER_OPENAI && config.key.isNotBlank()
+
+    /** 谷歌免费接口翻到指定语言（不带语种就是翻成中文）。 */
+    internal fun translateToBlocking(text: String, target: String): String {
+        val request = Request.Builder().url(endpoint(text, target))
+            .header("User-Agent", "Mozilla/5.0 (Linux; Android 14) AppleWebKit/537.36 Chrome/120 Mobile Safari/537.36")
+            .build()
+        return parseResponse(execute(request)).text
+    }
 
     private fun fetchOpenAi(text: String, c: TranslationConfig): Translation {
         requireKey(c.key, "AI 接口的 API Key")
@@ -404,7 +427,10 @@ object Translator {
      * 标准返回是 `choices[0].message.content`；有些服务把 content 拆成分段数组，把文字段拼起来。
      * 模型偶尔会把整段译文包在引号里，去掉。
      */
-    internal fun parseOpenAi(raw: String): Translation {
+    internal fun parseOpenAi(raw: String): Translation = splitLanguageLine(openAiContent(raw))
+
+    /** 从 OpenAI 兼容的返回里取出模型说的那段话。 */
+    internal fun openAiContent(raw: String): String {
         val root = JSONObject(raw)
         root.optJSONObject("error")?.let { error ->
             throw IOException("AI 接口返回错误：${error.optString("message").ifBlank { error.toString() }.take(160)}")
@@ -419,7 +445,7 @@ object Translator {
             else -> ""
         }.trim()
         if (content.isBlank()) throw IOException("没有翻出内容")
-        return splitLanguageLine(content)
+        return content
     }
 
     private val langLine = Regex("^[A-Za-z]{2,3}(?:[-_][A-Za-z]{2,4})?$")

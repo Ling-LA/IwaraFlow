@@ -28,38 +28,78 @@ import androidx.viewpager2.widget.ViewPager2
 class SearchActivity : AppCompatActivity() {
     private enum class Tab { VIDEOS, TAGS, AUTHORS }
 
-    private class VideoTab {
+    /**
+     * 一种写法的翻页进度。搜「克拉拉」时 Clara / クラーラ / 클라라 各是一条，
+     * 轮流翻页，结果并进同一份列表。
+     */
+    private class Variant(val query: String) {
+        var page = 0
+        /** 标签页当前用的是这个词的第几种标签写法（逗号 / 下划线 / 连写）。 */
+        var attempt = 0
+        var loading = false
+        var noMore = false
+    }
+
+    /** 三个结果页共用的翻页状态：几种写法轮着翻，谁都翻完了才算到底。 */
+    private open class TabState {
+        val variants = mutableListOf<Variant>()
+        var cursor = 0
+        var started = false
+        var failure: String? = null
+        /** 连着翻到的都是别的写法搜过的重复结果时，最多再自动翻这么多页。 */
+        var chain = 0
+
+        val loading: Boolean get() = variants.any { it.loading }
+        val noMore: Boolean get() = variants.isNotEmpty() && variants.all { it.noMore }
+
+        /** 轮到的下一条还能翻页的写法；都在翻或都翻完了返回 null。 */
+        fun nextVariant(): Variant? {
+            if (variants.isEmpty() || variants.any { it.loading }) return null
+            for (i in variants.indices) {
+                val index = (cursor + i) % variants.size
+                val variant = variants[index]
+                if (!variant.noMore) {
+                    cursor = (index + 1) % variants.size
+                    return variant
+                }
+            }
+            return null
+        }
+
+        /** 翻译回来后补上新写法：已经拿到的结果不动，新写法从第一页开始翻。 */
+        fun addQueries(queries: List<String>) {
+            val known = variants.map { it.query }.toSet()
+            queries.filter { it !in known }.forEach { variants += Variant(it) }
+        }
+
+        open fun reset(queries: List<String>) {
+            variants.clear()
+            queries.forEach { variants += Variant(it) }
+            cursor = 0; started = false; failure = null; chain = 0
+        }
+    }
+
+    private class VideoTab : TabState() {
         /** 服务端给回来的原始顺序；[items] 是按当前排序重排后给列表看的那份。 */
         val loaded = mutableListOf<VideoItem>()
         val items = mutableListOf<VideoItem>()
         val playable = mutableListOf<VideoItem>()
         val seenIds = mutableSetOf<String>()
-        var page = 0
-        var attempt = 0
-        var loading = false
-        var noMore = false
-        var started = false
-        var failure: String? = null
 
-        fun reset() {
+        override fun reset(queries: List<String>) {
+            super.reset(queries)
             loaded.clear(); items.clear(); playable.clear(); seenIds.clear()
-            page = 0; attempt = 0; loading = false; noMore = false; started = false; failure = null
         }
     }
 
-    private class AuthorTab {
+    private class AuthorTab : TabState() {
         val loaded = mutableListOf<IwaraAuthor>()
         val items = mutableListOf<IwaraAuthor>()
         val seenIds = mutableSetOf<String>()
-        var page = 0
-        var loading = false
-        var noMore = false
-        var started = false
-        var failure: String? = null
 
-        fun reset() {
+        override fun reset(queries: List<String>) {
+            super.reset(queries)
             loaded.clear(); items.clear(); seenIds.clear()
-            page = 0; loading = false; noMore = false; started = false; failure = null
         }
     }
 
@@ -90,6 +130,8 @@ class SearchActivity : AppCompatActivity() {
     private val authorTab = AuthorTab()
 
     private var query = ""
+    /** 这次搜索实际在用的几种写法：原词 + 中英日韩里另外三种的译法。 */
+    private var queries = listOf<String>()
     private var querySerial = 0
     private var currentTab = Tab.VIDEOS
     private var sortKey = SearchSort.DEFAULT_KEY
@@ -226,7 +268,10 @@ class SearchActivity : AppCompatActivity() {
         // 主动搜什么就是对什么感兴趣：关键词按标签记进画像。
         val terms = trimmed.split(Regex("[\\s,，、]+")).filter { it.isNotBlank() }.take(6)
         if (terms.isNotEmpty()) history.recordInteraction(VideoItem("search:$trimmed", trimmed, "", terms, 0), "search", 1.2)
-        videoTab.reset(); tagTab.reset(); authorTab.reset()
+        // 已经翻过的词直接用四种写法开搜；没翻过的先按原词搜着，译文回来再补进去。
+        val start = QueryTranslator.cached(trimmed) ?: listOf(trimmed)
+        queries = start
+        videoTab.reset(start); tagTab.reset(start); authorTab.reset(start)
         videoAdapter.notifyDataSetChanged()
         tagAdapter.notifyDataSetChanged()
         authorAdapter.notifyDataSetChanged()
@@ -234,6 +279,22 @@ class SearchActivity : AppCompatActivity() {
         feedAdapter.replace(emptyList())
         loadNextPage(currentTab)
         updateStatus()
+        expandQuery(trimmed)
+    }
+
+    /** 把搜索词补成中英日韩四种写法；回来得晚也不要紧，直接加到正在搜的几栏里。 */
+    private fun expandQuery(raw: String) {
+        if (QueryTranslator.cached(raw) != null) return
+        QueryTranslator.expand(raw) { expanded ->
+            // 认的是搜索词本身：中途换了排序（会重置翻页）也不该把译好的写法丢掉。
+            if (exiting || isFinishing || isDestroyed) return@expand
+            if (query != raw || expanded.size <= 1) return@expand
+            queries = expanded
+            videoTab.addQueries(expanded); tagTab.addQueries(expanded); authorTab.addQueries(expanded)
+            // 原词可能已经翻到底了：新写法进来后这一栏又有得搜。
+            loadNextPage(currentTab)
+            updateStatus()
+        }
     }
 
     private fun showTab(tab: Tab) {
@@ -292,7 +353,9 @@ class SearchActivity : AppCompatActivity() {
         if (inFeed) showList()
         if (query.isBlank()) { updateStatus(); return }
         querySerial++
-        videoTab.reset(); tagTab.reset()
+        // 几种写法（中英日韩）保持不变，只是各自从第一页按新排序重新翻。
+        val words = queries.ifEmpty { listOf(query) }
+        videoTab.reset(words); tagTab.reset(words)
         videoAdapter.notifyDataSetChanged()
         tagAdapter.notifyDataSetChanged()
         feedTab = null
@@ -340,24 +403,25 @@ class SearchActivity : AppCompatActivity() {
         if (tab == Tab.AUTHORS) loadAuthorPage() else loadVideoPage(tab)
     }
 
-    private fun tagCandidates(): List<String> = TagQuery.candidates(query)
-
-    /** 标签页当前真正在用的标签写法。 */
-    private fun activeTags(): String =
-        tagCandidates().getOrNull(tagTab.attempt)?.let { TagQuery.display(it) }.orEmpty()
+    /** 标签页各种写法当前真正在用的标签。 */
+    private fun activeTags(): String = tagTab.variants
+        .mapNotNull { TagQuery.candidates(it.query).getOrNull(it.attempt)?.let(TagQuery::display) }
+        .joinToString("  ")
 
     private fun loadVideoPage(tab: Tab) {
         val state = videoState(tab) ?: return
-        if (state.loading || state.noMore) return
-        val candidates = tagCandidates()
-        // 只输了分隔符时没有标签可搜，直接收尾而不是拿空列表去取下标。
-        if (tab == Tab.TAGS && candidates.getOrNull(state.attempt) == null) {
+        val variant = state.nextVariant() ?: return
+        val candidates = TagQuery.candidates(variant.query)
+        // 只输了分隔符时没有标签可搜，这种写法直接收尾而不是拿空列表去取下标。
+        if (tab == Tab.TAGS && candidates.getOrNull(variant.attempt) == null) {
             state.started = true
-            state.noMore = true
+            variant.noMore = true
             updateStatus()
+            // 换下一种写法接着搜。
+            loadVideoPage(tab)
             return
         }
-        state.loading = true
+        variant.loading = true
         state.started = true
         state.failure = null
         val serial = querySerial
@@ -366,15 +430,15 @@ class SearchActivity : AppCompatActivity() {
                 if (raw.isEmpty()) {
                     runOnUiThread {
                         if (isStale(serial)) return@runOnUiThread
-                        state.loading = false
-                        // 标签写法没命中就换下一种，全部试完才算没有结果。
-                        if (tab == Tab.TAGS && state.page == 0 && state.attempt + 1 < candidates.size) {
-                            state.attempt += 1
-                            loadVideoPage(tab)
+                        variant.loading = false
+                        // 标签写法没命中就换下一种，全部试完这个词才算没有结果。
+                        if (tab == Tab.TAGS && variant.page == 0 && variant.attempt + 1 < candidates.size) {
+                            variant.attempt += 1
                         } else {
-                            state.noMore = true
-                            updateStatus()
+                            variant.noMore = true
                         }
+                        updateStatus()
+                        loadVideoPage(tab)
                     }
                 } else {
                     gate.inspectAll(raw, prefs.defaultQuality) { checked ->
@@ -384,19 +448,22 @@ class SearchActivity : AppCompatActivity() {
                             val fresh = checked.filter { state.seenIds.add(it.id) }
                             fresh.forEach { it.localFavorite = history.isLocalFavorite(it.id) }
                             state.loaded += fresh
-                            state.page += 1
-                            state.noMore = raw.size < pageSize
-                            state.loading = false
+                            variant.page += 1
+                            variant.noMore = raw.size < pageSize
+                            variant.loading = false
                             // 新一页进来后整份结果重排一次，排序才是对整批结果生效的。
                             resort(state, tab)
                             updateStatus()
+                            // 这一页全是别的写法搜过的重复结果：接着翻，别让列表停在原地。
+                            state.chain = if (fresh.isEmpty()) state.chain + 1 else 0
+                            if (fresh.isEmpty() && !state.noMore && state.chain <= MAX_CHAINED_PAGES) loadVideoPage(tab)
                         }
                     }
                 }
             }.onFailure { e ->
                 runOnUiThread {
                     if (isStale(serial)) return@runOnUiThread
-                    state.loading = false
+                    variant.loading = false
                     // 状态栏里写原因，不是 errors.serverError 这种码。
                     state.failure = IwaraApi.explainError(e)
                     updateStatus()
@@ -404,23 +471,23 @@ class SearchActivity : AppCompatActivity() {
             }
         }
         updateStatus()
-        if (tab == Tab.TAGS) api.getVideosByTag(candidates[state.attempt], state.page, pageSize, sortKey.api, handler)
-        else api.searchVideos(query, state.page, pageSize, sortKey.api, handler)
+        if (tab == Tab.TAGS) api.getVideosByTag(candidates[variant.attempt], variant.page, pageSize, sortKey.api, handler)
+        else api.searchVideos(variant.query, variant.page, pageSize, sortKey.api, handler)
     }
 
     private fun loadAuthorPage() {
         val state = authorTab
-        if (state.loading || state.noMore) return
-        state.loading = true
+        val variant = state.nextVariant() ?: return
+        variant.loading = true
         state.started = true
         state.failure = null
         val serial = querySerial
         updateStatus()
-        api.searchUsers(query, state.page, pageSize) { result ->
+        api.searchUsers(variant.query, variant.page, pageSize) { result ->
             if (isStale(serial)) return@searchUsers
             runOnUiThread {
                 if (isStale(serial)) return@runOnUiThread
-                state.loading = false
+                variant.loading = false
                 result.onSuccess { users ->
                     val fresh = users.filter { state.seenIds.add(it.id.ifBlank { it.username }) }
                     state.loaded += fresh
@@ -428,8 +495,10 @@ class SearchActivity : AppCompatActivity() {
                     state.items.clear()
                     state.items += SearchSort.sortedAuthors(state.loaded)
                     if (currentTab == Tab.AUTHORS) authorAdapter.notifyDataSetChanged()
-                    state.page += 1
-                    state.noMore = users.size < pageSize
+                    variant.page += 1
+                    variant.noMore = users.size < pageSize
+                    state.chain = if (fresh.isEmpty()) state.chain + 1 else 0
+                    if (fresh.isEmpty() && !state.noMore && state.chain <= MAX_CHAINED_PAGES) loadAuthorPage()
                 }.onFailure { state.failure = IwaraApi.explainError(it) }
                 updateStatus()
             }
@@ -465,7 +534,10 @@ class SearchActivity : AppCompatActivity() {
             Tab.AUTHORS -> authorTab.noMore
         }
         val count = currentCount()
-        val subject = if (currentTab == Tab.TAGS) activeTags().ifBlank { query } else "“$query”"
+        // 几种写法一起搜：把实际在搜的词都写出来，看得见中英日韩都覆盖到了。
+        val words = queries.ifEmpty { listOf(query) }
+        val subject = if (currentTab == Tab.TAGS) activeTags().ifBlank { query }
+        else words.joinToString(" / ") { "“$it”" }
         val sortHint = if (currentTab == Tab.AUTHORS) "关注数优先" else SearchSort.label(sortKey, sortDescending)
         statusView.text = buildString {
             append("$subject · $label · $sortHint")
@@ -686,6 +758,9 @@ class SearchActivity : AppCompatActivity() {
     }
 
     companion object {
+        /** 一页全是重复结果时最多接着自动翻几页，免得几种写法互相撞出一串空转。 */
+        private const val MAX_CHAINED_PAGES = 8
+
         const val EXTRA_QUERY = "search_query"
         /** 关键词是一个标签：打开时直接停在「标签」那一页。 */
         const val EXTRA_AS_TAG = "search_as_tag"

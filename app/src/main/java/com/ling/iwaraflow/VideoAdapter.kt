@@ -164,6 +164,22 @@ class VideoAdapter(
     private var topInset = 0
     private var bottomInset = 0
 
+    /** 上一条被快速划走的视频；连着划走两条同类的（同作者 / 有共同标签）就加压共同的那一维。 */
+    private var lastSkipped: VideoItem? = null
+
+    private fun noteSkipStreak(item: VideoItem) {
+        val last = lastSkipped
+        lastSkipped = item
+        if (last == null || last.id == item.id) return
+        val sameAuthor = item.author.isNotBlank() && last.author.equals(item.author, ignoreCase = true)
+        val shared = item.tags.filter { tag -> last.tags.any { it.equals(tag, ignoreCase = true) } }
+        if (!sameAuthor && shared.isEmpty()) return
+        history.recordInteraction(
+            VideoItem(item.id, item.title, if (sameAuthor) item.author else "", shared, 0, authorId = if (sameAuthor) item.authorId else ""),
+            "skip_streak", SKIP_STREAK_WEIGHT
+        )
+    }
+
     /** 当前正在播的那一条；小窗里的分享按钮要靠它知道分享谁。 */
     fun activeItem(): VideoItem? = items.getOrNull(activePosition)
 
@@ -364,8 +380,14 @@ class VideoAdapter(
             val ratio = if (duration > 0L) position.toDouble() / duration else 0.0
             when {
                 hadError || !readyOnce || endedOnce -> Unit
-                playedMs >= LONG_WATCH_MS || ratio >= 0.5 -> history.recordInteraction(item, "watch", 0.8)
-                swipedAway && playedMs < QUICK_SKIP_MS && ratio < 0.2 -> history.recordInteraction(item, "skip", -0.5)
+                playedMs >= LONG_WATCH_MS || ratio >= 0.5 -> {
+                    history.recordInteraction(item, "watch", 0.8)
+                    lastSkipped = null
+                }
+                swipedAway && playedMs < QUICK_SKIP_MS && ratio < 0.2 -> {
+                    history.recordInteraction(item, "skip", -0.5)
+                    noteSkipStreak(item)
+                }
             }
         }
 
@@ -417,6 +439,10 @@ class VideoAdapter(
                     history.recordInteraction(item, "favorite", 1.4)
                     onSignal?.invoke(item, "favorite")
                     reactionBurst.playOn(favorite, ReactionBurstView.Kind.FAVORITE)
+                } else {
+                    // 取消收藏：当初的兴趣不算数了，往回压一点。
+                    history.recordInteraction(item, "unfavorite", -0.9)
+                    onSignal?.invoke(item, "unfavorite")
                 }
                 // 收藏有动画、取消有图标变化，不用再弹一层提示挡着视频。
                 updateLikeUi(item)
@@ -828,6 +854,10 @@ class VideoAdapter(
                             history.recordInteraction(item, "like", 2.0)
                             history.markSeen(item.id)
                             onSignal?.invoke(item, "like")
+                        } else {
+                            // 取消点赞：比“没点过”还差一点。
+                            history.recordInteraction(item, "unlike", -1.2)
+                            onSignal?.invoke(item, "unlike")
                         }
                         updateLikeUi(item)
                     }.onFailure {
@@ -972,6 +1002,8 @@ class VideoAdapter(
         const val QUICK_SKIP_MS = 4_000L
         /** 真播了这么久算“看得久”（正反馈），看过一半也算。 */
         const val LONG_WATCH_MS = 45_000L
+        /** 连续快速划走同类内容时，对共同的作者 / 标签额外的负反馈。 */
+        const val SKIP_STREAK_WEIGHT = -0.5
         const val MIN_BUFFER_MS = 12_000
         const val MAX_BUFFER_MS = 25_000
         const val BUFFER_FOR_PLAYBACK_MS = 1_200

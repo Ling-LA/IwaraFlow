@@ -65,6 +65,18 @@ class RecommendationQualityTest {
         assertEquals(listOf("2026-01", "2025-12"), engine().monthsToSample(now = 1_767_268_800_000L))
     }
 
+    @Test fun dislikedContentStillSurfacesOccasionallyAsExploration() {
+        val e = engine()
+        e.useProfile(PreferenceProfile(mapOf("bad" to -5.0), emptyMap()))
+        val feed = (0 until 45).map { by("ok$it", 0) } + (0 until 10).map { by("bad", it) }
+        val out = e.exploreDisliked(feed)
+        assertEquals(feed.size, out.size)
+        val shown = out.take(48).filter { it.author == "bad" }
+        assertEquals("45 条正常内容配 3 个探索位", 3, shown.size)
+        assertTrue("其余不喜欢的仍沉在底部", out.takeLast(7).all { it.author == "bad" })
+        assertEquals("正常内容顺序不变", (0 until 45).map { "ok$it-0" }, out.filter { it.author != "bad" }.map { it.id })
+    }
+
     @Test fun rerankMovesLikedAuthorsUpAndDislikedOnesDown() {
         val now = 1_789_000_000_000L
         val items = listOf(

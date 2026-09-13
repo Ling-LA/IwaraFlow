@@ -184,8 +184,34 @@ class RecommendationEngine(
         val (recent, aged) = splitByAge(ranked, System.currentTimeMillis())
         val feed = if (recent.size >= MIN_RECENT_FEED) recent else recent + aged.take(MIN_RECENT_FEED - recent.size)
         val pool = if (classicsEvery > 0) classics + aged else emptyList()
-        return weaveClassics(interleave(spreadAuthors(feed), subscribed), pool).take(MAX_RESULTS)
+        return weaveClassics(interleave(exploreDisliked(spreadAuthors(feed)), subscribed), pool).take(MAX_RESULTS)
     }
+
+    /**
+     * 负反馈只降权，不永久屏蔽。画像明显不喜欢的（作者 / 标签合计低于 [EXPLORE_NEGATIVE_THRESHOLD]）
+     * 打分后沉在候选底部，正常情况下永远露不出来；这里从中挑几条作为**探索位**，
+     * 每 [EXPLORE_EVERY] 条塞一条到随机位置——口味变了还有机会被重新发现，其余照旧留在底部。
+     */
+    internal fun exploreDisliked(feed: List<VideoItem>): List<VideoItem> {
+        val taste = profile
+        val (open, buried) = feed.partition { taste.score(it) >= EXPLORE_NEGATIVE_THRESHOLD }
+        if (buried.isEmpty() || open.isEmpty()) return feed
+        val slots = (open.size / EXPLORE_EVERY).coerceAtLeast(1).coerceAtMost(buried.size)
+        val explore = ArrayDeque(buried.take(slots))
+        val rest = ArrayDeque(open)
+        val out = ArrayList<VideoItem>(feed.size)
+        while (rest.isNotEmpty()) {
+            val block = ArrayList<VideoItem>(EXPLORE_EVERY + 1)
+            repeat(EXPLORE_EVERY) { if (rest.isNotEmpty()) block += rest.removeFirst() }
+            if (explore.isNotEmpty()) block.add(random.nextInt(block.size + 1), explore.removeFirst())
+            out += block
+        }
+        out += buried.drop(slots)
+        return out
+    }
+
+    /** 测试用：直接给定画像。 */
+    internal fun useProfile(taste: PreferenceProfile) { profile = taste }
 
     /**
      * 多样性：同一个作者在任意连续 [AUTHOR_WINDOW] + 1 条里最多出现一次。
@@ -573,6 +599,10 @@ class RecommendationEngine(
         internal const val QUALITY_PRIOR_RATE = 0.05
         /** 同一作者两条视频之间至少隔这么多条。 */
         internal const val AUTHOR_WINDOW = 4
+        /** 画像分低于这个值算“明显不喜欢”，只以探索位的形式偶尔出现。 */
+        internal const val EXPLORE_NEGATIVE_THRESHOLD = -1.0
+        /** 每这么多条正常推荐配一条探索位。 */
+        internal const val EXPLORE_EVERY = 15
         /** 订阅流只是候选来源之一，不再比别的榜单重——占比由插入间隔决定。 */
         private const val SUBSCRIBED_WEIGHT = 2.8
         /** 每这么多条“发现”配一条关注作者的更新，插在这一组里的随机位置。 */

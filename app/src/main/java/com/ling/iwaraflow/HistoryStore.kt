@@ -360,6 +360,10 @@ class HistoryStore(context: Context) : SQLiteOpenHelper(context, "iwaraflow.db",
         val author = HashMap<String, Double>()
         val authorIds = HashMap<String, Double>()
         val tags = HashMap<String, Double>()
+        // 长期持续快速划走：同一作者 / 标签攒够 [LONG_TERM_SKIPS] 次划走，再额外压一层。
+        val authorSkips = HashMap<String, Int>()
+        val authorIdSkips = HashMap<String, Int>()
+        val tagSkips = HashMap<String, Int>()
         readableDatabase.query(
             "interactions",
             arrayOf("author", "tags", "weight", "created_at", "author_id", "action"),
@@ -367,20 +371,27 @@ class HistoryStore(context: Context) : SQLiteOpenHelper(context, "iwaraflow.db",
         ).use { c ->
             while (c.moveToNext()) {
                 val at = c.getLong(3)
+                val action = c.getString(5)
                 val ageDays = ((now - at).coerceAtLeast(0) / 86_400_000.0)
                 val decay = 1.0 / (1.0 + ageDays / 30.0)
-                val session = if (now - at <= SESSION_WINDOW_MS && c.getString(5) != ACTION_CLOUD_LIKE) SESSION_BOOST else 1.0
+                val session = if (now - at <= SESSION_WINDOW_MS && action != ACTION_CLOUD_LIKE) SESSION_BOOST else 1.0
                 val w = c.getDouble(2) * decay * session
                 val a = c.getString(0).lowercase()
-                author[a] = (author[a] ?: 0.0) + w
                 val id = c.getString(4).orEmpty()
+                val itemTags = splitTags(c.getString(1)).map { it.lowercase() }
+                if (a.isNotBlank()) author[a] = (author[a] ?: 0.0) + w
                 if (id.isNotBlank()) authorIds[id] = (authorIds[id] ?: 0.0) + w
-                splitTags(c.getString(1)).forEach { tag ->
-                    val key = tag.lowercase()
-                    tags[key] = (tags[key] ?: 0.0) + w * 0.45
+                itemTags.forEach { key -> tags[key] = (tags[key] ?: 0.0) + w * 0.45 }
+                if (action == ACTION_SKIP) {
+                    if (a.isNotBlank()) authorSkips[a] = (authorSkips[a] ?: 0) + 1
+                    if (id.isNotBlank()) authorIdSkips[id] = (authorIdSkips[id] ?: 0) + 1
+                    itemTags.forEach { key -> tagSkips[key] = (tagSkips[key] ?: 0) + 1 }
                 }
             }
         }
+        authorSkips.forEach { (key, n) -> if (n >= LONG_TERM_SKIPS) author[key] = (author[key] ?: 0.0) - LONG_TERM_AUTHOR_PENALTY }
+        authorIdSkips.forEach { (key, n) -> if (n >= LONG_TERM_SKIPS) authorIds[key] = (authorIds[key] ?: 0.0) - LONG_TERM_AUTHOR_PENALTY }
+        tagSkips.forEach { (key, n) -> if (n >= LONG_TERM_SKIPS) tags[key] = (tags[key] ?: 0.0) - LONG_TERM_TAG_PENALTY }
         return PreferenceProfile(author, tags, authorIds)
     }
 
@@ -406,6 +417,11 @@ class HistoryStore(context: Context) : SQLiteOpenHelper(context, "iwaraflow.db",
         /** 最近这么久里的行为算“当前兴趣”，权重再乘 [SESSION_BOOST]。 */
         const val SESSION_WINDOW_MS = 45L * 60L * 1000L
         const val SESSION_BOOST = 2.5
+        /** 快速划走的动作名；同一作者 / 标签在画像窗口里攒到这么多次就额外压一层。 */
+        const val ACTION_SKIP = "skip"
+        const val LONG_TERM_SKIPS = 5
+        const val LONG_TERM_AUTHOR_PENALTY = 1.5
+        const val LONG_TERM_TAG_PENALTY = 0.8
 
         /** 同一个视频的不同清晰度各算一条，所以主键是视频加清晰度。 */
         private val DOWNLOADS_TABLE = """CREATE TABLE IF NOT EXISTS downloads(

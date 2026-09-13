@@ -269,9 +269,10 @@ class SearchActivity : AppCompatActivity() {
         val terms = trimmed.split(Regex("[\\s,，、]+")).filter { it.isNotBlank() }.take(6)
         if (terms.isNotEmpty()) history.recordInteraction(VideoItem("search:$trimmed", trimmed, "", terms, 0), "search", 1.2)
         // 已经翻过的词直接用四种写法开搜；没翻过的先按原词搜着，译文回来再补进去。
+        // 作者名只按输入的原词搜：作者的用户名就是他自己起的那一个，翻成别的语言反而搜偏。
         val start = QueryTranslator.cached(trimmed) ?: listOf(trimmed)
         queries = start
-        videoTab.reset(start); tagTab.reset(start); authorTab.reset(start)
+        videoTab.reset(start); tagTab.reset(start); authorTab.reset(listOf(trimmed))
         videoAdapter.notifyDataSetChanged()
         tagAdapter.notifyDataSetChanged()
         authorAdapter.notifyDataSetChanged()
@@ -290,9 +291,10 @@ class SearchActivity : AppCompatActivity() {
             if (exiting || isFinishing || isDestroyed) return@expand
             if (query != raw || expanded.size <= 1) return@expand
             queries = expanded
-            videoTab.addQueries(expanded); tagTab.addQueries(expanded); authorTab.addQueries(expanded)
+            // 只有视频名和标签用几种写法搜，作者名一栏不动。
+            videoTab.addQueries(expanded); tagTab.addQueries(expanded)
             // 原词可能已经翻到底了：新写法进来后这一栏又有得搜。
-            loadNextPage(currentTab)
+            if (currentTab != Tab.AUTHORS) loadNextPage(currentTab)
             updateStatus()
         }
     }
@@ -535,7 +537,8 @@ class SearchActivity : AppCompatActivity() {
         }
         val count = currentCount()
         // 几种写法一起搜：把实际在搜的词都写出来，看得见中英日韩都覆盖到了。
-        val words = queries.ifEmpty { listOf(query) }
+        // 作者名只搜原词，就只写原词。
+        val words = if (currentTab == Tab.AUTHORS) listOf(query) else queries.ifEmpty { listOf(query) }
         val subject = if (currentTab == Tab.TAGS) activeTags().ifBlank { query }
         else words.joinToString(" / ") { "“$it”" }
         val sortHint = if (currentTab == Tab.AUTHORS) "关注数优先" else SearchSort.label(sortKey, sortDescending)

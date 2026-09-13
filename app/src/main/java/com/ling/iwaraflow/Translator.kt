@@ -458,7 +458,8 @@ object Translator {
         // “1080p”这种单个字母不算文字，和 needsTranslation 的口径一致。
         if (letters.isEmpty() || !word.containsMatchIn(plain)) return ""
         if (letters.all { Character.UnicodeScript.of(it.code) == Character.UnicodeScript.HAN }) return "zh"
-        if (plain.any { it in "ăâđêôơưĂÂĐÊÔƠƯạảấầẩẫậắằẳẵặẹẻẽếềểễệỉịọỏốồổỗộớờởỡợụủứừửữựỳỵỷỹ" }) return "vi"
+        // 只认越南语独有的字母（đ、ơ、ư 和带声调的元音）；â ê ô 葡萄牙语、法语也有，不能当依据。
+        if (plain.any { it in "đơưĐƠƯạảấầẩẫậắằẳẵặẹẻẽếềểễệỉịọỏốồổỗộớờởỡợụủứừửữựỳỵỷỹ" }) return "vi"
         val words = plain.lowercase().split(Regex("[^\\p{L}']+")).filter { it.isNotBlank() }.toSet()
         fun hits(vararg stop: String) = stop.count { it in words }
         val scores = listOf(

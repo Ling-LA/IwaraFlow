@@ -26,8 +26,6 @@ class PauseSeekBar @JvmOverloads constructor(
     private var dragging = false
     private var observedPlayer: Player? = null
     private var chromeHidden = false
-    private var oldInfoVisibility = View.VISIBLE
-    private var oldActionVisibility = View.VISIBLE
 
     private val updater = object : Runnable {
         override fun run() {
@@ -76,28 +74,34 @@ class PauseSeekBar @JvmOverloads constructor(
         if (view.visibility != View.VISIBLE) view.visibility = View.VISIBLE
     }
 
-    /** 暂停时进度条右上方：还剩多久。 */
-    private fun placeRemaining(root: View, position: Long, duration: Long) {
-        val label = remaining(root) ?: return
-        label.text = "-${formatTime((duration - position).coerceAtLeast(0L))}"
-        if (label.visibility != View.VISIBLE) label.visibility = View.VISIBLE
-        var labelHeight = label.height
-        if (labelHeight <= 0) {
-            label.measure(
+    /** 暂停时进度条右上方那一行：退出全屏 / 小窗 / 剩余时长。 */
+    private fun placeTopRow(root: View, position: Long, duration: Long) {
+        val row = topRow(root) ?: return
+        remaining(root)?.text = "-${formatTime((duration - position).coerceAtLeast(0L))}"
+        root.findViewById<View>(R.id.pauseFullscreenExit)?.visibility =
+            if (mode(root) == MODE_FULLSCREEN) View.VISIBLE else View.GONE
+        if (row.visibility != View.VISIBLE) row.visibility = View.VISIBLE
+        var rowHeight = row.height
+        if (rowHeight <= 0) {
+            row.measure(
                 View.MeasureSpec.makeMeasureSpec(root.width, View.MeasureSpec.AT_MOST),
                 View.MeasureSpec.makeMeasureSpec(root.height, View.MeasureSpec.AT_MOST)
             )
-            labelHeight = label.measuredHeight
+            rowHeight = row.measuredHeight
         }
         val gap = (4f * resources.displayMetrics.density).roundToInt()
-        label.translationY = (translationY - labelHeight - gap).coerceAtLeast(0f)
+        row.translationY = (translationY - rowHeight - gap).coerceAtLeast(0f)
     }
 
+    private fun topRow(root: View?): View? = root?.findViewById(R.id.pauseTopRow)
     private fun remaining(root: View?): TextView? = root?.findViewById(R.id.pauseRemaining)
     private fun preview(root: View?): TextView? = root?.findViewById(R.id.seekPreview)
 
+    /** 卡片当前的显示模式，由 [VideoAdapter] 写在根视图的 tag 上。 */
+    private fun mode(root: View?): String = root?.getTag(R.id.chrome_mode) as? String ?: MODE_NORMAL
+
     private fun hideExtras(root: View?) {
-        remaining(root)?.visibility = View.GONE
+        topRow(root)?.visibility = View.GONE
         preview(root)?.visibility = View.GONE
     }
 
@@ -131,8 +135,9 @@ class PauseSeekBar @JvmOverloads constructor(
             restoreChrome()
             return
         }
-        // 画中画时适配器用 GONE 收起了整套控件，这块底部不归进度条管。
-        if (root.findViewById<View>(R.id.infoPanel)?.visibility == View.GONE) {
+        // 画中画里只有那么点大，这一套控件都不出现。全屏则相反：控件本来就藏着，
+        // 暂停时正要靠这里把进度条、快进后退、剩余时长和退出全屏放出来。
+        if (mode(root) == MODE_PIP) {
             visibility = View.GONE
             controls(root)?.visibility = View.GONE
             hideExtras(root)
@@ -148,7 +153,7 @@ class PauseSeekBar @JvmOverloads constructor(
         if (!dragging) {
             progress = ((position * max.toDouble()) / duration).roundToInt().coerceIn(0, max)
         }
-        placeRemaining(root, position, duration)
+        placeTopRow(root, position, duration)
     }
 
     private fun formatTime(ms: Long): String {
@@ -159,12 +164,12 @@ class PauseSeekBar @JvmOverloads constructor(
         return if (hours > 0) "%d:%02d:%02d".format(hours, minutes, seconds) else "%d:%02d".format(minutes, seconds)
     }
 
-    /** 停在标签下面那一行，够不到时退回到底部固定位置。 */
+    /** 停在标签下面那一行；全屏时信息栏是收起的，就贴到屏幕底部。 */
     private fun placeUnderTags(root: View) {
         val gap = (10f * resources.displayMetrics.density).roundToInt()
         val bottomInset = (28f * resources.displayMetrics.density).roundToInt()
         val tags = root.findViewById<View>(R.id.tags)
-        val wanted = if (tags == null || tags.height <= 0) root.height - height - bottomInset
+        val wanted = if (tags == null || tags.height <= 0 || mode(root) == MODE_FULLSCREEN) root.height - height - bottomInset
         else bottomInRoot(tags, root) + gap
         val lowest = (root.height - height - bottomInset).coerceAtLeast(0)
         translationY = wanted.coerceIn(0, lowest).toFloat()
@@ -199,23 +204,24 @@ class PauseSeekBar @JvmOverloads constructor(
     }
 
     private fun hideChrome(root: View) {
+        chromeHidden = true
+        // 卡片被回收复用后适配器会重新把控件显示出来，所以每次都要重新盖上。
         val info = root.findViewById<View>(R.id.infoPanel)
         val actions = root.findViewById<View>(R.id.actionPanel)
-        if (!chromeHidden) {
-            oldInfoVisibility = info?.visibility ?: View.VISIBLE
-            oldActionVisibility = actions?.visibility ?: View.VISIBLE
-            chromeHidden = true
-        }
-        // 卡片被回收复用后适配器会重新把控件显示出来，所以每次都要重新盖上。
         if (info?.visibility != View.INVISIBLE) info?.visibility = View.INVISIBLE
         if (actions?.visibility != View.INVISIBLE) actions?.visibility = View.INVISIBLE
     }
 
+    /**
+     * 恢复信息栏 / 操作栏。该不该显示由当前模式决定，而不是记住盖上之前的样子——
+     * 在全屏或小窗里把它们放出来就穿帮了。
+     */
     private fun restoreChrome() {
         if (!chromeHidden) return
         val root = cardRoot()
-        root?.findViewById<View>(R.id.infoPanel)?.visibility = oldInfoVisibility
-        root?.findViewById<View>(R.id.actionPanel)?.visibility = oldActionVisibility
+        val wanted = if (mode(root) == MODE_NORMAL) View.VISIBLE else View.GONE
+        root?.findViewById<View>(R.id.infoPanel)?.visibility = wanted
+        root?.findViewById<View>(R.id.actionPanel)?.visibility = wanted
         chromeHidden = false
     }
 
@@ -232,5 +238,11 @@ class PauseSeekBar @JvmOverloads constructor(
             node = node.parent as? View
         }
         return null
+    }
+
+    companion object {
+        const val MODE_NORMAL = "normal"
+        const val MODE_FULLSCREEN = "fullscreen"
+        const val MODE_PIP = "pip"
     }
 }

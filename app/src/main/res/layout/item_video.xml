@@ -258,15 +258,15 @@
             android:textStyle="bold" />
 
         <TextView
-            android:id="@+id/pip"
+            android:id="@+id/fullscreen"
             android:layout_width="match_parent"
             android:layout_height="wrap_content"
             android:layout_marginTop="14dp"
-            android:drawableTop="@drawable/ic_pip"
+            android:drawableTop="@drawable/ic_fullscreen"
             android:drawablePadding="3dp"
             android:gravity="center"
             android:includeFontPadding="false"
-            android:text="小窗"
+            android:text="全屏"
             android:textColor="#FFFFFFFF"
             android:textSize="12sp"
             android:textStyle="bold" />
@@ -295,25 +295,52 @@
         android:layout_marginEnd="16dp"
         android:visibility="gone" />
 
-    <!-- 暂停时进度条右上方的剩余时长；位置由 PauseSeekBar 跟着进度条摆。 -->
-    <TextView
-        android:id="@+id/pauseRemaining"
+    <!-- 暂停时进度条右上方这一行：退出全屏（仅全屏时）/ 小窗 / 剩余时长。
+         位置由 PauseSeekBar 跟着进度条摆，播放时整行收起。 -->
+    <LinearLayout
+        android:id="@+id/pauseTopRow"
         android:layout_width="wrap_content"
         android:layout_height="wrap_content"
         android:layout_gravity="top|end"
         android:layout_marginEnd="16dp"
         android:background="@drawable/bg_pause_controls"
-        android:includeFontPadding="false"
-        android:paddingStart="10dp"
-        android:paddingTop="5dp"
+        android:gravity="center_vertical"
+        android:orientation="horizontal"
+        android:paddingStart="6dp"
+        android:paddingTop="3dp"
         android:paddingEnd="10dp"
-        android:paddingBottom="5dp"
-        android:textColor="#FFFFFFFF"
-        android:textSize="15sp"
-        android:textStyle="bold"
-        android:visibility="gone" />
+        android:paddingBottom="3dp"
+        android:visibility="gone">
 
-    <!-- 拖动进度条时屏幕下方居中显示「当前位置 / 总时长」。 -->
+        <ImageView
+            android:id="@+id/pauseFullscreenExit"
+            android:layout_width="34dp"
+            android:layout_height="34dp"
+            android:contentDescription="退出全屏"
+            android:padding="6dp"
+            android:src="@drawable/ic_fullscreen_exit"
+            android:visibility="gone" />
+
+        <ImageView
+            android:id="@+id/pausePip"
+            android:layout_width="34dp"
+            android:layout_height="34dp"
+            android:contentDescription="小窗"
+            android:padding="6dp"
+            android:src="@drawable/ic_pip" />
+
+        <TextView
+            android:id="@+id/pauseRemaining"
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:layout_marginStart="4dp"
+            android:includeFontPadding="false"
+            android:textColor="#FFFFFFFF"
+            android:textSize="15sp"
+            android:textStyle="bold" />
+    </LinearLayout>
+
+    <!-- 拖动进度条或在画面上左右滑动时，屏幕下方居中显示「当前位置 / 总时长」。 -->
     <TextView
         android:id="@+id/seekPreview"
         android:layout_width="wrap_content"

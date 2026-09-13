@@ -33,7 +33,9 @@ class CommentsPanel(
     /** 点了评论者的头像 / 名字：页面去打开这个用户的主页。 */
     private val onOpenAuthor: ((IwaraAuthor) -> Unit)? = null,
     /** 评论发送成功：页面把它记进口味画像。 */
-    private val onCommentPosted: ((VideoItem) -> Unit)? = null
+    private val onCommentPosted: ((VideoItem) -> Unit)? = null,
+    /** 点了简介页里的标签：页面去搜这个标签。 */
+    private val onOpenTag: ((String) -> Unit)? = null
 ) {
     enum class Tab { INFO, COMMENTS }
 
@@ -45,7 +47,6 @@ class CommentsPanel(
     private val tabCommentsLine = root.findViewById<View>(R.id.panelTabCommentsLine)
     private val list = root.findViewById<RecyclerView>(R.id.commentsList)
     private val status = root.findViewById<TextView>(R.id.commentsStatus)
-    private val infoScroll = root.findViewById<View>(R.id.infoScroll)
     private val infoTitle = root.findViewById<TextView>(R.id.infoTitle)
     private val infoMeta = root.findViewById<TextView>(R.id.infoMeta)
     private val infoTags = root.findViewById<TextView>(R.id.infoTags)
@@ -55,6 +56,7 @@ class CommentsPanel(
     private val replyTarget = root.findViewById<TextView>(R.id.commentsReplyTarget)
     private val inputRow = root.findViewById<View>(R.id.commentsInputRow)
     private val input = root.findViewById<TextView>(R.id.commentsInput)
+    private val pages = root.findViewById<SwipeTabsLayout>(R.id.panelPages)
 
     private val adapter = CommentListAdapter(
         onReply = ::startReply, onLoadReplies = ::loadReplies, onOpenAuthor = onOpenAuthor
@@ -96,10 +98,10 @@ class CommentsPanel(
         root.findViewById<View>(R.id.panelHeader).setOnTouchListener(drag)
         tabInfo.setOnClickListener { selectTab(Tab.INFO) }
         tabComments.setOnClickListener { selectTab(Tab.COMMENTS) }
-        // 内容区左右滑：向左是下一个页签（评论），向右回到简介。
-        root.findViewById<SwipeTabsLayout>(R.id.panelPages).onSwipe = { direction ->
-            selectTab(if (direction < 0) Tab.COMMENTS else Tab.INFO)
-        }
+        // 手指滑到哪一页，页签跟着走。
+        pages.onPageSettled = { index -> applyTab(if (index == 0) Tab.INFO else Tab.COMMENTS) }
+        infoTags.movementMethod = android.text.method.LinkMovementMethod.getInstance()
+        infoTags.highlightColor = 0x33285C7B
         input.setOnClickListener { openInput() }
         renderInput()
     }
@@ -130,7 +132,8 @@ class CommentsPanel(
         infoTranslation = null
         detailRequested = false
         renderInfo(item)
-        selectTab(initialTab)
+        // 刚打开，不用滑动动画，直接停在该在的那一页。
+        selectTab(initialTab, animate = false)
     }
 
     fun close() {
@@ -193,7 +196,14 @@ class CommentsPanel(
         adapter.translationEnabled = false
     }
 
-    private fun selectTab(next: Tab) {
+    /** 切页签：内容区滑过去（打开面板时 [animate] 传 false，直接就位）。 */
+    private fun selectTab(next: Tab, animate: Boolean = true) {
+        pages.setPage(if (next == Tab.INFO) 0 else 1, animate)
+        applyTab(next)
+    }
+
+    /** 页签本身的样式和这一页要做的事；滑动落定和点页签都会走到这里，重复调用无副作用。 */
+    private fun applyTab(next: Tab) {
         tab = next
         val info = next == Tab.INFO
         tabInfoLabel.setTextColor(if (info) 0xFF17324A.toInt() else 0xFF8A9BAA.toInt())
@@ -203,15 +213,12 @@ class CommentsPanel(
         title.setTypeface(null, if (info) android.graphics.Typeface.NORMAL else android.graphics.Typeface.BOLD)
         tabCommentsLine.visibility = if (info) View.INVISIBLE else View.VISIBLE
 
-        infoScroll.visibility = if (info) View.VISIBLE else View.GONE
-        list.visibility = if (info) View.GONE else View.VISIBLE
+        // 两页一直都在，只是被挪到屏幕外；底部的输入栏不属于页面，跟着页签切。
         inputRow.visibility = if (info) View.GONE else View.VISIBLE
         replyBar.visibility = if (!info && replyTo != null) View.VISIBLE else View.GONE
         if (info) {
-            status.visibility = View.GONE
             ensureDescription()
         } else {
-            if (status.text.isNotBlank()) status.visibility = View.VISIBLE
             val item = video
             if (item != null && commentsLoadedFor != item.id) {
                 commentsLoadedFor = item.id
@@ -231,9 +238,33 @@ class CommentsPanel(
         if (item.views > 0) parts += "${formatCount(item.views)} 次播放"
         if (item.likes > 0) parts += "${formatCount(item.likes)} 赞"
         infoMeta.text = parts.joinToString("  ·  ")
-        infoTags.text = item.tags.joinToString("  ") { "#$it" }
-        infoTags.visibility = if (item.tags.isEmpty()) View.GONE else View.VISIBLE
+        renderTags(item)
         renderDescription(item)
+    }
+
+    /** 标签一个一个摆出来，每个都能点：点了去搜这个标签。 */
+    private fun renderTags(item: VideoItem) {
+        infoTags.visibility = if (item.tags.isEmpty()) View.GONE else View.VISIBLE
+        if (item.tags.isEmpty()) return
+        val open = onOpenTag
+        if (open == null) {
+            infoTags.text = item.tags.joinToString("  ") { "#$it" }
+            return
+        }
+        val text = android.text.SpannableStringBuilder()
+        item.tags.forEach { tag ->
+            val start = text.length
+            text.append("#").append(tag)
+            text.setSpan(object : android.text.style.ClickableSpan() {
+                override fun onClick(widget: View) = open(tag)
+                override fun updateDrawState(ds: android.text.TextPaint) {
+                    ds.color = 0xFF285C7B.toInt()
+                    ds.isUnderlineText = false
+                }
+            }, start, text.length, android.text.Spanned.SPAN_EXCLUSIVE_EXCLUSIVE)
+            text.append("   ")
+        }
+        infoTags.text = text
     }
 
     private fun renderDescription(item: VideoItem) {
@@ -471,7 +502,8 @@ class CommentsPanel(
 
     private fun showStatus(text: String) {
         status.text = text
-        status.visibility = if (tab == Tab.COMMENTS) View.VISIBLE else View.GONE
+        // 状态文字就在评论页里，跟着那一页一起被挪进挪出，不用再按页签判断。
+        status.visibility = View.VISIBLE
     }
 
     private fun hideStatus() { status.text = ""; status.visibility = View.GONE }

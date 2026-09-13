@@ -166,7 +166,8 @@ class MainActivityV3 : AppCompatActivity() {
             onComments = ::openComments,
             onInfo = { item -> if (!isInPictureInPictureMode) comments.open(item, CommentsPanel.Tab.INFO) },
             onSignal = { _, action -> if (action != "comments") rerankQueue() },
-            onDisliked = { item, _ -> afterDislike(item) }
+            onDisliked = { item, _ -> afterDislike(item) },
+            onFullscreen = { _, enabled -> setFullscreen(enabled) }
         )
         pager.adapter = adapter
         pager.offscreenPageLimit = 1
@@ -181,9 +182,11 @@ class MainActivityV3 : AppCompatActivity() {
             onNeedLogin = ::showLoginDialog,
             onOpenAuthor = { author -> openAuthor(author.id, author.name, author.username) },
             onOpenChanged = { open -> closeCommentsOnBack.isEnabled = open },
-            onCommentPosted = { item -> history.recordInteraction(item, "comment", 1.5); rerankQueue() }
+            onCommentPosted = { item -> history.recordInteraction(item, "comment", 1.5); rerankQueue() },
+            onOpenTag = ::openTagSearch
         )
         onBackPressedDispatcher.addCallback(this, closeCommentsOnBack)
+        onBackPressedDispatcher.addCallback(this, exitFullscreenOnBack)
         pager.registerOnPageChangeCallback(object : ViewPager2.OnPageChangeCallback() {
             override fun onPageSelected(position: Int) {
                 // 翻到下一条了，上一条的评论就不该还挂着。
@@ -667,11 +670,21 @@ class MainActivityV3 : AppCompatActivity() {
     }
 
     /** 搜索结果改成独立页面：视频名 / 标签 / 作者名分别成列表，而不是直接顶掉首页视频流。 */
-    private fun openSearchPage(query: String) {
+    private fun openSearchPage(query: String, asTag: Boolean = false) {
         if (openingInternalPage || isFinishing || isDestroyed) return
         openingInternalPage = true
         adapter.pauseAll()
-        searchLauncher.launch(Intent(this, SearchActivity::class.java).putExtra(SearchActivity.EXTRA_QUERY, query))
+        searchLauncher.launch(Intent(this, SearchActivity::class.java)
+            .putExtra(SearchActivity.EXTRA_QUERY, query)
+            .putExtra(SearchActivity.EXTRA_AS_TAG, asTag))
+    }
+
+    /** 简介页点了标签：收起面板去搜这个标签，并记一笔兴趣。 */
+    private fun openTagSearch(tag: String) {
+        if (tag.isBlank()) return
+        history.recordInteraction(VideoItem("tag:$tag", tag, "", listOf(tag), 0), "search", 1.2)
+        comments.close()
+        openSearchPage(tag, asTag = true)
     }
 
     private fun openFollowingPage() {
@@ -1174,6 +1187,18 @@ class MainActivityV3 : AppCompatActivity() {
         }
     }
 
+    /** 全屏时返回键先退出全屏，而不是直接退出应用。 */
+    private val exitFullscreenOnBack = object : OnBackPressedCallback(false) {
+        override fun handleOnBackPressed() = setFullscreen(false)
+    }
+
+    private fun setFullscreen(enabled: Boolean) {
+        if (isFinishing || isDestroyed) return
+        if (enabled) comments.close()
+        FullscreenMode.apply(this, adapter, listOf(topBar), enabled)
+        exitFullscreenOnBack.isEnabled = enabled
+    }
+
     private fun pipParams(): PictureInPictureParams =
         PictureInPictureParams.Builder().setAspectRatio(Rational(16, 9)).build()
 
@@ -1192,7 +1217,8 @@ class MainActivityV3 : AppCompatActivity() {
     override fun onPictureInPictureModeChanged(isInPictureInPictureMode: Boolean) {
         super.onPictureInPictureModeChanged(isInPictureInPictureMode)
         if (isInPictureInPictureMode) comments.close()
-        topBar.visibility = if (isInPictureInPictureMode) View.GONE else View.VISIBLE
+        // 全屏时顶栏本来就是收起的，退出小窗别把它放回来。
+        topBar.visibility = if (isInPictureInPictureMode || adapter.isFullscreen) View.GONE else View.VISIBLE
         adapter.setPipMode(isInPictureInPictureMode)
         // 退出小窗时页面已经停在后台（没有被展开成全屏）：是用户把小窗关掉了。
         // onStop 那会儿还算在小窗里没停播，这里必须停，否则没画面还一直出声。

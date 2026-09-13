@@ -104,7 +104,8 @@ class AuthorActivity : AppCompatActivity() {
             onEnded = ::nextWork,
             onNeedLogin = { Toast.makeText(this, "请先在主页登录 Iwara", Toast.LENGTH_SHORT).show() },
             onComments = { comments.open(it) },
-            onInfo = { comments.open(it, CommentsPanel.Tab.INFO) }
+            onInfo = { comments.open(it, CommentsPanel.Tab.INFO) },
+            onFullscreen = { _, enabled -> setFullscreen(enabled) }
         )
         pager.adapter = feedAdapter
         pager.offscreenPageLimit = 1
@@ -120,7 +121,8 @@ class AuthorActivity : AppCompatActivity() {
             gapPx = (20 * density).toInt(),
             onNeedLogin = { Toast.makeText(this, "请先在主页登录 Iwara", Toast.LENGTH_SHORT).show() },
             onOpenAuthor = ::openAnotherAuthor,
-            onCommentPosted = { history.recordInteraction(it, "comment", 1.5) }
+            onCommentPosted = { history.recordInteraction(it, "comment", 1.5) },
+            onOpenTag = ::openTagSearch
         )
         pager.registerOnPageChangeCallback(object : ViewPager2.OnPageChangeCallback() {
             override fun onPageSelected(position: Int) {
@@ -279,6 +281,17 @@ class AuthorActivity : AppCompatActivity() {
         if (lifecycle.currentState.isAtLeast(Lifecycle.State.RESUMED)) feedAdapter.resumeActive()
     }
 
+    /** 简介页点了标签：开搜索页搜这个标签。 */
+    private fun openTagSearch(tag: String) {
+        if (tag.isBlank() || exiting) return
+        history.recordInteraction(VideoItem("tag:$tag", tag, "", listOf(tag), 0), "search", 1.2)
+        comments.close()
+        feedAdapter.pauseAll()
+        startActivity(Intent(this, SearchActivity::class.java)
+            .putExtra(SearchActivity.EXTRA_QUERY, tag)
+            .putExtra(SearchActivity.EXTRA_AS_TAG, true))
+    }
+
     /** 评论区里点了别的用户：另开一个作者页；点的就是当前作者就回到作品列表。 */
     private fun openAnotherAuthor(target: IwaraAuthor) {
         if (exiting) return
@@ -305,9 +318,20 @@ class AuthorActivity : AppCompatActivity() {
         listPage.visibility = View.VISIBLE
     }
 
+    private fun setFullscreen(enabled: Boolean) {
+        if (exiting || isFinishing || isDestroyed) return
+        if (enabled) comments.close()
+        FullscreenMode.apply(this, feedAdapter, listOf(findViewById<View>(R.id.feedBack)), enabled)
+    }
+
     private fun handleBack() {
         if (exiting) return
-        if (comments.isOpen) comments.close() else if (inFeed) showList() else finishSafely()
+        when {
+            feedAdapter.isFullscreen -> setFullscreen(false)
+            comments.isOpen -> comments.close()
+            inFeed -> showList()
+            else -> finishSafely()
+        }
     }
 
     private fun finishSafely() {
@@ -487,7 +511,8 @@ class AuthorActivity : AppCompatActivity() {
     @Suppress("DEPRECATION")
     override fun onPictureInPictureModeChanged(isInPictureInPictureMode: Boolean) {
         super.onPictureInPictureModeChanged(isInPictureInPictureMode)
-        findViewById<View>(R.id.feedBack).visibility = if (isInPictureInPictureMode) View.GONE else View.VISIBLE
+        findViewById<View>(R.id.feedBack).visibility =
+            if (isInPictureInPictureMode || feedAdapter.isFullscreen) View.GONE else View.VISIBLE
         feedAdapter.setPipMode(isInPictureInPictureMode)
         when {
             isInPictureInPictureMode -> { comments.close(); PipRegistry.enter(this) }

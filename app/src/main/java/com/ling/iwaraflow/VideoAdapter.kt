@@ -43,7 +43,9 @@ class VideoAdapter(
     /** 记下了一条明确的行为（like / favorite / comments / share）：页面可据此重排剩余候选。 */
     private val onSignal: ((VideoItem, String) -> Unit)? = null,
     /** 长按画面上半区选了“不感兴趣”并已写进画像：页面可以跳过这条、重排候选。 */
-    private val onDisliked: ((VideoItem, DislikeSheet.Kind) -> Unit)? = null
+    private val onDisliked: ((VideoItem, DislikeSheet.Kind) -> Unit)? = null,
+    /** 点了全屏 / 退出全屏。页面负责转屏和收起自己的顶栏，不传就没有全屏按钮。 */
+    private val onFullscreen: ((VideoItem, Boolean) -> Unit)? = null
 ) : RecyclerView.Adapter<VideoAdapter.Holder>() {
 
     val items = mutableListOf<VideoItem>()
@@ -52,6 +54,7 @@ class VideoAdapter(
     private var preloadTask: Runnable? = null
     private var activePosition = RecyclerView.NO_POSITION
     private var pipMode = false
+    private var fullscreenMode = false
     @Volatile private var released = false
     // Selecting/binding a card is independent from granting a visible page playback.
     @Volatile private var playbackEnabled = false
@@ -201,6 +204,21 @@ class VideoAdapter(
         }
     }
 
+    /**
+     * 全屏：卡片上的信息栏和操作栏全部收起，画面铺满（横屏视频不再上移）。
+     * 暂停时进度条那一套照常出现，见 [PauseSeekBar]。
+     */
+    fun setFullscreen(enabled: Boolean) {
+        if (fullscreenMode == enabled) return
+        fullscreenMode = enabled
+        holders.toList().forEach {
+            it.setChromeVisible(!enabled)
+            it.applyVideoInsets()
+        }
+    }
+
+    val isFullscreen: Boolean get() = fullscreenMode
+
     private fun cancelIdlePreload() {
         preloadTask?.let { preloadHandler.removeCallbacks(it) }
         preloadTask = null
@@ -257,7 +275,7 @@ class VideoAdapter(
         // RecyclerView reuses holders after onViewRecycled; onCreateViewHolder is not called again.
         holders += holder
         holder.bind(items[position])
-        holder.setChromeVisible(!pipMode)
+        holder.setChromeVisible(!pipMode && !fullscreenMode)
         holder.setActive(!released && playbackEnabled && position == activePosition)
     }
 
@@ -273,7 +291,10 @@ class VideoAdapter(
         private val favorite = view.findViewById<ImageView>(R.id.favorite)
         private val quality = view.findViewById<TextView>(R.id.quality)
         private val download = view.findViewById<TextView>(R.id.download)
-        private val pip = view.findViewById<TextView>(R.id.pip)
+        private val fullscreen = view.findViewById<TextView>(R.id.fullscreen)
+        private val pausePip = view.findViewById<View>(R.id.pausePip)
+        private val pauseFullscreenExit = view.findViewById<View>(R.id.pauseFullscreenExit)
+        private val seekPreview = view.findViewById<TextView>(R.id.seekPreview)
         private val share = view.findViewById<TextView>(R.id.share)
         private val comments = view.findViewById<TextView>(R.id.comments)
         private val reactionBurst = view.findViewById<ReactionBurstView>(R.id.reactionBurst)
@@ -308,6 +329,65 @@ class VideoAdapter(
         private var downY = 0f
         private var touchMoved = false
         private var speedBoosting = false
+
+        // ------------------------------------------------------- 按住左右滑动调进度
+
+        /** 正在用手指拖进度。 */
+        private var seeking = false
+        /** 按下那一刻的播放位置，滑动都是相对它算的。 */
+        private var seekFrom = 0L
+        /** 上一次真正发出去的跳转位置，避免每个触摸事件都让播放器重新定位。 */
+        private var lastSeekTarget = -1L
+
+        private fun startSeek() {
+            val p = player ?: return
+            val duration = p.duration
+            if (duration <= 0L) return
+            seeking = true
+            seekFrom = p.currentPosition.coerceIn(0L, duration)
+            lastSeekTarget = -1L
+            // 这根手指归本卡片管，翻页控件不许中途抢走。
+            itemView.parent?.requestDisallowInterceptTouchEvent(true)
+            // 拖动期间跳到最近的关键帧：画面跟得上手指，松手再精确定位。
+            p.setSeekParameters(androidx.media3.exoplayer.SeekParameters.CLOSEST_SYNC)
+            pendingSingleTap?.let { tapHandler.removeCallbacks(it) }
+            pendingSingleTap = null
+            lastTap = 0L
+        }
+
+        private fun updateSeek(dx: Float) {
+            val p = player ?: return
+            val duration = p.duration
+            if (duration <= 0L) return
+            val width = itemView.width.takeIf { it > 0 } ?: return
+            val target = seekTargetFor(seekFrom, dx, width, duration)
+            if (lastSeekTarget < 0L || abs(target - lastSeekTarget) >= SEEK_STEP_MS) {
+                lastSeekTarget = target
+                p.seekTo(target)
+            }
+            val delta = target - seekFrom
+            val sign = if (delta >= 0) "+" else "-"
+            seekPreview.text = "${formatTime(target)} / ${formatTime(duration)}   $sign${formatTime(abs(delta))}"
+            if (seekPreview.visibility != View.VISIBLE) seekPreview.visibility = View.VISIBLE
+        }
+
+        private fun finishSeek() {
+            seeking = false
+            seekPreview.visibility = View.GONE
+            val p = player ?: return
+            p.setSeekParameters(androidx.media3.exoplayer.SeekParameters.DEFAULT)
+            // 松手时按最后停的位置精确定位一次，拖动期间用的是最近的关键帧。
+            if (lastSeekTarget >= 0L) p.seekTo(lastSeekTarget)
+            lastSeekTarget = -1L
+        }
+
+        private fun formatTime(ms: Long): String {
+            val totalSeconds = (ms.coerceAtLeast(0L) + 500L) / 1000L
+            val hours = totalSeconds / 3600
+            val minutes = (totalSeconds % 3600) / 60
+            val seconds = totalSeconds % 60
+            return if (hours > 0) "%d:%02d:%02d".format(hours, minutes, seconds) else "%d:%02d".format(minutes, seconds)
+        }
 
         init {
             // 卡片尺寸一变（进出小窗、分屏）就按新高度重算留白，别拿整屏的数字硬套。
@@ -449,7 +529,11 @@ class VideoAdapter(
             }
             quality.setOnClickListener { showQualityChooser(item, false) }
             download.setOnClickListener { showQualityChooser(item, true) }
-            pip.setOnClickListener { onEnterPip() }
+            // 操作栏是全屏；小窗和退出全屏挪到了暂停时才出现的那一行里。
+            fullscreen.visibility = if (onFullscreen == null) View.GONE else View.VISIBLE
+            fullscreen.setOnClickListener { onFullscreen?.invoke(item, !fullscreenMode) }
+            pausePip.setOnClickListener { onEnterPip() }
+            pauseFullscreenExit.setOnClickListener { onFullscreen?.invoke(item, false) }
             share.setOnClickListener {
                 // 愿意分享给别人，是比点赞还强的兴趣信号。
                 history.recordInteraction(item, "share", 1.0)
@@ -490,31 +574,48 @@ class VideoAdapter(
                         true
                     }
                     MotionEvent.ACTION_MOVE -> {
-                        val dx = abs(event.x - downX)
+                        val rawDx = event.x - downX
+                        val dx = abs(rawDx)
                         val dy = abs(event.y - downY)
-                        if (speedBoosting) {
-                            // 长按加速时手指难免慢慢挪动，按普通的点按阈值判“移动”会把加速掐掉。
-                            // 放宽到大得多的距离，真的想滑走再停。
-                            if (dx > boostSlop || dy > boostSlop) {
-                                touchMoved = true
-                                stopSpeedBoost()
-                                itemView.parent?.requestDisallowInterceptTouchEvent(false)
+                        when {
+                            seeking -> updateSeek(rawDx)
+                            speedBoosting -> {
+                                // 长按加速时手指难免慢慢挪动，按普通的点按阈值判“移动”会把加速掐掉。
+                                // 放宽到大得多的距离，真的想滑走再停。
+                                if (dx > boostSlop || dy > boostSlop) {
+                                    touchMoved = true
+                                    stopSpeedBoost()
+                                    itemView.parent?.requestDisallowInterceptTouchEvent(false)
+                                }
                             }
-                        } else if (!touchMoved && (dx > touchSlop || dy > touchSlop)) {
-                            touchMoved = true
-                            tapHandler.removeCallbacks(holdToSpeed)
+                            // 明显是横着划：进入拖动进度，竖向的翻页交给 ViewPager2。
+                            dx > touchSlop * 2 && dx > dy * 1.5f && !pipMode -> {
+                                tapHandler.removeCallbacks(holdToSpeed)
+                                touchMoved = true
+                                startSeek()
+                                updateSeek(rawDx)
+                            }
+                            !touchMoved && (dx > touchSlop || dy > touchSlop) -> {
+                                touchMoved = true
+                                tapHandler.removeCallbacks(holdToSpeed)
+                            }
                         }
                         true
                     }
                     MotionEvent.ACTION_UP -> {
                         tapHandler.removeCallbacks(holdToSpeed)
                         itemView.parent?.requestDisallowInterceptTouchEvent(false)
-                        if (speedBoosting) stopSpeedBoost() else if (!touchMoved) v.performClick()
+                        when {
+                            seeking -> finishSeek()
+                            speedBoosting -> stopSpeedBoost()
+                            !touchMoved -> v.performClick()
+                        }
                         true
                     }
                     MotionEvent.ACTION_CANCEL -> {
                         tapHandler.removeCallbacks(holdToSpeed)
                         itemView.parent?.requestDisallowInterceptTouchEvent(false)
+                        if (seeking) finishSeek()
                         if (speedBoosting) stopSpeedBoost()
                         touchMoved = true
                         true
@@ -692,10 +793,13 @@ class VideoAdapter(
         fun applyVideoInsets() {
             val height = itemView.height.takeIf { it > 0 } ?: itemView.resources.displayMetrics.heightPixels
             val panelOpen = bottomInset > 0 || topInset > 0
-            val top = if (panelOpen && !pipMode) topInset else 0
+            val top = if (panelOpen && !pipMode && !fullscreenMode) topInset else 0
             val bottom = when {
                 // 小窗：卡片只有两三百像素高，按整屏算出来的留白比窗口还大，画面会被挤没。
                 pipMode -> 0
+                // 全屏：画面铺满，横屏视频也不再上移——上移是为了给底下的信息栏让位，
+                // 而全屏时那一栏根本不在。
+                fullscreenMode -> 0
                 panelOpen -> bottomInset
                 landscape -> (height * LANDSCAPE_LIFT).toInt()
                 else -> 0
@@ -918,6 +1022,13 @@ class VideoAdapter(
         fun setChromeVisible(visible: Boolean) {
             infoPanel.visibility = if (visible) View.VISIBLE else View.GONE
             actionPanel.visibility = if (visible) View.VISIBLE else View.GONE
+            // 进度条那一套要知道现在是普通、全屏还是小窗：小窗里它整个不出现，
+            // 全屏里它反而是唯一的控制入口。
+            itemView.setTag(R.id.chrome_mode, when {
+                pipMode -> PauseSeekBar.MODE_PIP
+                fullscreenMode -> PauseSeekBar.MODE_FULLSCREEN
+                else -> PauseSeekBar.MODE_NORMAL
+            })
         }
 
         fun isPlaying(): Boolean = active && player?.isPlaying == true
@@ -940,7 +1051,9 @@ class VideoAdapter(
 
         private fun releasePlayerOnly() {
             speedBoosting = false
+            seeking = false
             speedIndicator.visibility = View.GONE
+            seekPreview.visibility = View.GONE
             playerView.player = null
             player?.let { p ->
                 p.setPlaybackSpeed(1f)
@@ -1004,6 +1117,27 @@ class VideoAdapter(
         const val LONG_WATCH_MS = 45_000L
         /** 连续快速划走同类内容时，对共同的作者 / 标签额外的负反馈。 */
         const val SKIP_STREAK_WEIGHT = -0.5
+        /** 横向滑动调进度：位移比例的指数，越大越偏向“小幅=微调”。 */
+        const val SEEK_CURVE = 1.8
+        /** 一次滑动最多能调这么多（毫秒）；片长比它短时以片长为准。 */
+        const val MAX_SEEK_RANGE_MS = 5 * 60 * 1000L
+        /** 拖动中位置变化不到这么多就不重新定位，免得每个触摸事件都让播放器忙一次。 */
+        const val SEEK_STEP_MS = 250L
+
+        /**
+         * 按住画面左右滑动时该跳到哪一毫秒。
+         *
+         * 位移占屏宽的比例先取 [SEEK_CURVE] 次方再乘可调范围：手指挪一点是几秒的微调，
+         * 划得越远跨度越大，划满一屏就是整个可调范围。可调范围取片长和
+         * [MAX_SEEK_RANGE_MS] 里小的那个，结果夹在 0 和片长之间。
+         */
+        fun seekTargetFor(fromMs: Long, dx: Float, width: Int, durationMs: Long): Long {
+            if (width <= 0 || durationMs <= 0L) return fromMs.coerceAtLeast(0L)
+            val fraction = (dx / width).coerceIn(-1f, 1f)
+            val curved = Math.signum(fraction) * Math.pow(abs(fraction).toDouble(), SEEK_CURVE).toFloat()
+            val range = durationMs.coerceAtMost(MAX_SEEK_RANGE_MS)
+            return (fromMs + (curved * range).toLong()).coerceIn(0L, durationMs)
+        }
         const val MIN_BUFFER_MS = 12_000
         const val MAX_BUFFER_MS = 25_000
         const val BUFFER_FOR_PLAYBACK_MS = 1_200

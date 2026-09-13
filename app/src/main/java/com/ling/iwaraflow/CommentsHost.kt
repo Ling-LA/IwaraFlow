@@ -22,7 +22,9 @@ class CommentsHost(
     /** 面板开合时通知页面（比如切换返回键的处理）。 */
     private val onOpenChanged: ((Boolean) -> Unit)? = null,
     /** 评论发送成功：交给页面记画像。 */
-    onCommentPosted: ((VideoItem) -> Unit)? = null
+    onCommentPosted: ((VideoItem) -> Unit)? = null,
+    /** 点了简介页里的标签：页面去搜这个标签。 */
+    onOpenTag: ((String) -> Unit)? = null
 ) {
     val panel = CommentsPanel(
         root = panelRoot,
@@ -34,7 +36,8 @@ class CommentsHost(
             onOpenChanged?.invoke(open)
         },
         onOpenAuthor = onOpenAuthor,
-        onCommentPosted = onCommentPosted
+        onCommentPosted = onCommentPosted,
+        onOpenTag = onOpenTag
     )
 
     init {

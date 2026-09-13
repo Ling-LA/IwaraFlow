@@ -107,37 +107,18 @@
         android:layout_height="1dp"
         android:background="#FFEEF2F6" />
 
-    <!-- 两个页签的内容区：左右滑动切换简介 / 评论。 -->
+    <!-- 两个页签的内容区：两页并排，左右滑动或点页签都是滑过去。第 0 页简介、第 1 页评论。 -->
     <com.ling.iwaraflow.SwipeTabsLayout
         android:id="@+id/panelPages"
         android:layout_width="match_parent"
         android:layout_height="0dp"
         android:layout_weight="1">
 
-        <androidx.recyclerview.widget.RecyclerView
-            android:id="@+id/commentsList"
-            android:layout_width="match_parent"
-            android:layout_height="match_parent"
-            android:clipToPadding="false"
-            android:paddingBottom="8dp" />
-
-        <TextView
-            android:id="@+id/commentsStatus"
-            android:layout_width="match_parent"
-            android:layout_height="wrap_content"
-            android:layout_gravity="center"
-            android:gravity="center"
-            android:padding="24dp"
-            android:textColor="#FF8A9BAA"
-            android:textSize="14sp"
-            android:visibility="gone" />
-
         <!-- 简介页：标题、作者 / 日期 / 数据、标签、正文。 -->
         <ScrollView
             android:id="@+id/infoScroll"
             android:layout_width="match_parent"
-            android:layout_height="match_parent"
-            android:visibility="gone">
+            android:layout_height="match_parent">
 
             <LinearLayout
                 android:layout_width="match_parent"
@@ -165,13 +146,16 @@
                     android:textColor="#FF8A9BAA"
                     android:textSize="12sp" />
 
+                <!-- 每个标签都能点，点了直接搜这个标签。 -->
                 <TextView
                     android:id="@+id/infoTags"
                     android:layout_width="match_parent"
                     android:layout_height="wrap_content"
                     android:layout_marginTop="8dp"
+                    android:lineSpacingExtra="4dp"
                     android:textColor="#FF285C7B"
                     android:textSize="13sp" />
+
                 <TextView
                     android:id="@+id/infoTranslate"
                     android:layout_width="wrap_content"
@@ -194,6 +178,31 @@
                     android:textSize="14sp" />
             </LinearLayout>
         </ScrollView>
+
+        <!-- 评论页：列表 + 状态文字（加载中 / 没有评论 / 失败）。 -->
+        <FrameLayout
+            android:id="@+id/panelPageComments"
+            android:layout_width="match_parent"
+            android:layout_height="match_parent">
+
+            <androidx.recyclerview.widget.RecyclerView
+                android:id="@+id/commentsList"
+                android:layout_width="match_parent"
+                android:layout_height="match_parent"
+                android:clipToPadding="false"
+                android:paddingBottom="8dp" />
+
+            <TextView
+                android:id="@+id/commentsStatus"
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:layout_gravity="center"
+                android:gravity="center"
+                android:padding="24dp"
+                android:textColor="#FF8A9BAA"
+                android:textSize="14sp"
+                android:visibility="gone" />
+        </FrameLayout>
     </com.ling.iwaraflow.SwipeTabsLayout>
 
     <!-- 正在回复谁。点“回复”后出现，点 ✕ 取消回到发评论。 -->

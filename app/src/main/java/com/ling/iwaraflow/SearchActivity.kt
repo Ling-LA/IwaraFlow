@@ -142,7 +142,8 @@ class SearchActivity : AppCompatActivity() {
             onEnded = ::nextWork,
             onNeedLogin = { Toast.makeText(this, "请先在主页登录 Iwara", Toast.LENGTH_SHORT).show() },
             onComments = { comments.open(it) },
-            onInfo = { comments.open(it, CommentsPanel.Tab.INFO) }
+            onInfo = { comments.open(it, CommentsPanel.Tab.INFO) },
+            onFullscreen = { _, enabled -> setFullscreen(enabled) }
         )
         pager.adapter = feedAdapter
         pager.offscreenPageLimit = 1
@@ -158,7 +159,14 @@ class SearchActivity : AppCompatActivity() {
             gapPx = (20 * density).toInt(),
             onNeedLogin = { Toast.makeText(this, "请先在主页登录 Iwara", Toast.LENGTH_SHORT).show() },
             onOpenAuthor = ::openAuthor,
-            onCommentPosted = { history.recordInteraction(it, "comment", 1.5) }
+            onCommentPosted = { history.recordInteraction(it, "comment", 1.5) },
+            // 已经在搜索页了：点标签直接在本页重搜，落在「标签」那一栏。
+            onOpenTag = { tag ->
+                comments.close()
+                input.setText(tag)
+                showTab(Tab.TAGS)
+                runSearch(tag)
+            }
         )
         pager.registerOnPageChangeCallback(object : ViewPager2.OnPageChangeCallback() {
             override fun onPageSelected(position: Int) {
@@ -182,6 +190,8 @@ class SearchActivity : AppCompatActivity() {
 
         val initial = intent.getStringExtra(EXTRA_QUERY).orEmpty()
         input.setText(initial)
+        // 从简介页的标签点进来的：直接落在「标签」那一页。
+        if (intent.getBooleanExtra(EXTRA_AS_TAG, false)) showTab(Tab.TAGS)
         if (initial.isNotBlank()) runSearch(initial) else statusView.text = "输入关键词后搜索视频名、标签或作者名"
     }
 
@@ -450,9 +460,20 @@ class SearchActivity : AppCompatActivity() {
         listPage.visibility = View.VISIBLE
     }
 
+    private fun setFullscreen(enabled: Boolean) {
+        if (exiting || isFinishing || isDestroyed) return
+        if (enabled) comments.close()
+        FullscreenMode.apply(this, feedAdapter, listOf(findViewById<View>(R.id.searchFeedBack)), enabled)
+    }
+
     private fun handleBack() {
         if (exiting) return
-        if (comments.isOpen) comments.close() else if (inFeed) showList() else finishSafely()
+        when {
+            feedAdapter.isFullscreen -> setFullscreen(false)
+            comments.isOpen -> comments.close()
+            inFeed -> showList()
+            else -> finishSafely()
+        }
     }
 
     private fun finishSafely() {
@@ -566,7 +587,8 @@ class SearchActivity : AppCompatActivity() {
     @Suppress("DEPRECATION")
     override fun onPictureInPictureModeChanged(isInPictureInPictureMode: Boolean) {
         super.onPictureInPictureModeChanged(isInPictureInPictureMode)
-        findViewById<View>(R.id.searchFeedBack).visibility = if (isInPictureInPictureMode) View.GONE else View.VISIBLE
+        findViewById<View>(R.id.searchFeedBack).visibility =
+            if (isInPictureInPictureMode || feedAdapter.isFullscreen) View.GONE else View.VISIBLE
         feedAdapter.setPipMode(isInPictureInPictureMode)
         when {
             isInPictureInPictureMode -> { comments.close(); PipRegistry.enter(this) }
@@ -593,5 +615,7 @@ class SearchActivity : AppCompatActivity() {
 
     companion object {
         const val EXTRA_QUERY = "search_query"
+        /** 关键词是一个标签：打开时直接停在「标签」那一页。 */
+        const val EXTRA_AS_TAG = "search_as_tag"
     }
 }

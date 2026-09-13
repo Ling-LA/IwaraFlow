@@ -272,12 +272,11 @@ class CommentsPanel(
                     return
                 }
                 infoTranslate.visibility = View.VISIBLE
-                val from = Translator.languageName(s.translation.sourceLang)
                 if (s.showOriginal) {
                     infoTranslate.text = "原文 · 查看中文翻译"
                 } else {
                     infoBody.text = s.translation.text
-                    infoTranslate.text = "翻译自$from · 显示原文"
+                    infoTranslate.text = "${Translator.sourceLabel(s.translation)} · 显示原文"
                 }
                 infoTranslate.setOnClickListener {
                     infoTranslation = s.copy(showOriginal = !s.showOriginal)

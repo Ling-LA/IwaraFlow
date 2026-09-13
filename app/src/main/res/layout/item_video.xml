@@ -304,12 +304,13 @@
         android:layout_marginEnd="16dp"
         android:background="@drawable/bg_pause_controls"
         android:includeFontPadding="false"
-        android:paddingStart="8dp"
-        android:paddingTop="3dp"
-        android:paddingEnd="8dp"
-        android:paddingBottom="3dp"
+        android:paddingStart="10dp"
+        android:paddingTop="5dp"
+        android:paddingEnd="10dp"
+        android:paddingBottom="5dp"
         android:textColor="#FFFFFFFF"
-        android:textSize="11sp"
+        android:textSize="15sp"
+        android:textStyle="bold"
         android:visibility="gone" />
 
     <!-- 拖动进度条时屏幕下方居中显示「当前位置 / 总时长」。 -->

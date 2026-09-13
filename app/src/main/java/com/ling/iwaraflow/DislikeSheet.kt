@@ -39,13 +39,20 @@ object DislikeSheet {
 
         val list = LinearLayout(activity).apply {
             orientation = LinearLayout.VERTICAL
-            setPadding(dp(12), dp(10), dp(12), dp(12))
+            setPadding(dp(12), dp(4), dp(12), dp(12))
             background = androidx.core.content.ContextCompat.getDrawable(activity, R.drawable.bg_comments_panel)
         }
-        list.addView(View(activity).apply {
-            layoutParams = LinearLayout.LayoutParams(dp(40), dp(4)).apply { gravity = Gravity.CENTER_HORIZONTAL; bottomMargin = dp(10) }
-            setBackgroundColor(0xFFD5DEE6.toInt())
-        })
+        val sheet = ScrollView(activity).apply { addView(list) }
+        // 拖拽把手：整块 28dp 高都能按到，按住往下拖过面板高度的四分之一（或者甩得够快）就收起。
+        val handle = android.widget.FrameLayout(activity).apply {
+            layoutParams = LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, dp(28))
+            addView(View(activity).apply {
+                layoutParams = android.widget.FrameLayout.LayoutParams(dp(40), dp(4), Gravity.CENTER)
+                setBackgroundColor(0xFFD5DEE6.toInt())
+            })
+            setOnTouchListener(DragToDismiss(sheet) { dialog.dismiss() })
+        }
+        list.addView(handle)
         fun row(label: String, strong: Boolean = false, onClick: () -> Unit) {
             list.addView(TextView(activity).apply {
                 text = label
@@ -80,7 +87,7 @@ object DislikeSheet {
         divider()
         row("取消") { }
 
-        dialog.setContentView(ScrollView(activity).apply { addView(list) })
+        dialog.setContentView(sheet)
         dialog.setCanceledOnTouchOutside(true)
         dialog.window?.apply {
             setBackgroundDrawable(ColorDrawable(Color.TRANSPARENT))
@@ -110,6 +117,44 @@ object DislikeSheet {
         }
         history.markSeen(item.id)
         onApplied?.invoke(item, kind)
+    }
+
+    /** 和评论面板同一套手势：面板跟着手指走，松手时拖得够远或够快就收起，否则弹回。 */
+    private class DragToDismiss(private val sheet: View, private val dismiss: () -> Unit) : View.OnTouchListener {
+        private var startY = 0f
+        private var startTime = 0L
+        private var dragging = false
+        private val slop = android.view.ViewConfiguration.get(sheet.context).scaledTouchSlop
+
+        override fun onTouch(v: View, event: android.view.MotionEvent): Boolean {
+            when (event.actionMasked) {
+                android.view.MotionEvent.ACTION_DOWN -> {
+                    startY = event.rawY; startTime = event.eventTime; dragging = false
+                    sheet.animate().cancel()
+                    return true
+                }
+                android.view.MotionEvent.ACTION_MOVE -> {
+                    val dy = event.rawY - startY
+                    if (!dragging && dy > slop) dragging = true
+                    if (dragging) sheet.translationY = dy.coerceAtLeast(0f)
+                    return true
+                }
+                android.view.MotionEvent.ACTION_UP, android.view.MotionEvent.ACTION_CANCEL -> {
+                    val dy = event.rawY - startY
+                    val elapsed = (event.eventTime - startTime).coerceAtLeast(1L)
+                    val fling = dy > slop * 2 && dy / elapsed > 1.2f
+                    val farEnough = dy > sheet.height * CommentsPanel.DISMISS_FRACTION
+                    if (event.actionMasked == android.view.MotionEvent.ACTION_UP && dragging && (farEnough || fling)) {
+                        sheet.animate().translationY(sheet.height.toFloat()).setDuration(160L).withEndAction { dismiss() }.start()
+                    } else {
+                        sheet.animate().translationY(0f).setDuration(160L).start()
+                    }
+                    dragging = false
+                    return true
+                }
+            }
+            return false
+        }
     }
 
     private fun hostActivity(context: Context): Activity? {

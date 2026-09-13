@@ -113,9 +113,10 @@ object Translator {
     /** 翻译失败时把原因交给页面记进诊断（不含原文）。 */
     @Volatile var onFailure: ((String) -> Unit)? = null
 
-    /** 发给模型的系统提示：只要译文，别的都不要。 */
+    /** 发给模型的系统提示：第一行报源语言代码，之后只要译文。 */
     const val AI_PROMPT = "你是翻译引擎。把用户发来的内容翻译成简体中文：保留原有的换行、表情、链接和 @用户名；" +
-        "不要解释，不要加引号，不要输出译文以外的任何内容。"
+        "不要解释，不要加引号。输出格式：第一行只写原文语言的 ISO 639-1 代码（如 en、ja、ko、ru、es），" +
+        "从第二行开始输出译文，不要输出别的内容。"
 
     @Volatile var config = TranslationConfig()
         private set
@@ -176,7 +177,10 @@ object Translator {
         cached(text)?.let { callback(Result.success(it)); return }
         val snapshot = config
         io.execute {
-            val result = runCatching { fetch(text, snapshot) }
+            val result = runCatching { fetch(text, snapshot) }.map { t ->
+                // 服务没报源语言（或只说“auto”）就按文字本身猜，别把“外语”写在界面上。
+                if (t.sourceLang.isBlank() || t.sourceLang.equals("auto", true)) t.copy(sourceLang = guessLanguage(text)) else t
+            }
             result.onSuccess { if (snapshot == config) synchronized(cache) { cache[text] = it } }
             result.onFailure { error ->
                 val where = if (snapshot.provider == PROVIDER_OPENAI) "${snapshot.provider}/${snapshot.aiVendor} ${aiTarget(snapshot).first.substringAfter("://").substringBefore('/')}" else snapshot.provider
@@ -413,12 +417,66 @@ object Translator {
                 node.optJSONObject(i)?.optString("text").orEmpty()
             }
             else -> ""
-        }.trim().let { text ->
-            if (text.length >= 2 && ((text.startsWith("\"") && text.endsWith("\"")) || (text.startsWith("“") && text.endsWith("”"))))
-                text.substring(1, text.length - 1).trim() else text
-        }
+        }.trim()
         if (content.isBlank()) throw IOException("没有翻出内容")
-        return Translation(content, "auto")
+        return splitLanguageLine(content)
+    }
+
+    private val langLine = Regex("^[A-Za-z]{2,3}(?:[-_][A-Za-z]{2,4})?$")
+
+    /**
+     * 模型按提示在第一行报语言代码：拆出来当源语言，其余是译文。模型没照做（第一行不是代码）
+     * 就整段当译文、源语言留空，由 [translate] 再按文字猜。多余的引号一并去掉。
+     */
+    internal fun splitLanguageLine(content: String): Translation {
+        val lines = content.lines()
+        val first = lines.firstOrNull()?.trim().orEmpty()
+        val (lang, body) = if (lines.size > 1 && langLine.matches(first)) {
+            first.lowercase().replace('_', '-') to lines.drop(1).joinToString("\n").trim()
+        } else "" to content
+        val text = body.let { t ->
+            if (t.length >= 2 && ((t.startsWith("\"") && t.endsWith("\"")) || (t.startsWith("“") && t.endsWith("”"))))
+                t.substring(1, t.length - 1).trim() else t
+        }
+        if (text.isBlank()) throw IOException("没有翻出内容")
+        return Translation(text, lang)
+    }
+
+    /**
+     * 按文字本身猜语言：假名 → 日语，谚文 → 韩语，西里尔 → 俄语，泰文 / 阿拉伯文各自对应，
+     * 只有汉字 → 中文；拉丁字母按几个常见功能词区分西 / 葡 / 法 / 德 / 意 / 印尼，带越南语声调字母算越南语，
+     * 都不像就当英语。没有字母的返回空串。
+     */
+    fun guessLanguage(text: String): String {
+        val plain = stripNoise(text)
+        if (plain.any { it in '぀'..'ヿ' }) return "ja"
+        if (plain.any { it in '가'..'힣' || it in 'ㄱ'..'ㆎ' }) return "ko"
+        if (plain.any { it in 'Ѐ'..'ӿ' }) return "ru"
+        if (plain.any { it in '฀'..'๿' }) return "th"
+        if (plain.any { it in '؀'..'ۿ' }) return "ar"
+        val letters = plain.filter { it.isLetter() }
+        // “1080p”这种单个字母不算文字，和 needsTranslation 的口径一致。
+        if (letters.isEmpty() || !word.containsMatchIn(plain)) return ""
+        if (letters.all { Character.UnicodeScript.of(it.code) == Character.UnicodeScript.HAN }) return "zh"
+        if (plain.any { it in "ăâđêôơưĂÂĐÊÔƠƯạảấầẩẫậắằẳẵặẹẻẽếềểễệỉịọỏốồổỗộớờởỡợụủứừửữựỳỵỷỹ" }) return "vi"
+        val words = plain.lowercase().split(Regex("[^\\p{L}']+")).filter { it.isNotBlank() }.toSet()
+        fun hits(vararg stop: String) = stop.count { it in words }
+        val scores = listOf(
+            "es" to hits("que", "el", "los", "las", "muy", "gracias", "por", "pero", "como", "esta", "está", "una"),
+            "pt" to hits("não", "muito", "você", "obrigado", "isso", "uma", "mais", "com", "também", "ele"),
+            "fr" to hits("les", "est", "pour", "très", "merci", "vous", "une", "des", "pas", "c'est"),
+            "de" to hits("und", "ist", "nicht", "das", "sehr", "danke", "ich", "die", "der", "auch"),
+            "it" to hits("che", "non", "molto", "grazie", "per", "una", "anche", "sono", "questo"),
+            "id" to hits("yang", "dan", "tidak", "saya", "ini", "itu", "banget", "bagus")
+        )
+        val best = scores.maxByOrNull { it.second }
+        return if (best != null && best.second >= 2) best.first else "en"
+    }
+
+    /** 界面上那行小字：知道源语言就写“翻译自×语”，不知道就只说“已翻译”。 */
+    fun sourceLabel(translation: Translation): String {
+        val name = languageName(translation.sourceLang)
+        return if (name.isBlank()) "已翻译" else "翻译自$name"
     }
 
     // ---- 自定义接口
@@ -492,10 +550,12 @@ object Translator {
         return NetworkProxy.explain(message)?.let { "连不上翻译服务" } ?: message.ifBlank { "翻译失败" }
     }
 
-    fun languageName(code: String): String = when (code.lowercase().substringBefore('-')) {
+    fun languageName(code: String): String = when (code.lowercase().substringBefore('-').substringBefore('_')) {
         "ja" -> "日语"; "en" -> "英语"; "ko" -> "韩语"; "ru" -> "俄语"; "es" -> "西班牙语"
         "fr" -> "法语"; "de" -> "德语"; "pt" -> "葡萄牙语"; "it" -> "意大利语"; "th" -> "泰语"
-        "vi" -> "越南语"; "id" -> "印尼语"; "zh" -> "中文"; "auto" -> "外语"
+        "vi" -> "越南语"; "id" -> "印尼语"; "zh" -> "中文"; "ar" -> "阿拉伯语"; "tr" -> "土耳其语"
+        "pl" -> "波兰语"; "uk" -> "乌克兰语"; "nl" -> "荷兰语"; "tl" -> "菲律宾语"; "ms" -> "马来语"
+        "", "auto", "und" -> ""
         else -> code
     }
 }

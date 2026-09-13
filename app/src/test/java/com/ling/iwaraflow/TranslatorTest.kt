@@ -76,5 +76,20 @@ class TranslatorTest {
         assertEquals("英语", Translator.languageName("en"))
         assertEquals("中文", Translator.languageName("zh-TW"))
         assertEquals("xx", Translator.languageName("xx"))
+        assertEquals("不知道的语言不叫“外语”", "", Translator.languageName("auto"))
+        assertEquals("已翻译", Translator.sourceLabel(Translator.Translation("x", "")))
+        assertEquals("翻译自日语", Translator.sourceLabel(Translator.Translation("x", "ja")))
+    }
+
+    @Test fun theLanguageIsGuessedFromTheScriptWhenTheServiceDoesNotSay() {
+        assertEquals("ja", Translator.guessLanguage("使用モデル「暁、響、雷、電」"))
+        assertEquals("ko", Translator.guessLanguage("너무 예뻐요"))
+        assertEquals("ru", Translator.guessLanguage("Очень красиво"))
+        assertEquals("en", Translator.guessLanguage("can't wait for the full version"))
+        assertEquals("es", Translator.guessLanguage("muy bueno, gracias por el video"))
+        assertEquals("pt", Translator.guessLanguage("muito bom, obrigado, você é incrível"))
+        assertEquals("vi", Translator.guessLanguage("rất đẹp, cảm ơn bạn"))
+        assertEquals("zh", Translator.guessLanguage("太好看了"))
+        assertEquals("", Translator.guessLanguage("😍😍 1080p"))
     }
 }

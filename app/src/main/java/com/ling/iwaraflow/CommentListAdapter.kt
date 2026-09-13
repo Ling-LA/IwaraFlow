@@ -223,12 +223,11 @@ class CommentListAdapter(
                         return
                     }
                     translate.visibility = View.VISIBLE
-                    val from = Translator.languageName(s.translation.sourceLang)
                     if (s.showOriginal) {
                         translate.text = "原文 · 查看中文翻译"
                     } else {
                         body.text = s.translation.text
-                        translate.text = "翻译自$from · 显示原文"
+                        translate.text = "${Translator.sourceLabel(s.translation)} · 显示原文"
                     }
                     translate.setOnClickListener { toggleOriginal(c) }
                 }

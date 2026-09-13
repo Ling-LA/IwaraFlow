@@ -39,7 +39,9 @@ class VideoAdapter(
     /** 点了评论按钮。不传就不显示评论按钮（没有评论面板的页面）。 */
     private val onComments: ((VideoItem) -> Unit)? = null,
     /** 点了视频标题：打开简介。不传标题就只是文字。 */
-    private val onInfo: ((VideoItem) -> Unit)? = null
+    private val onInfo: ((VideoItem) -> Unit)? = null,
+    /** 记下了一条明确的行为（like / favorite / comments / share）：页面可据此重排剩余候选。 */
+    private val onSignal: ((VideoItem, String) -> Unit)? = null
 ) : RecyclerView.Adapter<VideoAdapter.Holder>() {
 
     val items = mutableListOf<VideoItem>()
@@ -364,7 +366,12 @@ class VideoAdapter(
             aspect = 0f
             applyVideoInsets()
             comments.visibility = if (onComments == null) View.GONE else View.VISIBLE
-            comments.setOnClickListener { onComments?.invoke(item) }
+            comments.setOnClickListener {
+                // 打开评论区也是一点兴趣，比点赞轻得多。
+                history.recordInteraction(item, "comments", 0.3)
+                onSignal?.invoke(item, "comments")
+                onComments?.invoke(item)
+            }
             // 标题和标签行都能打开简介。
             val openInfo = onInfo?.let { open -> View.OnClickListener { open(item) } }
             title.setOnClickListener(openInfo)
@@ -394,6 +401,7 @@ class VideoAdapter(
                 history.setLocalFavorite(item, desired)
                 if (desired) {
                     history.recordInteraction(item, "favorite", 1.4)
+                    onSignal?.invoke(item, "favorite")
                     reactionBurst.playOn(favorite, ReactionBurstView.Kind.FAVORITE)
                 }
                 // 收藏有动画、取消有图标变化，不用再弹一层提示挡着视频。
@@ -403,6 +411,9 @@ class VideoAdapter(
             download.setOnClickListener { showQualityChooser(item, true) }
             pip.setOnClickListener { onEnterPip() }
             share.setOnClickListener {
+                // 愿意分享给别人，是比点赞还强的兴趣信号。
+                history.recordInteraction(item, "share", 1.0)
+                onSignal?.invoke(item, "share")
                 onShare?.invoke(item) ?: VideoShare.share(itemView.context, item)
             }
 
@@ -802,6 +813,7 @@ class VideoAdapter(
                         if (desired) {
                             history.recordInteraction(item, "like", 2.0)
                             history.markSeen(item.id)
+                            onSignal?.invoke(item, "like")
                         }
                         updateLikeUi(item)
                     }.onFailure {

@@ -73,6 +73,33 @@ class RecommendationEngine(
         }
     }
 
+    /**
+     * 实时重排：不重新请求，只按**此刻**的画像把还没展示的候选重新排一遍。
+     * 点赞、收藏、发评论、不感兴趣之后，或者连着翻了几页，画像已经变了，
+     * 队列里排在后面的旧顺序却还是刷新那一刻算的——重排一次，用户就能感觉到推荐在跟着学。
+     * 失败（比如页面已关）就原样回传。
+     */
+    fun rerank(items: List<VideoItem>, callback: (List<VideoItem>) -> Unit) {
+        if (items.size < 2) { callback(items); return }
+        runCatching {
+            io.execute {
+                val taste = runCatching { history.preferenceProfile() }.getOrNull()
+                callback(if (taste == null) items else rerankBlocking(items, taste, System.currentTimeMillis()))
+            }
+        }.onFailure { callback(items) }
+    }
+
+    /** 重排的纯函数部分：质量 + 新鲜度 + 画像，和 [rank] 同一套口径（来源权重已经用过了，不再算）。 */
+    internal fun rerankBlocking(items: List<VideoItem>, taste: PreferenceProfile, now: Long): List<VideoItem> {
+        val ranked = items.sortedByDescending { item ->
+            val ageDays = if (item.createdAt > 0L) ((now - item.createdAt).coerceAtLeast(0L) / 86_400_000.0) else 30.0
+            qualityScore(item.likes, item.views) + 1.6 / (1.0 + ageDays / 30.0) +
+                taste.score(item).coerceIn(-6.0, 8.0) * 0.38 +
+                ((item.id.hashCode().toLong() and 0xffff) / 65535.0) * 0.15
+        }
+        return spreadAuthors(ranked)
+    }
+
     /** 候选按“没看过 / 看过但没点赞 / 已点赞收藏”分三档，前面不够时才用后面的。 */
     private class Buckets {
         val fresh = ArrayList<VideoItem>()

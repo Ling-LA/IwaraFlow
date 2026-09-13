@@ -157,7 +157,9 @@ class SearchActivity : AppCompatActivity() {
             topBarHeight = { (60 * density).toInt() },
             gapPx = (20 * density).toInt(),
             onNeedLogin = { Toast.makeText(this, "请先在主页登录 Iwara", Toast.LENGTH_SHORT).show() },
-            onOpenAuthor = ::openAuthor
+            onOpenAuthor = ::openAuthor,
+            onCommentPosted = { history.recordInteraction(it, "comment", 1.5) },
+            onDislike = ::dislike
         )
         pager.registerOnPageChangeCallback(object : ViewPager2.OnPageChangeCallback() {
             override fun onPageSelected(position: Int) {
@@ -194,6 +196,9 @@ class SearchActivity : AppCompatActivity() {
         if (inFeed) showList()
         query = trimmed
         querySerial++
+        // 主动搜什么就是对什么感兴趣：关键词按标签记进画像。
+        val terms = trimmed.split(Regex("[\\s,，、]+")).filter { it.isNotBlank() }.take(6)
+        if (terms.isNotEmpty()) history.recordInteraction(VideoItem("search:$trimmed", trimmed, "", terms, 0), "search", 1.2)
         videoTab.reset(); tagTab.reset(); authorTab.reset()
         videoAdapter.notifyDataSetChanged()
         tagAdapter.notifyDataSetChanged()
@@ -408,6 +413,8 @@ class SearchActivity : AppCompatActivity() {
         if (exiting) return
         val state = videoState(tab) ?: return
         val index = state.playable.indexOfFirst { it.id == item.id }
+        // 从搜索结果里点开的：比刷到的更能说明兴趣。
+        history.recordInteraction(item, "search_open", 0.6)
         if (index < 0) return
         inFeed = true
         feedTab = tab
@@ -454,6 +461,13 @@ class SearchActivity : AppCompatActivity() {
         exiting = true
         feedAdapter.pauseAll()
         finish()
+    }
+
+    /** “不感兴趣”：记负反馈、标记已看；搜索结果流不跳过，用户自己划。 */
+    private fun dislike(item: VideoItem) {
+        history.recordInteraction(item, "dislike", -2.0)
+        history.markSeen(item.id)
+        Toast.makeText(this, "已减少此类推荐", Toast.LENGTH_SHORT).show()
     }
 
     private fun openAuthor(author: IwaraAuthor) {

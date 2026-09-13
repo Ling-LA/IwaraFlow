@@ -65,6 +65,18 @@ class RecommendationQualityTest {
         assertEquals(listOf("2026-01", "2025-12"), engine().monthsToSample(now = 1_767_268_800_000L))
     }
 
+    @Test fun rerankMovesLikedAuthorsUpAndDislikedOnesDown() {
+        val now = 1_789_000_000_000L
+        val items = listOf(
+            VideoItem("meh", "t", "Meh", listOf("x"), 50, views = 1000, createdAt = now),
+            VideoItem("bad", "t", "Bad", listOf("x"), 50, views = 1000, createdAt = now),
+            VideoItem("good", "t", "Good", listOf("x"), 50, views = 1000, createdAt = now)
+        )
+        val taste = PreferenceProfile(mapOf("good" to 6.0, "bad" to -6.0), emptyMap())
+        val out = engine().rerankBlocking(items, taste, now)
+        assertEquals(listOf("good", "meh", "bad"), out.map { it.id })
+    }
+
     @Test fun roundZeroAsksForTheMonthlyTopCharts() {
         val api = mock(IwaraApi::class.java)
         val e = RecommendationEngine(api, mock(HistoryStore::class.java), random = Random(1))

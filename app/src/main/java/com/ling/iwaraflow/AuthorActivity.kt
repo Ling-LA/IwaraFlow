@@ -119,7 +119,13 @@ class AuthorActivity : AppCompatActivity() {
             topBarHeight = { (60 * density).toInt() },
             gapPx = (20 * density).toInt(),
             onNeedLogin = { Toast.makeText(this, "请先在主页登录 Iwara", Toast.LENGTH_SHORT).show() },
-            onOpenAuthor = ::openAnotherAuthor
+            onOpenAuthor = ::openAnotherAuthor,
+            onCommentPosted = { history.recordInteraction(it, "comment", 1.5) },
+            onDislike = { item ->
+                history.recordInteraction(item, "dislike", -2.0)
+                history.markSeen(item.id)
+                Toast.makeText(this, "已减少此类推荐", Toast.LENGTH_SHORT).show()
+            }
         )
         pager.registerOnPageChangeCallback(object : ViewPager2.OnPageChangeCallback() {
             override fun onPageSelected(position: Int) {
@@ -352,7 +358,13 @@ class AuthorActivity : AppCompatActivity() {
             runOnUiThread {
                 if (isFinishing || isDestroyed || exiting) return@runOnUiThread
                 followButton.isEnabled = true
-                result.onSuccess { a.following = desired; refreshRelationUi() }
+                result.onSuccess {
+                    a.following = desired
+                    refreshRelationUi()
+                    // 关注是很强的兴趣信号（取关则反过来压一点）。
+                    val card = VideoItem("author:${a.id}", a.name, a.name, emptyList(), 0, authorId = a.id)
+                    history.recordInteraction(card, if (desired) "follow" else "unfollow", if (desired) 1.5 else -1.0)
+                }
                     .onFailure { Toast.makeText(this, it.message ?: "关注操作失败", Toast.LENGTH_SHORT).show() }
             }
         }

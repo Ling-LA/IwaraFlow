@@ -164,7 +164,8 @@ class MainActivityV3 : AppCompatActivity() {
             onNeedLogin = ::showLoginDialog,
             onShare = ::shareVideo,
             onComments = ::openComments,
-            onInfo = { item -> if (!isInPictureInPictureMode) comments.open(item, CommentsPanel.Tab.INFO) }
+            onInfo = { item -> if (!isInPictureInPictureMode) comments.open(item, CommentsPanel.Tab.INFO) },
+            onSignal = { _, action -> if (action != "comments") rerankQueue() }
         )
         pager.adapter = adapter
         pager.offscreenPageLimit = 1
@@ -178,7 +179,9 @@ class MainActivityV3 : AppCompatActivity() {
             gapPx = dp(COMMENTS_PANEL_GAP_DP),
             onNeedLogin = ::showLoginDialog,
             onOpenAuthor = { author -> openAuthor(author.id, author.name, author.username) },
-            onOpenChanged = { open -> closeCommentsOnBack.isEnabled = open }
+            onOpenChanged = { open -> closeCommentsOnBack.isEnabled = open },
+            onCommentPosted = { item -> history.recordInteraction(item, "comment", 1.5); rerankQueue() },
+            onDislike = ::dislike
         )
         onBackPressedDispatcher.addCallback(this, closeCommentsOnBack)
         pager.registerOnPageChangeCallback(object : ViewPager2.OnPageChangeCallback() {
@@ -187,6 +190,8 @@ class MainActivityV3 : AppCompatActivity() {
                 comments.close()
                 adapter.setActive(position)
                 if (pagingEnabled && position >= adapter.itemCount - 5) loadMore()
+                // 每翻几页按最新画像重排一次还没展示的候选。
+                if (mode == "recommend" && ++pagesSinceRerank >= RERANK_EVERY_PAGES) rerankQueue()
             }
         })
 
@@ -486,6 +491,44 @@ class MainActivityV3 : AppCompatActivity() {
         loadingMore = false
     }
 
+    /** 上次重排剩余候选之后翻了几页。 */
+    private var pagesSinceRerank = 0
+    private var rerankSerial = 0
+
+    /**
+     * 按此刻的画像重排还没展示的推荐候选。只动队列，不动已经在流里的卡片，
+     * 也不发网络请求；结果回来时队列已经被翻页消费过的话，就只替换还剩下的部分。
+     */
+    private fun rerankQueue() {
+        pagesSinceRerank = 0
+        if (mode != "recommend" || recommendQueue.size < 2) return
+        val snapshot = ArrayList(recommendQueue)
+        val serial = ++rerankSerial
+        val request = requestSerial
+        recommender.rerank(snapshot) { reordered ->
+            runOnUiThread {
+                if (isFinishing || isDestroyed || serial != rerankSerial || request != requestSerial) return@runOnUiThread
+                val stillQueued = recommendQueue.mapTo(HashSet()) { it.id }
+                val kept = reordered.filter { it.id in stillQueued }
+                if (kept.size != recommendQueue.size) return@runOnUiThread
+                recommendQueue.clear()
+                recommendQueue.addAll(kept)
+            }
+        }
+    }
+
+    /** 简介页的“不感兴趣”：作者和标签记负反馈、标记已看、跳到下一条，剩余候选重排。 */
+    private fun dislike(item: VideoItem) {
+        history.recordInteraction(item, "dislike", -2.0)
+        history.markSeen(item.id)
+        Toast.makeText(this, "已减少此类推荐", Toast.LENGTH_SHORT).show()
+        rerankQueue()
+        val position = pager.currentItem
+        if (adapter.items.getOrNull(position)?.id == item.id && position + 1 < adapter.itemCount) {
+            pager.setCurrentItem(position + 1, true)
+        }
+    }
+
     private fun loadMore() {
         if (loadingMore || awaitingFullFeed || adapter.itemCount == 0) return
         loadingMore = true
@@ -578,6 +621,8 @@ class MainActivityV3 : AppCompatActivity() {
     @Suppress("UNUSED_PARAMETER")
     fun openAuthorProfile(view: View) {
         val item = adapter.items.getOrNull(pager.currentItem) ?: return
+        // 专门点进作者主页：对这个作者有点兴趣。
+        history.recordInteraction(item, "author_visit", 0.3)
         if (item.authorId.isBlank() && item.authorUsername.isBlank() && item.id.isNotBlank()) {
             // 本地下载记录里没有作者 id：现拉一次详情再进。
             Toast.makeText(this, "正在读取作者资料…", Toast.LENGTH_SHORT).show()
@@ -1254,5 +1299,7 @@ class MainActivityV3 : AppCompatActivity() {
         const val LOCAL_SOURCE_NAME = "本地文件"
         /** 点图标展开子页面小窗后，等多久还没被盖住就当作展开失败。 */
         const val PIP_EXPAND_GRACE_MS = 1200L
+        /** 推荐流每翻这么多页，按最新画像重排一次剩余候选。 */
+        const val RERANK_EVERY_PAGES = 4
     }
 }

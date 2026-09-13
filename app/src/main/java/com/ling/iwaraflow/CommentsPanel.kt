@@ -31,7 +31,11 @@ class CommentsPanel(
     /** 面板开合时通知页面：开着时给出画面要让出的顶部和底部留白（像素）。 */
     private val onLayoutChanged: (open: Boolean, top: Int, bottom: Int) -> Unit,
     /** 点了评论者的头像 / 名字：页面去打开这个用户的主页。 */
-    private val onOpenAuthor: ((IwaraAuthor) -> Unit)? = null
+    private val onOpenAuthor: ((IwaraAuthor) -> Unit)? = null,
+    /** 评论发送成功：页面把它记进口味画像。 */
+    private val onCommentPosted: ((VideoItem) -> Unit)? = null,
+    /** 简介页点了“不感兴趣”：页面记负反馈、跳过这条。 */
+    private val onDislike: ((VideoItem) -> Unit)? = null
 ) {
     enum class Tab { INFO, COMMENTS }
 
@@ -99,6 +103,10 @@ class CommentsPanel(
             selectTab(if (direction < 0) Tab.COMMENTS else Tab.INFO)
         }
         input.setOnClickListener { openInput() }
+        root.findViewById<View>(R.id.infoDislike).apply {
+            visibility = if (onDislike == null) View.GONE else View.VISIBLE
+            setOnClickListener { video?.let { item -> close(); onDislike?.invoke(item) } }
+        }
         renderInput()
     }
 
@@ -454,6 +462,7 @@ class CommentsPanel(
                     refreshTitle()
                     hideStatus()
                     cancelReply()
+                    onCommentPosted?.invoke(item)
                     Toast.makeText(root.context, "已发送到 Iwara", Toast.LENGTH_SHORT).show()
                 }.onFailure {
                     // 没发出去的内容留作草稿，再点输入框还能接着改。

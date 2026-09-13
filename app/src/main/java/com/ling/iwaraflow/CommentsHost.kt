@@ -20,7 +20,10 @@ class CommentsHost(
     onNeedLogin: () -> Unit,
     onOpenAuthor: ((IwaraAuthor) -> Unit)? = null,
     /** 面板开合时通知页面（比如切换返回键的处理）。 */
-    private val onOpenChanged: ((Boolean) -> Unit)? = null
+    private val onOpenChanged: ((Boolean) -> Unit)? = null,
+    /** 评论发送成功 / 点了“不感兴趣”：交给页面记画像。 */
+    onCommentPosted: ((VideoItem) -> Unit)? = null,
+    onDislike: ((VideoItem) -> Unit)? = null
 ) {
     val panel = CommentsPanel(
         root = panelRoot,
@@ -31,7 +34,9 @@ class CommentsHost(
             adapter.setVideoInsets(if (open) top else 0, if (open) bottom else 0)
             onOpenChanged?.invoke(open)
         },
-        onOpenAuthor = onOpenAuthor
+        onOpenAuthor = onOpenAuthor,
+        onCommentPosted = onCommentPosted,
+        onDislike = onDislike
     )
 
     init {

@@ -86,6 +86,30 @@ class SearchApiTest {
         } finally { api.close() }
     }
 
+    /** 搜索接口对 sort 的支持没有保证：它要是不认，得退回不带排序参数，不能整页结果都没了。 */
+    @Test fun titleSearchFallsBackWhenTheServerRejectsTheSortKey() {
+        server.dispatcher = object : Dispatcher() {
+            override fun dispatch(request: RecordedRequest): MockResponse {
+                requests += request
+                return if (request.requestUrl!!.queryParameter("sort") != null) {
+                    MockResponse().setResponseCode(400)
+                        .setBody(JSONObject().put("message", "errors.badRequest").toString())
+                } else {
+                    MockResponse().setResponseCode(200).setBody(
+                        JSONObject().put("count", 1).put("results", JSONArray().put(video("search-1"))).toString()
+                    )
+                }
+            }
+        }
+        val api = api()
+        try {
+            assertEquals(listOf("search-1"), api.searchVideosBlocking("fixture", 0, 24, "views").map { it.id })
+            assertEquals(2, requests.size)
+            assertEquals("views", requests.first().requestUrl!!.queryParameter("sort"))
+            assertNull(requests.last().requestUrl!!.queryParameter("sort"))
+        } finally { api.close() }
+    }
+
     @Test fun videoSearchesDefaultToNewestFirst() {
         val api = api()
         try {

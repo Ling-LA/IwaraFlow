@@ -204,13 +204,19 @@ class IwaraApi(context: Context, private val apiRoot: String = DEFAULT_API_ROOT)
         enqueue(callback) { runCatching { searchVideosBlocking(query, page, limit, sort) } }
     }
 
-    /** [sort] 是搜索结果页的排序键（date / views / likes）；服务端忽略它时本地还会再排一次。 */
+    /**
+     * [sort] 是搜索结果页的排序键（date / views / likes）；服务端忽略它时本地还会再排一次。
+     * 搜索接口对 sort 的支持没有文档保证，万一它因此报错就退回不带排序参数再试一次。
+     */
     fun searchVideosBlocking(query: String, page: Int = 0, limit: Int = 32, sort: String = "date"): List<VideoItem> {
-        val url = "$apiRoot/search".toHttpUrl().newBuilder()
-            .addQueryParameter("query", query).addQueryParameter("type", "videos")
-            .addQueryParameter("sort", sort)
-            .addQueryParameter("page", page.toString()).addQueryParameter("limit", limit.toString()).build()
-        return parseVideoPage(getJsonObject(url.toString(), optionalAuth = true))
+        fun request(withSort: Boolean): List<VideoItem> {
+            val url = "$apiRoot/search".toHttpUrl().newBuilder()
+                .addQueryParameter("query", query).addQueryParameter("type", "videos")
+                .apply { if (withSort) addQueryParameter("sort", sort) }
+                .addQueryParameter("page", page.toString()).addQueryParameter("limit", limit.toString()).build()
+            return parseVideoPage(getJsonObject(url.toString(), optionalAuth = true))
+        }
+        return try { request(true) } catch (_: IOException) { request(false) }
     }
 
     fun searchUsers(query: String, page: Int = 0, limit: Int = 24, callback: (Result<List<IwaraAuthor>>) -> Unit) {

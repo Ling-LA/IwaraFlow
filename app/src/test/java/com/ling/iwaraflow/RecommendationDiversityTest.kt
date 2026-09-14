@@ -25,7 +25,7 @@ class RecommendationDiversityTest {
         val e = engine()
         val a = item("a", "Alice", listOf("miku", "dance"))
         val b = item("b", "Bob", listOf("miku", "dance"))
-        val c = item("c", "Bob", listOf("other"))
+        val c = item("c", "Cara", listOf("other"))
         val d = item("d", "Alice", listOf("miku"))
         assertEquals("标签完全一样就是最像", 1.0, e.similarity(a, b), 1e-9)
         assertEquals("同一个作者直接算最像", 1.0, e.similarity(a, d), 1e-9)

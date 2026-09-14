@@ -93,7 +93,7 @@ class ClassicsWeaveTest {
 
     @Test fun oldCandidatesOnlyAppearAsWovenClassics() {
         val engine = engine(12)
-        val ranked = (0 until 40).map { dated("old-aged-$it", 400 + it) } + (0 until 48).map { dated("new-$it", it % 100) }
+        val ranked = (0 until 40).map { dated("old-aged-$it", 800 + it) } + (0 until 48).map { dated("new-$it", it % 100) }
         val out = engine.assemble(ranked, emptySet(), classics(3))
         val groups = out.chunked(13)
         groups.forEachIndexed { index, group ->
@@ -104,14 +104,14 @@ class ClassicsWeaveTest {
     }
 
     @Test fun withClassicsOffOldCandidatesAreDropped() {
-        val ranked = (0 until 30).map { dated("old-$it", 400) } + (0 until 30).map { dated("new-$it", 3) }
+        val ranked = (0 until 30).map { dated("old-$it", 800) } + (0 until 30).map { dated("new-$it", 3) }
         val out = engine(0).assemble(ranked, emptySet(), emptyList())
         assertEquals(30, out.size)
         assertTrue(out.none(::isClassic))
     }
 
     @Test fun tooFewRecentVideosAreToppedUpWithOldOnes() {
-        val ranked = (0 until 5).map { dated("new-$it", 3) } + (0 until 40).map { dated("old-$it", 400) }
+        val ranked = (0 until 5).map { dated("new-$it", 3) } + (0 until 40).map { dated("old-$it", 800) }
         val out = engine(0).assemble(ranked, emptySet(), emptyList())
         assertEquals("补到最低条数，不给空页", RecommendationEngine.MIN_RECENT_FEED, out.size)
         assertEquals((0 until 5).map { "new-$it" }, out.take(5).map { it.id })

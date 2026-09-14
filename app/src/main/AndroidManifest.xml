@@ -16,6 +16,8 @@
     <application
         android:name=".IwaraFlowApplication"
         android:allowBackup="true"
+        android:dataExtractionRules="@xml/data_extraction_rules"
+        android:fullBackupContent="@xml/backup_rules"
         android:usesCleartextTraffic="false"
         android:theme="@style/Theme.IwaraFlow"
         android:label="IwaraFlow"

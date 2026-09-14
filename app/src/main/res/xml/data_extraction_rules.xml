@@ -1,0 +1,22 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+  Android 12+ 的备份 / 换机规则。SharedPreferences 和 SQLite 默认都算可备份数据，
+  这里明确把敏感的几样排除掉：
+  - 加密存储（登录 token、翻译 / AI 的 API Key）：换机之后 Keystore 里的主密钥也解不开，
+    备份出去只有风险没有用；
+  - 浏览记录 / 推荐行为数据库：看过什么是很私密的事，不上云、也不跟着换机走。
+  （诊断信息写在 cacheDir 下，系统本来就不备份缓存目录。）
+  设置项（画质、推荐参数、代理地址等）照常备份。
+-->
+<data-extraction-rules>
+    <cloud-backup>
+        <exclude domain="sharedpref" path="iwara_flow_secure_session.xml" />
+        <exclude domain="sharedpref" path="iwara_flow_session_fallback.xml" />
+        <exclude domain="database" path="iwaraflow.db" />
+    </cloud-backup>
+    <device-transfer>
+        <exclude domain="sharedpref" path="iwara_flow_secure_session.xml" />
+        <exclude domain="sharedpref" path="iwara_flow_session_fallback.xml" />
+        <exclude domain="database" path="iwaraflow.db" />
+    </device-transfer>
+</data-extraction-rules>

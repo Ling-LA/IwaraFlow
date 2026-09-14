@@ -293,6 +293,24 @@ Iwara 官方点赞会完整同步进 `seen_videos`（服务端一页最多 50 �
 - Android DownloadManager、Picture-in-Picture、FileProvider
 - GitHub Releases 应用内更新
 
+### 数据与隐私
+
+**敏感数据只进加密存储**（`SecureSessionStore` / AndroidX Security Crypto）：
+
+| 内容 | 存在哪 |
+| --- | --- |
+| Iwara 的 refresh / access token | 加密存储 |
+| 翻译 / AI 服务的 API Key、百度 APP ID、自定义 Authorization 头 | 加密存储（老版本存在普通 SharedPreferences 里，升级时自动搬过去并删掉明文） |
+| 画质、推荐参数、代理地址、翻译服务商和地址 | 普通 SharedPreferences |
+| 浏览记录、收藏、行为画像、下载记录 | 本地 SQLite (`iwaraflow.db`) |
+
+- **Keystore 出错时不再退回明文**：以前加密存储打不开会退到普通 SharedPreferences，把 refresh token 明文写在磁盘上。现在这种情况下密钥只放内存，进程结束就没了（重新登录即可），磁盘上一个字节都不留；老版本留下的明文文件在启动时删除
+- 登录密码从不落盘
+- **备份规则**（`data_extraction_rules.xml` / `backup_rules.xml`）：加密存储和浏览记录数据库既不进云备份也不跟着换机走；设置项照常备份。诊断信息写在 cacheDir 下，系统本来就不备份缓存目录
+- 诊断信息只记录异常、退出原因和加载线索，不含账号、密钥和视频列表，不自动上传
+
+> **发布签名说明**：仓库里的 `signing/iwaraflow-dev.jks.b64` 和 CI 里的口令是公开的，任何人都能用同一身份签出 APK。这是为了让任何人 fork 之后都能直接构建出可覆盖安装的包；它**不是**、也不应被当作正式发布用的私钥。若要把本项目当作正式分发渠道，必须换一把只存在于仓库 Secrets 里的签名密钥，并按 Android 的签名密钥轮换（signing lineage）机制过渡——直接删文件没有用，Git 历史里已经公开过。
+
 ### 播放与缓冲
 
 - 竖滑流缓冲上限 25 秒（ExoPlayer 默认 50 秒），起播缓冲 1.2 秒；画质由视频源决定，不受影响
@@ -349,6 +367,16 @@ gradlew.bat assembleDebug
 > 发布新版本时必须同时提高 `versionCode` 与 `versionName`，否则已安装相同版本号的客户端不会收到更新提示。
 
 ## 更新日志
+
+### v0.13.2
+
+按文档的安全部分加固本地数据：
+
+- **Keystore 出错时不再把 token 明文写到磁盘**：加密存储打不开时密钥只放内存，进程结束即失效；老版本留下的明文文件启动时删除
+- **翻译 / AI 的 API Key、百度 APP ID、自定义 Authorization 头改存加密存储**，升级时自动从普通 SharedPreferences 搬过去并清掉明文
+- **明确了备份范围**：加密存储和浏览记录数据库不进云备份、也不跟着换机走（`dataExtractionRules` / `fullBackupContent`），设置项照常备份
+- 读取翻译配置改到后台线程，启动路径不碰 Keystore
+- 修 CI：GitHub runner 的新 cmdline-tools 里没有 `tools` 包，`setup-android` 改成只装 `platform-tools`
 
 ### v0.13.1
 

@@ -4,7 +4,6 @@ import java.util.Random
 import java.util.concurrent.ExecutorService
 import java.util.concurrent.Executors
 import java.util.concurrent.TimeUnit
-import kotlin.math.ln
 
 /**
  * 推荐候选的来源。
@@ -47,7 +46,9 @@ class RecommendationEngine(
      * 所以单独开一条“老片”流——按总点赞排序、往后翻到几十上百页去抽，
      * 那里全是有年头又受欢迎的作品——按固定间隔、随机位置塞进结果里。
      */
-    @Volatile var classicsEvery: Int = 0
+    var classicsEvery: Int
+        get() = ranker.classicsEvery
+        set(value) { ranker.classicsEvery = value }
 
     /** 最近一次榜单请求失败的原因，只在全部失败时拿来充实错误信息。 */
     @Volatile private var lastFailure: Throwable? = null
@@ -63,15 +64,13 @@ class RecommendationEngine(
     /** 服务端支不支持按月过滤：第一次拿到明显是全站量的总数就关掉，不再白请求。 */
     @Volatile private var monthFilterSupported = true
 
-    /** 这一轮的口味画像，抽候选和打分共用一份。 */
-    @Volatile private var profile: PreferenceProfile = PreferenceProfile(emptyMap(), emptyMap())
+    /** 排序那一半：打分、多样性、探索位、老片穿插、关注插入，见 [RecommendationRanker]。 */
+    private val ranker = RecommendationRanker(random)
 
-    /**
-     * 候选的完整信息，按视频 id 记着：来源分、命中的标签 / 作者、是不是关注 / 老片 / 探索位。
-     * 实时重排靠它在**原来的完整得分**上更新口味，而不是把第一次排序的信息全扔掉；
-     * 「为什么推荐给我」也读这里。
-     */
-    private val candidates = java.util.concurrent.ConcurrentHashMap<String, RecommendationCandidate>()
+    /** 这一轮的口味画像。召回（按标签 / 作者拉页）和排序共用一份。 */
+    private var profile: PreferenceProfile
+        get() = ranker.profile
+        set(value) { ranker.profile = value }
 
     fun load(skipSeen: Boolean, callback: (Result<List<VideoItem>>) -> Unit) {
         io.execute {
@@ -96,26 +95,12 @@ class RecommendationEngine(
         }.onFailure { callback(items) }
     }
 
-    /**
-     * 重排的纯函数部分，和 [rank] 是同一套口径：**来源分照旧算进去**。
-     * 以前这里只算质量 + 新鲜度 + 画像，于是用户点一次赞，整条队列就换了一套评分体系；
-     * 现在来源分从候选表里取回来（见 [candidates]），只有口味那一项跟着新画像变。
-     */
+    /** 重排：口径和第一次排序完全一致（来源分照旧算），只有口味跟着新画像变。 */
     internal fun rerankBlocking(items: List<VideoItem>, taste: PreferenceProfile, now: Long): List<VideoItem> =
-        diversify(spreadAuthors(items.sortedByDescending { scoreOf(it, taste, now) }))
-
-    /** 一条候选此刻的得分：来源 + 质量 + 新鲜度 + 画像 + 稳定抖动。 */
-    private fun scoreOf(item: VideoItem, taste: PreferenceProfile, now: Long): Double {
-        val ageDays = if (item.createdAt > 0L) ((now - item.createdAt).coerceAtLeast(0L) / 86_400_000.0) else 30.0
-        val known = candidates[item.id]
-        val quality = known?.baseQuality ?: qualityScore(item.likes, item.views)
-        return (known?.sourceScore ?: 0.0) + quality + 1.6 / (1.0 + ageDays / 30.0) +
-            taste.score(item).coerceIn(-6.0, 8.0) * 0.38 +
-            ((item.id.hashCode().toLong() and 0xffff) / 65535.0) * 0.15
-    }
+        ranker.rerank(items, taste, now)
 
     /** 「为什么推荐给我」：这条视频是怎么被选出来的。没记录就返回 null。 */
-    fun reasonFor(videoId: String): String? = candidates[videoId]?.reason()
+    fun reasonFor(videoId: String): String? = ranker.reasonFor(videoId)
 
     /**
      * 回退到官方榜单时，官方候选也要走本地这一套：排除已看 → 本地评分 → 作者打散。
@@ -132,10 +117,7 @@ class RecommendationEngine(
                     if (unseen.isNotEmpty()) unseen else items
                 }
                 kept.forEach { item ->
-                    candidates.getOrPut(item.id) { RecommendationCandidate(item) }.also {
-                        it.sources += RecommendationCandidate.Source.OFFICIAL
-                        if (it.baseQuality == 0.0) it.baseQuality = qualityScore(item.likes, item.views)
-                    }
+                    ranker.remember(item) { it.sources += RecommendationCandidate.Source.OFFICIAL }
                 }
                 callback(if (taste == null) spreadAuthors(kept) else rerankBlocking(kept, taste, System.currentTimeMillis()))
             }
@@ -213,152 +195,26 @@ class RecommendationEngine(
         }
     }
 
-    /**
-     * 把候选装配成最终的推荐流：**主体只放近期视频，老视频只按设置的间隔穿插**。
-     *
-     * 抽页会抽到存档深处，候选里混着不少发布好几年的视频；它们点赞、播放量都高，
-     * 打分后经常排在前面，结果整屏都是老片，设置里的“每 N 条一条老片”形同虚设。
-     * 所以先按发布时间分两堆：半年内的（以及接口没给时间的）留在主流里，更老的并进老片池，
-     * 和专门抓的老片一起，每 [classicsEvery] 条塞一条；关了穿插就不出现。
-     * 近期的实在不够（网络差、只抓到深页）时才用老的补到 [MIN_RECENT_FEED] 条，不给空页。
-     */
-    internal fun assemble(ranked: List<VideoItem>, subscribed: Set<String>, classics: List<VideoItem>): List<VideoItem> {
-        val (recent, aged) = splitByAge(ranked, System.currentTimeMillis())
-        val feed = if (recent.size >= MIN_RECENT_FEED) recent else recent + aged.take(MIN_RECENT_FEED - recent.size)
-        // 老片池也按“质量 × 口味”排一遍：穿插进来的应该是“你可能喜欢的经典”，不是全站经典。
-        val pool = if (classicsEvery > 0) rankClassics(classics + aged) else emptyList()
-        return weaveClassics(
-            interleave(exploreDisliked(diversify(spreadAuthors(feed))), subscribed),
-            pool
-        ).take(MAX_RESULTS)
-    }
+    /** 装配最终推荐流：主体 + 探索位 + 关注插入 + 老片穿插，见 [RecommendationRanker.assemble]。 */
+    internal fun assemble(ranked: List<VideoItem>, subscribed: Set<String>, classics: List<VideoItem>): List<VideoItem> =
+        ranker.assemble(ranked, subscribed, followingIds, classics)
 
-    /**
-     * 老片的个性化排序：质量 × 画像，**不算新鲜度**（老片本来就老，算了等于按年龄再罚一次）。
-     * 排完同样做一次多样性重排，免得穿插位连着几条都是同一类内容。
-     */
-    internal fun rankClassics(items: List<VideoItem>): List<VideoItem> {
-        if (items.size <= 1) return items
-        val taste = profile
-        return diversify(items.sortedByDescending { item ->
-            qualityScore(item.likes, item.views) + taste.score(item).coerceIn(-6.0, 8.0) * CLASSIC_TASTE_WEIGHT
-        })
-    }
+    internal fun rankClassics(items: List<VideoItem>): List<VideoItem> = ranker.rankClassics(items)
 
-    /**
-     * 两条视频有多像：同一个作者直接算最像，否则看标签的 Jaccard 相似度。
-     * 不用任何模型，够用来判断“又是同一种内容”。
-     */
-    internal fun similarity(a: VideoItem, b: VideoItem): Double {
-        // 有 id 就按 id 认人；只有名字时才比名字（不同 id 同名的是两个人）。
-        if (a.authorId.isNotBlank() && b.authorId.isNotBlank()) {
-            if (a.authorId == b.authorId) return 1.0
-        } else if (a.author.isNotBlank() && a.author.equals(b.author, ignoreCase = true)) return 1.0
-        val x = a.tags.mapTo(HashSet()) { it.lowercase() }
-        val y = b.tags.mapTo(HashSet()) { it.lowercase() }
-        if (x.isEmpty() || y.isEmpty()) return 0.0
-        val overlap = x.count { it in y }.toDouble()
-        val union = x.size + y.size - overlap
-        return if (union <= 0.0) 0.0 else overlap / union
-    }
+    internal fun similarity(a: VideoItem, b: VideoItem): Double = ranker.similarity(a, b)
 
-    /**
-     * 轻量 MMR 多样性重排：**最终价值 = 原来的名次 − 与最近几条的相似度惩罚**。
-     *
-     * 打散作者只解决了“连着五条同一个人”，解决不了“二十条不同作者、但全是同一种内容”。
-     * 这里每次只在最前面的 [DIVERSITY_LOOKAHEAD] 条里挑一条和最近 [SIMILARITY_WINDOW] 条最不像的，
-     * 挑不动就还是原来那条——没有相似内容时结果和原顺序完全一致。
-     */
-    internal fun diversify(items: List<VideoItem>, window: Int = SIMILARITY_WINDOW): List<VideoItem> {
-        if (items.size <= 2) return items
-        val pending = ArrayList(items)
-        val out = ArrayList<VideoItem>(items.size)
-        while (pending.isNotEmpty()) {
-            val lookAhead = minOf(DIVERSITY_LOOKAHEAD, pending.size)
-            var bestIndex = 0
-            var bestCost = Double.MAX_VALUE
-            val recent = out.takeLast(window)
-            for (i in 0 until lookAhead) {
-                val candidate = pending[i]
-                val similar = recent.maxOfOrNull { similarity(it, candidate) } ?: 0.0
-                val cost = i * POSITION_COST + similar * SIMILARITY_PENALTY
-                if (cost < bestCost) { bestCost = cost; bestIndex = i }
-            }
-            out += pending.removeAt(bestIndex)
-        }
-        return out
-    }
+    internal fun diversify(items: List<VideoItem>, window: Int = SIMILARITY_WINDOW): List<VideoItem> =
+        ranker.diversify(items, window)
 
-    /**
-     * 负反馈只降权，不永久屏蔽。画像明显不喜欢的（作者 / 标签合计低于 [EXPLORE_NEGATIVE_THRESHOLD]）
-     * 打分后沉在候选底部，正常情况下永远露不出来；这里从中挑几条作为**探索位**，
-     * 每 [EXPLORE_EVERY] 条塞一条到随机位置——口味变了还有机会被重新发现，其余照旧留在底部。
-     * 正常内容不足一个间隔时也给一条，探索位不会因为候选少而消失。
-     */
-    internal fun exploreDisliked(feed: List<VideoItem>): List<VideoItem> {
-        val taste = profile
-        val (open, buried) = feed.partition { taste.score(it) >= EXPLORE_NEGATIVE_THRESHOLD }
-        if (buried.isEmpty() || open.isEmpty()) return feed
-        // 探索位要探索的是“还不知道你喜不喜欢”，不是“你已经明说不喜欢”：
-        // 点过「不感兴趣：作者 / 标签」的内容不进探索位（在兴趣管理里恢复之前都不进），
-        // 剩下的按离 0 最近的优先——弱负反馈（划得快几次）比重负反馈更值得再试一次。
-        val retryable = buried.filterNot { taste.isMuted(it) }.sortedByDescending { taste.score(it) }
-        if (retryable.isEmpty()) return feed
-        val slots = (open.size / EXPLORE_EVERY).coerceAtLeast(1).coerceAtMost(retryable.size)
-        val explore = ArrayDeque(retryable.take(slots))
-        explore.forEach { candidates[it.id]?.exploration = true }
-        val rest = ArrayDeque(open)
-        val out = ArrayList<VideoItem>(feed.size)
-        while (rest.isNotEmpty()) {
-            val block = ArrayList<VideoItem>(EXPLORE_EVERY + 1)
-            repeat(EXPLORE_EVERY) { if (rest.isNotEmpty()) block += rest.removeFirst() }
-            if (explore.isNotEmpty()) block.add(random.nextInt(block.size + 1), explore.removeFirst())
-            out += block
-        }
-        // 没被选去探索的（包括明确拉黑的）照旧沉在底部，顺序不变。
-        val used = retryable.take(slots).mapTo(HashSet()) { it.id }
-        out += buried.filterNot { it.id in used }
-        return out
-    }
+    internal fun exploreDisliked(feed: List<VideoItem>): List<VideoItem> = ranker.exploreDisliked(feed)
 
     /** 测试用：直接给定画像。 */
-    internal fun useProfile(taste: PreferenceProfile) { profile = taste }
+    internal fun useProfile(taste: PreferenceProfile) { ranker.profile = taste }
 
-    /**
-     * 多样性：同一个作者在任意连续 [AUTHOR_WINDOW] + 1 条里最多出现一次。
-     * 打分高的作者会整段霸屏，看起来像作者页；把它的其余作品往后挪，顺序尽量不动。
-     */
-    internal fun spreadAuthors(items: List<VideoItem>, window: Int = AUTHOR_WINDOW): List<VideoItem> {
-        if (items.size <= 2) return items
-        val pending = ArrayDeque(items)
-        val out = ArrayList<VideoItem>(items.size)
-        while (pending.isNotEmpty()) {
-            val recent = out.takeLast(window)
-            val pick = pending.firstOrNull { candidate ->
-                recent.none { it.author.equals(candidate.author, ignoreCase = true) }
-            } ?: pending.first()
-            pending.remove(pick)
-            out += pick
-        }
-        return out
-    }
+    internal fun spreadAuthors(items: List<VideoItem>, window: Int = AUTHOR_WINDOW): List<VideoItem> =
+        ranker.spreadAuthors(items, window)
 
-    /**
-     * 视频质量分：**平滑点赞率**为主，绝对热度为辅。
-     *
-     * 只看点赞总数，老视频和常年霸榜的天然占优；只看裸点赞率，10 次播放 5 个赞会压过
-     * 十万播放一万赞。所以点赞率按贝叶斯平滑：先假设每条视频有 [QUALITY_PRIOR_VIEWS] 次
-     * 播放、平均点赞率 [QUALITY_PRIOR_RATE]，播放量越大真实数据占比越高。
-     * 结果相对平均水平取对数，再加一点对数热度，量级和原来的“点赞 + 播放”接近。
-     */
-    internal fun qualityScore(likes: Int, views: Int): Double {
-        val l = likes.coerceAtLeast(0).toDouble()
-        val v = views.coerceAtLeast(0).toDouble()
-        val rate = (l + QUALITY_PRIOR_VIEWS * QUALITY_PRIOR_RATE) / (v + QUALITY_PRIOR_VIEWS)
-        val relative = ln(rate / QUALITY_PRIOR_RATE).coerceIn(-1.5, 2.5) * 1.6
-        val heat = ln(l + 1.0) * 0.5 + ln(v + 1.0) * 0.12
-        return relative + heat
-    }
+    internal fun qualityScore(likes: Int, views: Int): Double = ranker.qualityScore(likes, views)
 
     /** 按月点赞榜要抽的月份：本月和上月（`yyyy-MM`）。 */
     internal fun monthsToSample(now: Long = System.currentTimeMillis()): List<String> {
@@ -370,28 +226,10 @@ class RecommendationEngine(
         return listOf(current, format.format(calendar.time))
     }
 
-    /**
-     * 按发布时间分成（主体，经典池）两堆，顺序不变；没有发布时间的算主体。
-     *
-     * 年龄不再是一刀切：**近期**（[RECENT_MAX_AGE_MS] 以内）和**中期**（到
-     * [CLASSIC_MIN_AGE_MS] 为止）都留在主体里，只是新鲜度按连续曲线自然衰减；
-     * 超过一年的才进经典池按间隔穿插。以前半年是硬切线，179 天和 181 天的待遇天差地别。
-     */
-    internal fun splitByAge(items: List<VideoItem>, now: Long): Pair<List<VideoItem>, List<VideoItem>> {
-        val cutoff = now - CLASSIC_MIN_AGE_MS
-        return items.partition { it.createdAt <= 0L || it.createdAt >= cutoff }
-    }
+    internal fun splitByAge(items: List<VideoItem>, now: Long): Pair<List<VideoItem>, List<VideoItem>> =
+        ranker.splitByAge(items, now)
 
-    /** 年龄桶，只用于诊断和文档口径：近期 / 中期 / 经典。 */
-    internal fun ageBucket(item: VideoItem, now: Long): String {
-        if (item.createdAt <= 0L) return "近期"
-        val age = (now - item.createdAt).coerceAtLeast(0L)
-        return when {
-            age <= RECENT_MAX_AGE_MS -> "近期"
-            age < CLASSIC_MIN_AGE_MS -> "中期"
-            else -> "经典"
-        }
-    }
+    internal fun ageBucket(item: VideoItem, now: Long): String = ranker.ageBucket(item, now)
 
     /**
      * 老片候选：按总点赞排序的列表，跳过最前面那几页（那是常年霸榜的），
@@ -428,33 +266,8 @@ class RecommendationEngine(
         }
     }
 
-    /**
-     * 每 [classicsEvery] 条里塞一条老片，塞在这一组里的随机位置——可能是第一条，
-     * 也可能是最后一条。老片不够时有多少塞多少，塞完就照常。
-     */
-    internal fun weaveClassics(feed: List<VideoItem>, classics: List<VideoItem>): List<VideoItem> {
-        val every = classicsEvery
-        if (every <= 0 || classics.isEmpty() || feed.isEmpty()) return feed
-        val taken = feed.map { it.id }.toHashSet()
-        val pool = ArrayDeque(classics.filter { taken.add(it.id) })
-        if (pool.isEmpty()) return feed
-        pool.forEach { item ->
-            candidates.getOrPut(item.id) { RecommendationCandidate(item) }.also {
-                it.classic = true
-                it.sources += RecommendationCandidate.Source.CLASSICS
-                if (it.baseQuality == 0.0) it.baseQuality = qualityScore(item.likes, item.views)
-            }
-        }
-        val out = ArrayList<VideoItem>(feed.size + pool.size)
-        val rest = ArrayDeque(feed)
-        while (rest.isNotEmpty()) {
-            val block = ArrayList<VideoItem>(every + 1)
-            repeat(every) { if (rest.isNotEmpty()) block += rest.removeFirst() }
-            if (pool.isNotEmpty()) block.add(random.nextInt(block.size + 1), pool.removeFirst())
-            out += block
-        }
-        return out
-    }
+    internal fun weaveClassics(feed: List<VideoItem>, classics: List<VideoItem>): List<VideoItem> =
+        ranker.weaveClassics(feed, classics)
 
     /**
      * 一次请求：某个榜单（或订阅流 / 标签召回 / 作者召回）的某一页。
@@ -614,66 +427,7 @@ class RecommendationEngine(
         }
     }
 
-    /**
-     * 打分排序。分数由来源、站方质量、新鲜度和本地画像合成，见 [scoreOf]；
-     * 每条候选连同来源分一起记进 [candidates]，之后的实时重排才接得上同一套口径。
-     * 关注的作者不在这里加分——加分会让他们整片霸榜，改成排完序之后按位置插入。
-     */
-    private fun rank(merged: Map<String, RecommendationCandidate>): List<VideoItem> {
-        val taste = profile
-        val now = System.currentTimeMillis()
-        if (candidates.size > MAX_TRACKED_CANDIDATES) candidates.clear()
-        merged.values.forEach { candidate ->
-            // 站方数据：平滑点赞率 + 热度，见 qualityScore。
-            candidate.baseQuality = qualityScore(candidate.item.likes, candidate.item.views)
-            candidates[candidate.item.id] = candidate
-        }
-        return merged.values
-            .map { it.item }
-            .sortedByDescending { scoreOf(it, taste, now) }
-    }
-
-    /**
-     * 关注作者的更新按**位置**插进结果里，而不是靠权重往上挤。
-     *
-     * 以前订阅流权重最高、关注的作者还额外加分，结果整屏刷出来全是已经关注的人——
-     * 推荐页就失去意义了。现在每 [DISCOVERY_RUN] 条没关注的内容配一条关注作者的，
-     * 占比固定，跟打分高低无关。
-     *
-     * 插在这一组里的哪个位置是随机的：可能是头一条，也可能压到最后一条。固定插在
-     * 组尾会形成一眼看得出来的节奏，隔几条就知道下一条是关注的作者。
-     * 哪一条关注作者的更新排在前面，仍然由打分决定。
-     */
-    private fun interleave(ranked: List<VideoItem>, subscribed: Set<String>): List<VideoItem> {
-        val followedAuthors = followingIds
-        fun isFollowed(item: VideoItem) =
-            item.id in subscribed || (item.authorId.isNotBlank() && item.authorId in followedAuthors)
-
-        val followed = ArrayDeque(ranked.filter(::isFollowed))
-        val discovery = ArrayDeque(ranked.filterNot(::isFollowed))
-        // 一边是空的就没得混，原样返回：没关注任何作者、关注的作者最近没更新、
-        // 没登录拿不到订阅流，都会走到这里。这是正常情况，不是错误。
-        if (followed.isEmpty() || discovery.isEmpty()) return ranked
-
-        // 关注的更新不够按 1:[DISCOVERY_RUN] 铺满时，把间隔拉大，让这几条散布开，
-        // 而不是全挤在开头几屏之后就再也不见。够铺满时这里就等于 DISCOVERY_RUN。
-        //
-        // 间隔按**最终会露面的那一段**算：结果最后要截到 MAX_RESULTS 条，
-        // 按整个候选池去摊的话，只关注了一两个作者的账号会把那几条摊到列表末尾，正好被截掉。
-        val window = minOf(discovery.size + followed.size, MAX_RESULTS)
-        val run = maxOf(DISCOVERY_RUN, window / followed.size - 1)
-
-        val out = ArrayList<VideoItem>(ranked.size)
-        while (discovery.isNotEmpty() && followed.isNotEmpty()) {
-            val block = ArrayList<VideoItem>(run + 1)
-            repeat(run) { if (discovery.isNotEmpty()) block += discovery.removeFirst() }
-            block.add(random.nextInt(block.size + 1), followed.removeFirst())
-            out += block
-        }
-        out += discovery
-        out += followed
-        return out
-    }
+    private fun rank(merged: Map<String, RecommendationCandidate>): List<VideoItem> = ranker.rank(merged)
 
     private fun split(ranked: List<VideoItem>): Buckets {
         val buckets = Buckets()
@@ -793,18 +547,18 @@ class RecommendationEngine(
         /** 按月过滤生效时总数是一个月的量（不到一万）；超过这个数就是全站总榜。 */
         internal const val MONTH_FILTER_MAX_TOTAL = 60_000
         /** 质量分的先验：假设每条视频先有 400 次播放、5% 的点赞率。 */
-        internal const val QUALITY_PRIOR_VIEWS = 400.0
-        internal const val QUALITY_PRIOR_RATE = 0.05
+        internal const val QUALITY_PRIOR_VIEWS = RecommendationRanker.QUALITY_PRIOR_VIEWS
+        internal const val QUALITY_PRIOR_RATE = RecommendationRanker.QUALITY_PRIOR_RATE
         /** 同一作者两条视频之间至少隔这么多条。 */
-        internal const val AUTHOR_WINDOW = 4
+        internal const val AUTHOR_WINDOW = RecommendationRanker.AUTHOR_WINDOW
         /** 画像分低于这个值算“明显不喜欢”，只以探索位的形式偶尔出现。 */
-        internal const val EXPLORE_NEGATIVE_THRESHOLD = -1.0
+        internal const val EXPLORE_NEGATIVE_THRESHOLD = RecommendationRanker.EXPLORE_NEGATIVE_THRESHOLD
         /** 每这么多条正常推荐配一条探索位。 */
-        internal const val EXPLORE_EVERY = 30
+        internal const val EXPLORE_EVERY = RecommendationRanker.EXPLORE_EVERY
         /** 订阅流只是候选来源之一，不再比别的榜单重——占比由插入间隔决定。 */
         private const val SUBSCRIBED_WEIGHT = 2.8
         /** 每这么多条“发现”配一条关注作者的更新，插在这一组里的随机位置。 */
-        internal const val DISCOVERY_RUN = 5
+        internal const val DISCOVERY_RUN = RecommendationRanker.DISCOVERY_RUN
         /** 老片流：按总点赞排序，跳过最前面常年霸榜的几页，在后面均匀抽。 */
         internal const val CLASSICS_SORT = "likes"
         internal const val CLASSICS_MIN_PAGE = 8
@@ -813,21 +567,20 @@ class RecommendationEngine(
          * 年龄软分桶：90 天内是「近期」，90 天～1 年是「中期」（仍在推荐流主体里，
          * 只是新鲜度分自然更低），超过 1 年才是「经典」，进老片池按间隔穿插。
          */
-        internal const val RECENT_MAX_AGE_MS = 90L * 24 * 60 * 60 * 1000
-        internal const val CLASSIC_MIN_AGE_MS = 365L * 24 * 60 * 60 * 1000
+        internal const val RECENT_MAX_AGE_MS = RecommendationRanker.RECENT_MAX_AGE_MS
+        internal const val CLASSIC_MIN_AGE_MS = RecommendationRanker.CLASSIC_MIN_AGE_MS
         /** 老片排序里口味占的比重：比主流里的 0.38 更重，老片本来就该挑合口味的。 */
-        internal const val CLASSIC_TASTE_WEIGHT = 0.5
+        internal const val CLASSIC_TASTE_WEIGHT = RecommendationRanker.CLASSIC_TASTE_WEIGHT
         /** 多样性重排：和最近几条比、最多往后看几条、名次代价、相似度惩罚。 */
-        internal const val SIMILARITY_WINDOW = 3
-        internal const val DIVERSITY_LOOKAHEAD = 16
-        internal const val POSITION_COST = 0.06
-        internal const val SIMILARITY_PENALTY = 1.2
+        internal const val SIMILARITY_WINDOW = RecommendationRanker.SIMILARITY_WINDOW
+        internal const val DIVERSITY_LOOKAHEAD = RecommendationRanker.DIVERSITY_LOOKAHEAD
+        internal const val POSITION_COST = RecommendationRanker.POSITION_COST
+        internal const val SIMILARITY_PENALTY = RecommendationRanker.SIMILARITY_PENALTY
         /** 近期视频至少凑到这么多条，不够才拿老的补。 */
-        internal const val MIN_RECENT_FEED = 24
+        internal const val MIN_RECENT_FEED = RecommendationRanker.MIN_RECENT_FEED
         /** 设置里的默认：每 12 条穿插一条。 */
         const val DEFAULT_CLASSICS_EVERY = 12
         private const val PAGE_SIZE = 36
-        private const val MAX_RESULTS = 80
         /** 首轮榜单 + 按月榜 + 召回约 12 个请求，再加点赞同步和老片，留一点余量。 */
         private const val MAX_PARALLEL_REQUESTS = 16
         /**
@@ -847,8 +600,6 @@ class RecommendationEngine(
         const val MIN_FRESH_CANDIDATES = 12
         /** 最多再抽几轮找没看过的视频。 */
         const val MAX_EXTRA_ROUNDS = 3
-        /** 候选表最多记这么多条；超了整张清掉（只是少了推荐理由，不影响推荐本身）。 */
-        private const val MAX_TRACKED_CANDIDATES = 2000
         private const val MAX_FOLLOWING_PAGES = 40
         private const val FOLLOWING_TTL_MS = 6L * 60L * 60L * 1000L
         private const val DEFAULT_LIST_BUDGET_MS = 9_000L

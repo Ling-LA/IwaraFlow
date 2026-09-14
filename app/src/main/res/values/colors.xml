@@ -1,3 +1,17 @@
 <resources>
     <color name="launcher_background">#FEE96E</color>
+
+    <!--
+      浅蓝主题的基础色。列表页、搜索页、设置弹窗共用这几个值；
+      新写的布局和代码请引用这里，不要再散着写十六进制，
+      以后要调主题色 / 做深色模式才不用改几十个文件。
+    -->
+    <color name="surface_page">#EEF8FE</color>
+    <color name="surface_header">#DDF1FC</color>
+    <color name="surface_card">#FFFFFFFF</color>
+    <color name="text_primary">#17324A</color>
+    <color name="text_secondary">#607D93</color>
+    <color name="text_hint">#99607D93</color>
+    <color name="accent">#285C7B</color>
+    <color name="divider">#D9E6F2</color>
 </resources>

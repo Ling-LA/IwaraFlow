@@ -312,6 +312,17 @@ Iwara 官方点赞会完整同步进 `seen_videos`（服务端一页最多 50 �
 - Android DownloadManager、Picture-in-Picture、FileProvider
 - GitHub Releases 应用内更新
 
+### 推荐模块的分工
+
+推荐拆成**召回**和**排序**两半，各管各的：
+
+| | 负责 |
+| --- | --- |
+| `RecommendationEngine` | 召回与编排：抽哪些页、发请求、翻页深度上限、按月榜 / 标签 / 作者的个性化召回、关注名单、候选分桶（已看 / 已赞）、老片抓取 |
+| `RecommendationRanker` | 排序：打分（来源 + 质量 + 新鲜度 + 画像）、作者打散、内容 MMR 去重、探索位、老片个性化、关注按位置插入、最终装配；还持有候选表（来源信息、推荐理由） |
+
+`RecommendationRanker` 一个网络请求都不发、也不碰数据库，全是纯计算，可以脱离网络单独测；改排序策略不会动到召回，反过来也一样。
+
 ### 数据与隐私
 
 **敏感数据只进加密存储**（`SecureSessionStore` / AndroidX Security Crypto）：
@@ -364,15 +375,25 @@ Iwara 官方点赞会完整同步进 `seen_videos`（服务端一页最多 50 �
 - 播放主界面深色沉浸式；登录 / 搜索 / 设置弹窗浅蓝白色主题，主按钮带 OEM 主题兼容兜底
 - 浏览历史、作者主页、搜索结果使用浅蓝卡片列表
 - 点赞 / 收藏使用圆润的爱心与五角星矢量图标，同尺寸；画质 / 下载 / 小窗按钮带文字说明
-- 专属 launcher 图标：黄色底、蓝色渐变的圆角播放三角与波浪，自适应图标（前景位图在 `mipmap-*/ic_launcher_foreground.png`，原图在 `art/launcher-source.png`）
+- 专属 launcher 图标：黄色底、蓝色渐变的圆角播放三角与波浪，自适应图标（前景位图在 `mipmap-*/ic_launcher_foreground.png`，原图在 `art/launcher-source.png`）；另带 Android 13+ 的 **monochrome 主题图标**（`drawable/ic_launcher_monochrome.xml`），跟随壁纸取色
+- 颜色令牌集中在 `values/colors.xml`（页面底色、顶栏、主文字、次文字、强调色、分隔线）。新写的布局引用令牌，不再散着写十六进制；老布局逐步替换
 
 ## 构建与发布
 
 要求：JDK 17+、Android SDK 36、Gradle 8.13。
 
+仓库里不放 `gradle-wrapper.jar`（二进制），所以一键脚本按「有 `gradlew` 用 `gradlew` → 系统装了 `gradle` 用 `gradle` → 都没有就按 `gradle/wrapper/gradle-wrapper.properties` 里的版本下载一份到 `~/.gradle/iwaraflow-dist`」的顺序找 Gradle：
+
 ```bat
-gradlew.bat assembleDebug
+build-apk.bat               :: 默认 assembleDebug
+build-apk.bat assembleRelease
 ```
+
+```bash
+./build-apk.sh              # Linux / macOS，同样支持传任务名
+```
+
+用 Android Studio 打开本项目直接构建当然也可以。
 
 单元测试：`gradle :app:testDebugUnitTest`。设备测试（仅测试模拟器）：`gradle :app:connectedDebugAndroidTest`，参数 `-Pandroid.testInstrumentationRunnerArguments.backMode=key` 或 `gesture` 分别验证系统按键与手势返回；测试使用合成数据，不需要真实账号。
 
@@ -386,6 +407,15 @@ gradlew.bat assembleDebug
 > 发布新版本时必须同时提高 `versionCode` 与 `versionName`，否则已安装相同版本号的客户端不会收到更新提示。
 
 ## 更新日志
+
+### v0.13.5
+
+按文档的架构和工程部分收尾：
+
+- **推荐拆成召回和排序两半**：`RecommendationEngine` 只管召回与编排，新的 `RecommendationRanker` 管打分、多样性、探索位、老片穿插和装配；排序那半不发请求、不碰数据库，可以单独测
+- **补上 Android 13+ 的 monochrome 主题图标**，跟随壁纸取色
+- **一键构建脚本真的能一键了**：`build-apk.bat` / `build-apk.sh` 按「有 gradlew 用 gradlew → 有 gradle 用 gradle → 都没有就按 wrapper 里写的版本下载一份」的顺序找 Gradle，不再直接让你去开 Android Studio
+- 颜色令牌集中到 `values/colors.xml`，新布局引用令牌
 
 ### v0.13.4
 

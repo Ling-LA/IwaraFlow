@@ -10,6 +10,10 @@ class PlayableVideoGate(
     private val api: IwaraApi,
     private val batchBudgetMs: Long = DEFAULT_BATCH_BUDGET_MS
 ) {
+    /** 可播放验证的通过率，只用于诊断：验了多少条、其中多少条真能播。 */
+    private val inspected = java.util.concurrent.atomic.AtomicInteger()
+    private val passed = java.util.concurrent.atomic.AtomicInteger()
+
     private val coordinator = Executors.newSingleThreadExecutor()
     private val probes = Executors.newFixedThreadPool(PROBE_THREADS)
     private val lifecycleLock = Any()
@@ -110,6 +114,7 @@ class PlayableVideoGate(
     }
 
     private fun probeOne(item: VideoItem, quality: String): VideoItem {
+        inspected.incrementAndGet()
         return try {
             val sources = item.sources?.takeIf { it.isNotEmpty() } ?: api.resolveSourcesBlocking(item.id)
             val preferred = api.chooseSource(sources, item.selectedQuality ?: quality)
@@ -178,6 +183,7 @@ class PlayableVideoGate(
     }
 
     private fun remember(key: String, item: VideoItem) {
+        if (item.playbackIssue == null) passed.incrementAndGet()
         val verdict = Verdict(System.currentTimeMillis(), item.playbackIssue, item.sources, item.streamUrl, item.selectedQuality)
         synchronized(verdicts) { verdicts[key] = verdict }
     }
@@ -208,6 +214,9 @@ class PlayableVideoGate(
             }
         }.getOrDefault(false)
     }
+
+    /** 诊断用：这次会话里验了多少条候选、通过了多少条。 */
+    fun verificationStats(): Pair<Int, Int> = inspected.get() to passed.get()
 
     fun close() {
         synchronized(lifecycleLock) {

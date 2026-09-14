@@ -195,7 +195,9 @@ class MainActivityV3 : AppCompatActivity() {
             onOpenAuthor = { author -> openAuthor(author.id, author.name, author.username) },
             onOpenChanged = { open -> closeCommentsOnBack.isEnabled = open },
             onCommentPosted = { item -> history.recordInteraction(item, "comment", 1.5); rerankQueue() },
-            onOpenTag = ::openTagSearch
+            onOpenTag = ::openTagSearch,
+            // 简介里写清楚这条是怎么被推荐出来的；别的流（最新 / 流行 / 人气）没有理由可写。
+            reasonFor = { videoId -> if (mode == "recommend") recommender.reasonFor(videoId) else null }
         )
         onBackPressedDispatcher.addCallback(this, closeCommentsOnBack)
         onBackPressedDispatcher.addCallback(this, exitFullscreenOnBack)
@@ -516,6 +518,45 @@ class MainActivityV3 : AppCompatActivity() {
         requestSerial++
         awaitingFullFeed = false
         loadingMore = false
+    }
+
+    /**
+     * 兴趣管理：把点过「不感兴趣：作者 / 标签」的都列出来，可以随时恢复。
+     *
+     * 明确的负反馈本来连探索位都不给，恢复入口就是它唯一的出路——
+     * 口味变了、或者手滑点错了，不该永远出不来。
+     */
+    private fun showInterestManager() {
+        val profile = runCatching { history.preferenceProfile() }.getOrNull()
+        val authors = profile?.mutedAuthors.orEmpty().sorted()
+        val tags = profile?.mutedTags.orEmpty().sorted()
+        val entries = authors.map { DislikeSheet.Kind.AUTHOR to it } + tags.map { DislikeSheet.Kind.TAG to it }
+        if (entries.isEmpty()) {
+            AlertDialog.Builder(this)
+                .setTitle("兴趣管理")
+                .setMessage("还没有点过「不感兴趣：作者 / 标签」。\n\n点过之后这类内容基本不再出现，可以随时在这里恢复。")
+                .setPositiveButton("知道了", null)
+                .show()
+            return
+        }
+        val labels = entries.map { (kind, key) ->
+            if (kind == DislikeSheet.Kind.AUTHOR) "作者 @$key" else "标签 #$key"
+        }.toTypedArray()
+        AlertDialog.Builder(this)
+            .setTitle("兴趣管理 · 点一项恢复")
+            .setItems(labels) { _, which ->
+                val (kind, key) = entries[which]
+                val removed = runCatching { history.forgetDislike(kind, key) }.getOrDefault(0)
+                val what = if (kind == DislikeSheet.Kind.AUTHOR) "@$key" else "#$key"
+                Toast.makeText(
+                    this,
+                    if (removed > 0) "已恢复 $what，之后还会推荐" else "没有找到 $what 的记录",
+                    Toast.LENGTH_SHORT
+                ).show()
+                if (removed > 0) rerankQueue()
+            }
+            .setNegativeButton("关闭", null)
+            .show()
     }
 
     /** 上次重排剩余候选之后翻了几页。 */
@@ -1033,7 +1074,8 @@ class MainActivityV3 : AppCompatActivity() {
 
         panel.addView(sectionTitle("维护"))
         panel.addView(actionRow("同步点赞记录", "把在网页端点过的赞补进“已看”，刷新推荐后生效。") { syncLikedVideos() })
-        panel.addView(actionRow("诊断信息", "最近的异常、退出原因和加载线索，只存在本机，不会上传。") {
+        panel.addView(actionRow("兴趣管理", "点过「不感兴趣」的作者和标签列在这里，可以随时恢复。") { showInterestManager() })
+        panel.addView(actionRow("诊断信息", "最近的异常、退出原因和加载线索、推荐质量指标，只存在本机，不会上传。") {
             NavigationDiagnostics.show(this)
         })
 

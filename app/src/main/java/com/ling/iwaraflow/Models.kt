@@ -35,6 +35,39 @@ data class VideoListPage(
     val total: Int
 )
 
+/**
+ * 推荐质量的本地诊断指标，见 [HistoryStore.recommendationMetrics]。
+ * 只算本机数据，不上传；设置里的「诊断信息」会把它打印出来。
+ */
+data class RecommendationMetrics(
+    /** 最近统计了多少条观看行为（看过的 + 划走的）。 */
+    val samples: Int,
+    /** 快速划走率：最直接能看出推荐跑没跑偏。 */
+    val quickSkipRate: Double,
+    /** 平均有效播放时长。 */
+    val averageWatchMs: Long,
+    /** 播放完成率。 */
+    val completionRate: Double,
+    /** 点赞 / 收藏率：强正反馈。 */
+    val reactionRate: Double,
+    /** 同作者重复率：作者多样性。 */
+    val authorRepeatRate: Double,
+    /** 标签重复率：内容多样性。 */
+    val tagRepeatRate: Double
+) {
+    fun summary(): String = buildString {
+        if (samples == 0) { append("最近没有足够的观看记录"); return@buildString }
+        fun percent(value: Double) = "%.0f%%".format(value * 100)
+        append("最近 $samples 条：")
+        append("快速划走 ${percent(quickSkipRate)}")
+        append(" · 平均播放 ${averageWatchMs / 1000} 秒")
+        append(" · 完成率 ${percent(completionRate)}")
+        append(" · 点赞收藏 ${percent(reactionRate)}")
+        append(" · 同作者重复 ${percent(authorRepeatRate)}")
+        append(" · 同标签重复 ${percent(tagRepeatRate)}")
+    }
+}
+
 /** 一批视频的本地状态，一次查库问清，见 [HistoryStore.loadStatuses]。 */
 data class VideoStatuses(val seen: Set<String>, val favorites: Set<String>)
 

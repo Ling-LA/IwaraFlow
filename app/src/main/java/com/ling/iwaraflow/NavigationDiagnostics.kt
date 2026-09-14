@@ -122,6 +122,8 @@ object NavigationDiagnostics {
                     appendLine("${Date(info.timestamp)} reason=${info.reason} status=${info.status} ${info.description.orEmpty()}")
                 }
             }
+            appendLine("\n推荐诊断（只算本机数据，不上传）：")
+            appendLine(recommendationSummary(activity))
             appendLine("\n最近异常：")
             appendLine(runCatching { File(activity.filesDir, "last-navigation-crash.txt").readText() }
                 .getOrDefault("暂无 Java 异常记录"))
@@ -130,6 +132,19 @@ object NavigationDiagnostics {
                 .getOrDefault("暂无记录"))
         }
     }
+
+    /**
+     * 推荐质量的几个本地指标。看的是「这套规则有没有让推荐变好」，
+     * 而不是「算法有没有按写的规则跑」——后者是单元测试的事。
+     */
+    internal fun recommendationSummary(context: Context): String = runCatching {
+        val store = HistoryStore(context.applicationContext)
+        try {
+            store.recommendationMetrics().summary()
+        } finally {
+            runCatching { store.close() }
+        }
+    }.getOrDefault("推荐指标读取失败")
 
     private fun version(context: Context): String = runCatching {
         @Suppress("DEPRECATION")

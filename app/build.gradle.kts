@@ -12,8 +12,8 @@ android {
         applicationId = "com.ling.iwaraflow"
         minSdk = 28
         targetSdk = 36
-        versionCode = 75
-        versionName = "0.13.3"
+        versionCode = 76
+        versionName = "0.13.4"
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
     }
 

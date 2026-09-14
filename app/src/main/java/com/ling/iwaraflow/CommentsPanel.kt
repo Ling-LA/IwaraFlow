@@ -35,7 +35,9 @@ class CommentsPanel(
     /** 评论发送成功：页面把它记进口味画像。 */
     private val onCommentPosted: ((VideoItem) -> Unit)? = null,
     /** 点了简介页里的标签：页面去搜这个标签。 */
-    private val onOpenTag: ((String) -> Unit)? = null
+    private val onOpenTag: ((String) -> Unit)? = null,
+    /** 「为什么推荐给我」：页面按视频 id 给出推荐理由，没有就不显示这一行。 */
+    private val reasonFor: ((String) -> String?)? = null
 ) {
     enum class Tab { INFO, COMMENTS }
 
@@ -237,7 +239,9 @@ class CommentsPanel(
         if (item.createdAt > 0L) parts += SimpleDateFormat("yyyy-MM-dd", Locale.ROOT).format(Date(item.createdAt))
         if (item.views > 0) parts += "${formatCount(item.views)} 次播放"
         if (item.likes > 0) parts += "${formatCount(item.likes)} 赞"
-        infoMeta.text = parts.joinToString("  ·  ")
+        // 「为什么推荐给我」：这条是怎么被选出来的。推荐流之外（作者页、搜索页）没有理由，就不写。
+        val reason = reasonFor?.invoke(item.id)?.takeIf { it.isNotBlank() }
+        infoMeta.text = parts.joinToString("  ·  ") + (reason?.let { "\n推荐理由：$it" }.orEmpty())
         renderTags(item)
         renderDescription(item)
     }

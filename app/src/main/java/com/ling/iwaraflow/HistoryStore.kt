@@ -446,6 +446,90 @@ class HistoryStore(context: Context) : SQLiteOpenHelper(context, "iwaraflow.db",
     }
 
     /**
+     * 推荐质量的本地诊断指标。
+     *
+     * 单元测试回答的是「算法有没有按我写的规则跑」，回答不了「这套规则有没有让推荐变好」。
+     * 这里从本地的行为表和观看记录算几个能直接看出好坏的数：快速划走率、平均有效播放、
+     * 播放完成率、点赞收藏率、作者 / 标签重复率。全部只算本机数据，不上传。
+     */
+    @Synchronized
+    fun recommendationMetrics(limit: Int = METRICS_ROWS): RecommendationMetrics {
+        var watches = 0
+        var skips = 0
+        var likes = 0
+        val authors = ArrayList<String>()
+        val tags = ArrayList<String>()
+        readableDatabase.query(
+            "interactions", arrayOf("action", "author", "tags"),
+            null, null, null, null, "created_at DESC", limit.toString()
+        ).use { c ->
+            while (c.moveToNext()) {
+                val action = c.getString(0)
+                when (action) {
+                    "watch" -> { watches += 1; authors += c.getString(1).lowercase(); tags += splitTags(c.getString(2)).map { it.lowercase() } }
+                    ACTION_SKIP -> { skips += 1; authors += c.getString(1).lowercase(); tags += splitTags(c.getString(2)).map { it.lowercase() } }
+                    "like", "favorite" -> likes += 1
+                }
+            }
+        }
+        var played = 0L
+        var playedRows = 0
+        var completed = 0
+        readableDatabase.query(
+            "history", arrayOf("last_position", "duration", "completed"),
+            null, null, null, null, "watched_at DESC", limit.toString()
+        ).use { c ->
+            while (c.moveToNext()) {
+                played += c.getLong(0).coerceAtLeast(0L)
+                playedRows += 1
+                if (c.getInt(2) == 1) completed += 1
+            }
+        }
+        val viewed = watches + skips
+        val distinctAuthors = authors.filter { it.isNotBlank() }.toSet().size
+        val authorTotal = authors.count { it.isNotBlank() }
+        val distinctTags = tags.toSet().size
+        return RecommendationMetrics(
+            samples = viewed,
+            quickSkipRate = if (viewed == 0) 0.0 else skips.toDouble() / viewed,
+            averageWatchMs = if (playedRows == 0) 0L else played / playedRows,
+            completionRate = if (playedRows == 0) 0.0 else completed.toDouble() / playedRows,
+            reactionRate = if (viewed == 0) 0.0 else likes.toDouble() / viewed,
+            authorRepeatRate = if (authorTotal == 0) 0.0 else 1.0 - distinctAuthors.toDouble() / authorTotal,
+            tagRepeatRate = if (tags.isEmpty()) 0.0 else 1.0 - distinctTags.toDouble() / tags.size
+        )
+    }
+
+    /**
+     * 兴趣管理里的“恢复”：把某个作者 / 标签的「不感兴趣」记录删掉，
+     * 它就不再被静音，也能重新参与推荐和探索。返回删掉了几条。
+     */
+    @Synchronized
+    fun forgetDislike(kind: DislikeSheet.Kind, key: String): Int {
+        val value = key.trim()
+        if (value.isBlank()) return 0
+        val db = writableDatabase
+        return when (kind) {
+            DislikeSheet.Kind.AUTHOR -> db.delete(
+                "interactions",
+                "action=? AND (LOWER(author)=? OR author_id=?)",
+                arrayOf(ACTION_DISLIKE_AUTHOR, value.lowercase(), value)
+            )
+            DislikeSheet.Kind.TAG -> db.delete(
+                "interactions",
+                "action=? AND (LOWER(tags)=? OR LOWER(tags) LIKE ? OR LOWER(tags) LIKE ? OR LOWER(tags) LIKE ?)",
+                arrayOf(
+                    ACTION_DISLIKE_TAG, value.lowercase(),
+                    "${value.lowercase()}%", "%${value.lowercase()}", "%${value.lowercase()}%"
+                )
+            )
+            DislikeSheet.Kind.VIDEO -> db.delete(
+                "interactions", "action=? AND video_id=?", arrayOf(ACTION_DISLIKE_VIDEO, value)
+            )
+        }
+    }
+
+    /**
      * 首次查询会顺带打开数据库并跑升级迁移。启动时在后台先做掉，
      * 首屏视频到达后主线程读收藏状态就不用再等这一步。
      */
@@ -466,6 +550,8 @@ class HistoryStore(context: Context) : SQLiteOpenHelper(context, "iwaraflow.db",
         const val PROFILE_ROWS = 2000
         /** 批量查“看过没 / 收藏没”时一次问多少个 id（SQLite 的变量个数有上限）。 */
         const val STATUS_BATCH = 400
+        /** 算推荐诊断指标时看最近多少条记录。 */
+        const val METRICS_ROWS = 200
         /** 最近这么久里的行为算“当前兴趣”，权重再乘 [SESSION_BOOST]。 */
         const val SESSION_WINDOW_MS = 45L * 60L * 1000L
         const val SESSION_BOOST = 2.5

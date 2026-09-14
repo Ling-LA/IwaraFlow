@@ -24,7 +24,9 @@ class CommentsHost(
     /** 评论发送成功：交给页面记画像。 */
     onCommentPosted: ((VideoItem) -> Unit)? = null,
     /** 点了简介页里的标签：页面去搜这个标签。 */
-    onOpenTag: ((String) -> Unit)? = null
+    onOpenTag: ((String) -> Unit)? = null,
+    /** 「为什么推荐给我」：按视频 id 给出推荐理由，只有推荐流给得出来。 */
+    reasonFor: ((String) -> String?)? = null
 ) {
     val panel = CommentsPanel(
         root = panelRoot,
@@ -37,7 +39,8 @@ class CommentsHost(
         },
         onOpenAuthor = onOpenAuthor,
         onCommentPosted = onCommentPosted,
-        onOpenTag = onOpenTag
+        onOpenTag = onOpenTag,
+        reasonFor = reasonFor
     )
 
     init {

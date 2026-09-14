@@ -876,7 +876,14 @@ class MainActivityV3 : AppCompatActivity() {
         val pauseIcon = CheckBox(this).apply {
             text = "暂停时显示播放三角"; isChecked = prefs.showPauseIndicator
         }
-        panel.addView(autoNext); panel.addView(autoPip); panel.addView(pauseIcon)
+        val tapPause = CheckBox(this).apply {
+            text = "点一下画面暂停播放"; isChecked = prefs.tapToPause
+        }
+        panel.addView(autoNext); panel.addView(autoPip); panel.addView(pauseIcon); panel.addView(tapPause)
+        panel.addView(TextView(this).apply {
+            text = "关掉后点一下画面不再暂停：只在「标题 / 标签 / 操作栏」和「进度条 / 快进后退 / 剩余时长」之间切换，视频照常播，要暂停就点控件里的暂停按钮。"
+            textSize = 12f; setTextColor(0xFF607D93.toInt()); setPadding(dp(4), dp(4), 0, dp(8))
+        })
         val skipValues = intArrayOf(5, 10, 15, 30, 60)
         val skipNames = skipValues.map { "前进 / 后退 $it 秒" }.toTypedArray()
         val skip = Spinner(this).apply {
@@ -1031,6 +1038,7 @@ class MainActivityV3 : AppCompatActivity() {
             prefs.classicsEvery = newClassics; recommender.classicsEvery = newClassics
             prefs.skipSeen = skipSeen.isChecked; prefs.autoNext = autoNext.isChecked; prefs.autoPip = autoPip.isChecked
             prefs.showPauseIndicator = pauseIcon.isChecked
+            prefs.tapToPause = tapPause.isChecked
             prefs.skipSeconds = skipValues[skip.selectedItemPosition]
             prefs.defaultQuality = qualityValues[spinner.selectedItemPosition]
             val newType = proxyTypes[proxyType.selectedItemPosition]

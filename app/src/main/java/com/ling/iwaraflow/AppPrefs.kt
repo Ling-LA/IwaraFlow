@@ -27,6 +27,14 @@ class AppPrefs(context: Context) {
         get() = prefs.getLong("liked_sync_at", 0L)
         set(value) = prefs.edit().putLong("liked_sync_at", value).apply()
 
+    /**
+     * 点一下画面是不是暂停播放。关掉之后点一下只在「信息栏 / 操作栏」和
+     * 「进度条 / 快进后退 / 剩余时长」之间切换，视频照常播。
+     */
+    var tapToPause: Boolean
+        get() = prefs.getBoolean("tap_to_pause", true)
+        set(value) = prefs.edit().putBoolean("tap_to_pause", value).apply()
+
     /** 暂停时是否显示播放三角。 */
     var showPauseIndicator: Boolean
         get() = prefs.getBoolean("show_pause_indicator", true)

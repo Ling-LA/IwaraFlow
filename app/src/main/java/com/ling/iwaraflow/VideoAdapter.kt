@@ -307,6 +307,7 @@ class VideoAdapter(
         private val reactionBurst = view.findViewById<ReactionBurstView>(R.id.reactionBurst)
         private val speedIndicator = view.findViewById<TextView>(R.id.speedIndicator)
         private val pauseIndicator = view.findViewById<PauseIndicatorView>(R.id.pauseIndicator)
+        private val pauseSeekBar = view.findViewById<PauseSeekBar>(R.id.pauseSeekBar)
         private val skipBack = view.findViewById<View>(R.id.skipBack)
         private val skipForward = view.findViewById<View>(R.id.skipForward)
         private val skipBackLabel = view.findViewById<TextView>(R.id.skipBackLabel)
@@ -328,6 +329,8 @@ class VideoAdapter(
         private var stalledChecks = 0
         private var pendingSingleTap: Runnable? = null
         private var lastTap = 0L
+        /** 播放控件是被点出来的（没暂停也显示）。 */
+        private var controlsPinned = false
 
         private val touchSlop = ViewConfiguration.get(itemView.context).scaledTouchSlop
         /** 加速进行中允许手指挪动的距离：约 48dp，比点按阈值宽得多。 */
@@ -483,6 +486,8 @@ class VideoAdapter(
 
         fun bind(item: VideoItem) {
             release()
+            // 卡片被回收复用：上一条点出来的控件不要跟着带到下一条。
+            setControlsPinned(false)
             bound = item
             recoveryAttempts = 0
             landscape = false
@@ -561,7 +566,14 @@ class VideoAdapter(
                     lastTap = now
                     val action = Runnable {
                         if (System.currentTimeMillis() - lastTap >= 280L) {
-                            player?.let { p -> if (p.isPlaying) p.pause() else if (active) p.play() }
+                            // 设置里可以把「点一下画面暂停播放」关掉：那时点一下只是在
+                            // 信息栏和播放控件之间切换，视频照常播。
+                            if (prefs.tapToPause) {
+                                setControlsPinned(false)
+                                player?.let { p -> if (p.isPlaying) p.pause() else if (active) p.play() }
+                            } else {
+                                setControlsPinned(!controlsPinned)
+                            }
                             lastTap = 0L
                         }
                     }
@@ -745,6 +757,7 @@ class VideoAdapter(
                 if (!active && player == null) return
                 if (active) { recordWatchSignals(swipedAway = false); persistHistory(completed = false) }
                 active = false
+                setControlsPinned(false)
                 generation++
                 pendingSingleTap?.let { tapHandler.removeCallbacks(it) }
                 pendingSingleTap = null
@@ -773,7 +786,17 @@ class VideoAdapter(
             p.pause()
         }
 
+        /** 没暂停也把播放控件放出来（关掉点击暂停后，点一下画面就是切这个）。 */
+        private fun setControlsPinned(pinned: Boolean) {
+            if (controlsPinned == pinned) return
+            controlsPinned = pinned
+            pauseSeekBar.controlsPinned = pinned
+            pauseIndicator.controlsPinned = pinned
+        }
+
         fun applyDisplayPrefs() {
+            // 设置里又把「点一下画面暂停播放」打开了：点出来的控件跟着收起。
+            if (prefs.tapToPause) setControlsPinned(false)
             pauseIndicator.indicatorEnabled = prefs.showPauseIndicator
             val seconds = prefs.skipSeconds.toString()
             skipBackLabel.text = seconds

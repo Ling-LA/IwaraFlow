@@ -27,6 +27,17 @@ class PauseSeekBar @JvmOverloads constructor(
     private var observedPlayer: Player? = null
     private var chromeHidden = false
 
+    /**
+     * 不暂停也把这一套控件放出来。关掉「点一下画面暂停播放」后，点一下画面就是在
+     * 信息栏和这套控件之间切换，视频照常播。
+     */
+    var controlsPinned = false
+        set(value) {
+            if (field == value) return
+            field = value
+            refreshFromPlayer()
+        }
+
     private val updater = object : Runnable {
         override fun run() {
             refreshFromPlayer()
@@ -114,6 +125,7 @@ class PauseSeekBar @JvmOverloads constructor(
     override fun onDetachedFromWindow() {
         removeCallbacks(updater)
         observedPlayer = null
+        controlsPinned = false
         visibility = View.GONE
         controls(cardRoot())?.visibility = View.GONE
         hideExtras(cardRoot())
@@ -126,9 +138,10 @@ class PauseSeekBar @JvmOverloads constructor(
         val p = findPlayer()
         observedPlayer = p
         val duration = p?.duration ?: 0L
-        val paused = p != null && !p.isPlaying && !p.playWhenReady &&
-            p.playbackState != Player.STATE_IDLE && p.playbackState != Player.STATE_ENDED
-        if (root == null || !paused || duration <= 0L) {
+        val alive = p != null && p.playbackState != Player.STATE_IDLE && p.playbackState != Player.STATE_ENDED
+        val paused = alive && p != null && !p.isPlaying && !p.playWhenReady
+        // 关掉「点一下画面暂停播放」时点出来的控件：没暂停也要显示。
+        if (root == null || !(paused || (controlsPinned && alive)) || duration <= 0L) {
             visibility = View.GONE
             controls(root)?.visibility = View.GONE
             hideExtras(root)

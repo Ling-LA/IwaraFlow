@@ -50,13 +50,17 @@ class SecretStorageTest {
     /** 翻译 / AI 的密钥从普通 SharedPreferences 搬进加密存储，明文一并清掉。 */
     @Test fun translationSecretsMoveOutOfPlainPreferences() {
         val plain = context.getSharedPreferences("iwara_flow_prefs", Context.MODE_PRIVATE)
+        // 清空和写入放在同一次提交里：偏好文件在用例之间是留着的，上一个用例的写入
+        // 可能比 @Before 还晚落地，那样迁移标记就还在，这个用例就测不到迁移了。
         plain.edit()
+            .clear()
             .putString("tr_provider", Translator.PROVIDER_OPENAI)
             .putString("tr_key", "sk-legacy")
             .putString("tr_app_id", "baidu-legacy")
             .putString("tr_custom_headers", "Authorization: Bearer legacy")
             .commit()
 
+        SecureSessionStore(context).clear()
         val config = AppPrefs(context).translation
 
         assertEquals("配置照常读得到", "sk-legacy", config.key)

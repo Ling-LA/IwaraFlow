@@ -35,6 +35,9 @@ data class VideoListPage(
     val total: Int
 )
 
+/** 一批视频的本地状态，一次查库问清，见 [HistoryStore.loadStatuses]。 */
+data class VideoStatuses(val seen: Set<String>, val favorites: Set<String>)
+
 /** 一条 Iwara 官方评论。[parentId] 非空表示这是某条评论下的回复。 */
 data class IwaraComment(
     val id: String,

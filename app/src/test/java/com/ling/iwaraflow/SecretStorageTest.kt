@@ -2,6 +2,7 @@ package com.ling.iwaraflow
 
 import android.content.Context
 import org.junit.Assert.*
+import org.junit.Before
 import org.junit.Test
 import org.junit.runner.RunWith
 import org.robolectric.RobolectricTestRunner
@@ -16,6 +17,12 @@ import org.robolectric.annotation.Config
 @Config(sdk = [36])
 class SecretStorageTest {
     private val context: Context get() = RuntimeEnvironment.getApplication()
+
+    /** 每个用例都从干净的存储开始：偏好文件和加密存储在用例之间是会留下来的。 */
+    @Before fun reset() {
+        context.getSharedPreferences("iwara_flow_prefs", Context.MODE_PRIVATE).edit().clear().commit()
+        SecureSessionStore(context).clear()
+    }
 
     @Test fun tokensRoundTripAndClearOut() {
         val store = SecureSessionStore(context)

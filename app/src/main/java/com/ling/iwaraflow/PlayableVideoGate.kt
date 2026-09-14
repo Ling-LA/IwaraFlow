@@ -18,6 +18,11 @@ class PlayableVideoGate(
         .connectTimeout(3, TimeUnit.SECONDS)
         .readTimeout(4, TimeUnit.SECONDS)
         .followRedirects(true)
+        // 探测是后台活，不该和正在播的视频抢带宽：同一台 CDN 上同时最多这么几个。
+        .dispatcher(okhttp3.Dispatcher().apply {
+            maxRequests = PROBE_THREADS
+            maxRequestsPerHost = MAX_PROBES_PER_HOST
+        })
         .build()
 
     fun filterPlayable(
@@ -97,6 +102,14 @@ class PlayableVideoGate(
 
     private fun inspectOne(item: VideoItem, quality: String): VideoItem {
         item.playbackIssue = null
+        val key = cacheKey(item, quality)
+        cached(key)?.let { return apply(item, it) }
+        val checked = probeOne(item, quality)
+        remember(key, checked)
+        return checked
+    }
+
+    private fun probeOne(item: VideoItem, quality: String): VideoItem {
         return try {
             val sources = item.sources?.takeIf { it.isNotEmpty() } ?: api.resolveSourcesBlocking(item.id)
             val preferred = api.chooseSource(sources, item.selectedQuality ?: quality)
@@ -125,6 +138,58 @@ class PlayableVideoGate(
             }
             item
         }
+    }
+
+    // ---------------------------------------------------------------- 短期结果缓存
+    //
+    // 同一条视频在推荐流里会被反复验证（首屏窗口、续页、重排之后再来一遍），
+    // 每次都是“解析 CDN 地址 + Range 探测”两次往返。滑动时这部分请求量很可观，
+    // 所以按 视频 id + 清晰度 记一小段时间：可播的记 10 分钟（CDN 地址本来就会过期，
+    // 播放器有自动重解析兜底），明确不可播的（私密 / 已删除 / 无权限）记 1 小时。
+
+    private class Verdict(
+        val at: Long,
+        val issue: String?,
+        val sources: List<VideoSource>?,
+        val streamUrl: String?,
+        val quality: String?
+    )
+
+    /**
+     * 这一个 gate 自己的缓存。页面各自持有一个 gate，一个页面里同一条视频会被反复验证
+     * （首屏窗口、续页、重排之后再来一遍），省掉的就是这些重复往返。
+     */
+    private val verdicts = object : LinkedHashMap<String, Verdict>(64, 0.75f, true) {
+        override fun removeEldestEntry(eldest: MutableMap.MutableEntry<String, Verdict>?): Boolean =
+            size > VERDICT_CACHE_MAX
+    }
+
+    private fun cacheKey(item: VideoItem, quality: String): String =
+        item.id + "@" + (item.selectedQuality ?: quality)
+
+    private fun cached(key: String): Verdict? = synchronized(verdicts) {
+        val verdict = verdicts[key] ?: return null
+        val ttl = if (verdict.issue != null) ISSUE_TTL_MS else PLAYABLE_TTL_MS
+        if (System.currentTimeMillis() - verdict.at > ttl) {
+            verdicts.remove(key)
+            return null
+        }
+        verdict
+    }
+
+    private fun remember(key: String, item: VideoItem) {
+        val verdict = Verdict(System.currentTimeMillis(), item.playbackIssue, item.sources, item.streamUrl, item.selectedQuality)
+        synchronized(verdicts) { verdicts[key] = verdict }
+    }
+
+    private fun apply(item: VideoItem, verdict: Verdict): VideoItem {
+        item.playbackIssue = verdict.issue
+        if (verdict.issue == null) {
+            verdict.sources?.let { item.sources = it }
+            verdict.streamUrl?.let { item.streamUrl = it }
+            verdict.quality?.let { item.selectedQuality = it }
+        }
+        return item
     }
 
     private fun probe(url: String): Boolean {
@@ -160,8 +225,16 @@ class PlayableVideoGate(
         /** 单批最多验证多少条候选，以及并发探测线程数。 */
         private const val MAX_CANDIDATES = 32
         private const val PROBE_THREADS = 12
+        /** 同一台 CDN 主机上同时最多几个探测请求。 */
+        private const val MAX_PROBES_PER_HOST = 6
         private const val FIRST_BATCH = 3
         /** A straggling candidate is dropped from the batch instead of holding the feed forever. */
         private const val DEFAULT_BATCH_BUDGET_MS = 12_000L
+
+        /** 验证结果缓存：可播的记这么久（CDN 地址本来就会过期，播放器有兜底）。 */
+        internal const val PLAYABLE_TTL_MS = 10L * 60 * 1000
+        /** 明确不可播的（私密 / 已删除 / 无权限）记久一点，别反复去撞同一堵墙。 */
+        internal const val ISSUE_TTL_MS = 60L * 60 * 1000
+        private const val VERDICT_CACHE_MAX = 400
     }
 }

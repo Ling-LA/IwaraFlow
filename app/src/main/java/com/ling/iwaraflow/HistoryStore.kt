@@ -242,6 +242,35 @@ class HistoryStore(context: Context) : SQLiteOpenHelper(context, "iwaraflow.db",
         item.localFavorite = enabled
     }
 
+    /**
+     * 一次问清一批视频的「看过没 / 收藏没」。
+     *
+     * 推荐候选分桶和首页装点原来是每条视频各查一次 `isSeen` 和 `isLocalFavorite`，
+     * 几百条候选就是上千次 SQLite 查询，刷新推荐的延迟里有不少是耗在这上面的。
+     * SQLite 的变量个数有上限，按 [STATUS_BATCH] 分批问。
+     */
+    @Synchronized
+    fun loadStatuses(videoIds: Collection<String>): VideoStatuses {
+        val ids = videoIds.filter { it.isNotBlank() }.distinct()
+        if (ids.isEmpty()) return VideoStatuses(emptySet(), emptySet())
+        val seen = HashSet<String>()
+        val favorites = HashSet<String>()
+        val db = readableDatabase
+        ids.chunked(STATUS_BATCH).forEach { batch ->
+            val placeholders = batch.joinToString(",") { "?" }
+            val args = batch.toTypedArray()
+            fun collect(table: String, into: MutableSet<String>) {
+                db.query(table, arrayOf("video_id"), "video_id IN ($placeholders)", args, null, null, null)
+                    .use { c -> while (c.moveToNext()) into += c.getString(0) }
+            }
+            collect("seen_videos", seen)
+            // 老版本只写了 history，没有 seen_videos 的那批也算看过。
+            collect("history", seen)
+            collect("favorites", favorites)
+        }
+        return VideoStatuses(seen, favorites)
+    }
+
     @Synchronized
     fun isLocalFavorite(videoId: String): Boolean {
         readableDatabase.query(
@@ -435,6 +464,8 @@ class HistoryStore(context: Context) : SQLiteOpenHelper(context, "iwaraflow.db",
         const val MAX_INTERACTIONS = 3000
         /** 算画像时读多少条最近的行为。 */
         const val PROFILE_ROWS = 2000
+        /** 批量查“看过没 / 收藏没”时一次问多少个 id（SQLite 的变量个数有上限）。 */
+        const val STATUS_BATCH = 400
         /** 最近这么久里的行为算“当前兴趣”，权重再乘 [SESSION_BOOST]。 */
         const val SESSION_WINDOW_MS = 45L * 60L * 1000L
         const val SESSION_BOOST = 2.5

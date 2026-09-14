@@ -29,6 +29,12 @@ class IwaraApi(context: Context, private val apiRoot: String = DEFAULT_API_ROOT)
         .readTimeout(35, TimeUnit.SECONDS)
         .writeTimeout(20, TimeUnit.SECONDS)
         .followRedirects(true)
+        // 各模块（推荐召回、可播放验证、预缓存、翻译）各有各的线程池，弱网上容易自己跟
+        // 自己抢带宽。这里给同一台主机的并发定个上限，正在播的那条视频才有带宽可用。
+        .dispatcher(okhttp3.Dispatcher().apply {
+            maxRequests = MAX_CONCURRENT_REQUESTS
+            maxRequestsPerHost = MAX_CONCURRENT_PER_HOST
+        })
         .build()
 
     init {
@@ -634,6 +640,10 @@ class IwaraApi(context: Context, private val apiRoot: String = DEFAULT_API_ROOT)
 
         /** Iwara 列表接口的服务端上限，请求更大的 limit 也只会返回这么多。 */
         const val MAX_PAGE_LIMIT = 50
+
+        /** 同时在飞的接口请求上限，以及同一台主机的上限（OkHttp 默认是 64 / 5）。 */
+        internal const val MAX_CONCURRENT_REQUESTS = 16
+        internal const val MAX_CONCURRENT_PER_HOST = 8
 
         /** 关注（粉丝）数在各个接口里用过的字段名。 */
         private val FOLLOWER_KEYS = listOf("numFollowers", "followers", "followerCount")

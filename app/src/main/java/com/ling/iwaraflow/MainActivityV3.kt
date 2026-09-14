@@ -622,7 +622,12 @@ class MainActivityV3 : AppCompatActivity() {
         loadFeed(reset = false)
     }
 
-    private fun decorate(raw: List<VideoItem>): List<VideoItem> = raw.onEach { it.localFavorite = history.isLocalFavorite(it.id) }
+    /** 一次问清这一批的本地收藏状态，不是一条视频查一次库。 */
+    private fun decorate(raw: List<VideoItem>): List<VideoItem> {
+        if (raw.isEmpty()) return raw
+        val favorites = runCatching { history.loadStatuses(raw.map { it.id }).favorites }.getOrNull()
+        return raw.onEach { it.localFavorite = favorites?.contains(it.id) ?: history.isLocalFavorite(it.id) }
+    }
 
     private fun note(event: String) = NavigationDiagnostics.note(this, event)
 

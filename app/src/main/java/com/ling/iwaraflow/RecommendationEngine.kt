@@ -418,10 +418,13 @@ class RecommendationEngine(
         val videos = (if (remaining <= 0L) null
         else runCatching { future.get(remaining, TimeUnit.NANOSECONDS) }.getOrNull()) ?: return emptyList()
         val cutoff = System.currentTimeMillis() - CLASSIC_MIN_AGE_MS
+        val statuses = runCatching { history.loadStatuses(videos.map { it.id }) }.getOrNull()
         return videos.filter { item ->
             // 发布时间不明（接口没给）就不按年龄筛：抽到的页本身已经够靠后了。
             val oldEnough = item.createdAt <= 0L || item.createdAt < cutoff
-            oldEnough && !item.liked && !history.isLocalFavorite(item.id) && !(skipSeen && history.isSeen(item.id))
+            val favourite = statuses?.favorites?.contains(item.id) ?: history.isLocalFavorite(item.id)
+            val seen = statuses?.seen?.contains(item.id) ?: history.isSeen(item.id)
+            oldEnough && !item.liked && !favourite && !(skipSeen && seen)
         }
     }
 
@@ -674,15 +677,20 @@ class RecommendationEngine(
 
     private fun split(ranked: List<VideoItem>): Buckets {
         val buckets = Buckets()
+        // 一次问清这一批的已看 / 收藏：以前每条候选各查两次库，几百条就是上千次查询。
+        val statuses = runCatching { history.loadStatuses(ranked.map { it.id }) }.getOrNull()
+        val newlySeen = ArrayList<String>()
         ranked.forEach { item ->
-            val favourite = item.liked || history.isLocalFavorite(item.id)
-            if (favourite) history.markSeen(item.id)
+            val favourite = item.liked ||
+                (statuses?.favorites?.contains(item.id) ?: history.isLocalFavorite(item.id))
+            if (favourite) newlySeen += item.id
             when {
                 favourite -> buckets.liked += item
-                history.isSeen(item.id) -> buckets.watched += item
+                statuses?.seen?.contains(item.id) ?: history.isSeen(item.id) -> buckets.watched += item
                 else -> buckets.fresh += item
             }
         }
+        if (newlySeen.isNotEmpty()) runCatching { history.markSeen(newlySeen) }
         return buckets
     }
 

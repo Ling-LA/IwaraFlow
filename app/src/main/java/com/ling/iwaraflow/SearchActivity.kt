@@ -448,7 +448,11 @@ class SearchActivity : AppCompatActivity() {
                         runOnUiThread {
                             if (isStale(serial)) return@runOnUiThread
                             val fresh = checked.filter { state.seenIds.add(it.id) }
-                            fresh.forEach { it.localFavorite = history.isLocalFavorite(it.id) }
+                            // 一次问清这一批的本地收藏，不是一条查一次库。
+                            val favorites = runCatching { history.loadStatuses(fresh.map { it.id }).favorites }.getOrNull()
+                            fresh.forEach {
+                                it.localFavorite = favorites?.contains(it.id) ?: history.isLocalFavorite(it.id)
+                            }
                             state.loaded += fresh
                             variant.page += 1
                             variant.noMore = raw.size < pageSize

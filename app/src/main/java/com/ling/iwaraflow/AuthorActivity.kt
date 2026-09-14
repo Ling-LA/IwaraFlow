@@ -41,7 +41,17 @@ class AuthorActivity : AppCompatActivity() {
     private lateinit var friendButton: Button
 
     private val works = mutableListOf<VideoItem>()
-    private val playableWorks = mutableListOf<VideoItem>()
+    /** 还有几批作品的可播放验证在后台跑，只用来写状态栏那行字。 */
+    private var verifying = 0
+
+    /**
+     * 可以进播放流的作品：**还没验到的也算**。
+     *
+     * 列表是元数据一回来就显示的，验证在后台慢慢跑（见 [loadNextPage]）；
+     * 要求“验过且通过”才能点开，等于把加速又退回去了。验出来确实播不了的那些，
+     * 下一次 [rebuildFeed] 自然会被筛掉。
+     */
+    private fun playableWorks(): List<VideoItem> = works.filter { it.playbackIssue == null }
     private var author: IwaraAuthor? = null
     private var page = 0
     private var loadingPage = false
@@ -202,7 +212,7 @@ class AuthorActivity : AppCompatActivity() {
         val a = author ?: return
         if (loadingPage || noMore || a.id.isBlank() || exiting) return
         loadingPage = true
-        statusView.text = if (works.isEmpty()) "正在检查作者作品是否可播放…" else "正在加载更多作品…"
+        statusView.text = if (works.isEmpty()) "正在加载作者作品…" else "正在加载更多作品…"
         api.getAuthorVideos(a.id, page, pageSize) { result ->
             if (isFinishing || isDestroyed || exiting) return@getAuthorVideos
             result.onSuccess { raw ->
@@ -216,20 +226,30 @@ class AuthorActivity : AppCompatActivity() {
                     }
                     return@onSuccess
                 }
-                gate.inspectAll(raw, prefs.defaultQuality) { checked ->
-                    if (isFinishing || isDestroyed || exiting) return@inspectAll
-                    runOnUiThread {
-                        if (isFinishing || isDestroyed || exiting) return@runOnUiThread
-                        val currentId = if (inFeed) feedAdapter.items.getOrNull(pager.currentItem)?.id else null
-                        val start = works.size
-                        works += checked
-                        playableWorks += checked.filter { it.playbackIssue == null }
-                        listAdapter.notifyItemRangeInserted(start, checked.size)
-                        page++
-                        noMore = raw.size < pageSize
-                        loadingPage = false
-                        if (inFeed) rebuildFeed(currentId)
-                        updateStatus()
+                // 元数据回来就先把列表显示出来：缩略图和标题不需要知道视频能不能播。
+                // 以前要等整页 36 条全部“解析源 + 探测”完才进列表，弱网上点进作者页
+                // 要干等好几秒。验证改到后台跑，跑完再刷新这一批卡片上的不可播放标记。
+                runOnUiThread {
+                    if (isFinishing || isDestroyed || exiting) return@runOnUiThread
+                    val start = works.size
+                    works += raw
+                    listAdapter.notifyItemRangeInserted(start, raw.size)
+                    page++
+                    noMore = raw.size < pageSize
+                    loadingPage = false
+                    verifying += 1
+                    updateStatus()
+
+                    gate.inspectAll(raw, prefs.defaultQuality) { _ ->
+                        if (isFinishing || isDestroyed || exiting) return@inspectAll
+                        runOnUiThread {
+                            if (isFinishing || isDestroyed || exiting) return@runOnUiThread
+                            verifying = (verifying - 1).coerceAtLeast(0)
+                            // inspectAll 改的就是列表里那几个对象，重新绑定一次就能看到标记。
+                            listAdapter.notifyItemRangeChanged(start, raw.size)
+                            if (inFeed) rebuildFeedKeepingCurrent()
+                            updateStatus()
+                        }
                     }
                 }
             }.onFailure {
@@ -249,12 +269,13 @@ class AuthorActivity : AppCompatActivity() {
         statusView.text = buildString {
             append("作品 ${works.size} 条")
             if (unavailable > 0) append("  ·  $unavailable 条当前不可播放")
+            if (verifying > 0) append("  ·  正在后台检查可播放性")
             if (!noMore) append("  ·  下滑继续加载")
         }
     }
 
     private fun rebuildFeed(currentId: String?) {
-        val list = playableWorks.toList()
+        val list = playableWorks()
         feedAdapter.replace(list)
         if (list.isEmpty()) return
         val desiredId = currentId ?: list.first().id
@@ -270,12 +291,18 @@ class AuthorActivity : AppCompatActivity() {
 
     private fun openWork(item: VideoItem) {
         if (exiting) return
-        val index = playableWorks.indexOfFirst { it.id == item.id }
+        // 已经验出确定播不了的才拦住；还没轮到验证的照常打开。
+        item.playbackIssue?.let { issue ->
+            android.widget.Toast.makeText(this, issue, android.widget.Toast.LENGTH_SHORT).show()
+            return
+        }
+        val list = playableWorks()
+        val index = list.indexOfFirst { it.id == item.id }
         if (index < 0) return
         inFeed = true
         listPage.visibility = View.GONE
         feedPage.visibility = View.VISIBLE
-        feedAdapter.replace(playableWorks.toList())
+        feedAdapter.replace(list)
         pager.setCurrentItem(index, false)
         feedAdapter.setActive(index)
         if (lifecycle.currentState.isAtLeast(Lifecycle.State.RESUMED)) feedAdapter.resumeActive()
@@ -418,7 +445,7 @@ class AuthorActivity : AppCompatActivity() {
     }
 
     private fun refreshWorksAfterRelationshipChange() {
-        works.clear(); playableWorks.clear(); listAdapter.notifyDataSetChanged(); feedAdapter.replace(emptyList())
+        works.clear(); verifying = 0; listAdapter.notifyDataSetChanged(); feedAdapter.replace(emptyList())
         page = 0; noMore = false; loadingPage = false; loadNextPage()
     }
 

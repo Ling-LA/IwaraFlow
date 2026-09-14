@@ -93,7 +93,16 @@ class MainActivityV3 : AppCompatActivity() {
 
     /** 推荐算法一次产出的剩余候选，推荐流翻页从这里取，取完再重新生成。 */
     private val recommendQueue = ArrayList<VideoItem>()
-    /** 连续几次重新生成推荐都没拿到新内容。拿到就归零。 */
+    /**
+     * 这一轮推荐里**已经处理过**的候选 id：显示出来的、还在队列里的，以及
+     * 被可播放验证刷掉的。
+     *
+     * 以前判据是 `adapter.items`，也就是“真的显示出来了”。被判定不可播放的候选
+     * 没进 adapter，于是下一轮重新生成时它又算“新内容”，可以被反复召回、反复探测；
+     * 连着抽到同一批坏视频的话，[emptyRefills] 还会被它们一次次重置，永远降不了级。
+     */
+    private val consumedCandidates = HashSet<String>()
+    /** 连续几次重新生成推荐都没拿到**能播的**新内容。拿到就归零。 */
     private var emptyRefills = 0
 
     private val authorLauncher = registerForActivityResult(ActivityResultContracts.StartActivityForResult()) { result ->
@@ -344,10 +353,32 @@ class MainActivityV3 : AppCompatActivity() {
         loadFeed(reset = true)
     }
 
+    /**
+     * 登录之后：**先种画像，再生成第一批推荐**。
+     *
+     * 登录成功和「刷新推荐」以前是同时发生的，官方点赞还在后台一页页翻，
+     * 推荐已经算完了——一个用了多年 Iwara 的账号第一屏仍然是冷启动的样子，
+     * 要到第二次刷新才像认识你。这里只等第一页（最多 50 个点赞）种进画像，
+     * 剩下的照旧交给后台同步。等太久也不行，所以给它一个上限，到点就照常刷新。
+     */
+    private fun seedThenReload() {
+        loading.visibility = View.VISIBLE
+        val started = java.util.concurrent.atomic.AtomicBoolean(false)
+        val go = Runnable {
+            if (started.getAndSet(true)) return@Runnable
+            if (isFinishing || isDestroyed) return@Runnable
+            likedSync.syncIfStale()
+            loadFeed(reset = true)
+        }
+        likedSync.seedFirstPage { runOnUiThread(go) }
+        window.decorView.postDelayed(go, LOGIN_SEED_BUDGET_MS)
+    }
+
     private fun loadFeed(reset: Boolean) {
         if (reset) {
             currentPage = 0
             emptyRefills = 0
+            consumedCandidates.clear()
             invalidateRequests()
             loading.visibility = View.VISIBLE
             error.visibility = View.GONE
@@ -374,6 +405,7 @@ class MainActivityV3 : AppCompatActivity() {
                             noteGateResult("推荐首屏", first, playable)
                             recommendQueue.clear()
                             recommendQueue.addAll(rest)
+                            raw.forEach { consumedCandidates += it.id }
                             showFeedReset(requestId, playable, emptyMessage, first)
                         }
                     }
@@ -641,14 +673,17 @@ class MainActivityV3 : AppCompatActivity() {
                 }
                 loadingMore = false
                 loading.visibility = View.GONE
+                // 真的产出了能播的新内容，降级计数才归零，见 refillRecommendQueue。
+                emptyRefills = 0
                 appendFeed(list)
             }
         }
     }
 
     /**
-     * 重新生成一批推荐候选。只有**连着 [maxEmptyRefills] 次都一条新内容都拿不到**
-     * 才退回官方榜单，而不是按生成次数封顶；退回之后官方候选同样会走本地这一套
+     * 重新生成一批推荐候选。只有**连着 [maxEmptyRefills] 次都一条能播的新内容都拿不到**
+     * 才退回官方榜单，而不是按生成次数封顶；判据是“有没有产出能播的结果”，
+     * 不是“有没有见过的候选 id”——全是不可播放的坏视频也该算没产出；退回之后官方候选同样会走本地这一套
      * （排除已看 → 本地评分 → 作者打散），见 [prepareOfficialCandidates]。
      */
     private fun refillRecommendQueue(requestId: Int) {
@@ -660,14 +695,13 @@ class MainActivityV3 : AppCompatActivity() {
         recommender.load(prefs.skipSeen) { result ->
             runOnUiThread {
                 if (requestId != requestSerial) return@runOnUiThread
-                val known = adapter.items.mapTo(HashSet<String>()) { it.id }
-                val fresh = result.getOrNull().orEmpty().filter { known.add(it.id) }
+                // 这一轮处理过的一概不再进队列：显示过的、还排着的、验证没通过的都算。
+                val fresh = result.getOrNull().orEmpty().filter { consumedCandidates.add(it.id) }
                 if (fresh.isEmpty()) {
                     emptyRefills += 1
                     if (emptyRefills >= maxEmptyRefills) loadMoreOfficialPage() else refillRecommendQueue(requestId)
                     return@runOnUiThread
                 }
-                emptyRefills = 0
                 recommendQueue.addAll(fresh)
                 loadMoreRecommend(requestId)
             }
@@ -877,8 +911,7 @@ class MainActivityV3 : AppCompatActivity() {
                         dialog.dismiss()
                         // 换账号后点赞记录要重新同步一次。
                         prefs.likedSyncAt = 0L
-                        likedSync.syncIfStale()
-                        loadFeed(reset = true)
+                        seedThenReload()
                     }
                 } }
             }
@@ -1433,6 +1466,8 @@ class MainActivityV3 : AppCompatActivity() {
     companion object {
         /** 设置弹窗里可滚动区域占屏幕高度的比例；加上标题后和主菜单弹窗差不多高。 */
         const val SETTINGS_SCROLL_FRACTION = 0.42f
+        /** 登录后最多等这么久的“第一页点赞种画像”，到点就照常刷新，见 [seedThenReload]。 */
+        const val LOGIN_SEED_BUDGET_MS = 4000L
         /** 评论面板顶边比“刚好贴住画面底边”再往下收的距离（dp）。 */
         const val COMMENTS_PANEL_GAP_DP = 20
         /** 已下载视频的播放源名字，画质按钮上显示它。 */

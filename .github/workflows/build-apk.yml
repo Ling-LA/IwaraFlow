@@ -128,7 +128,7 @@ jobs:
           path: out/IwaraFlow-signed.apk
           if-no-files-found: error
 
-      - name: Publish or refresh GitHub Release
+      - name: Publish GitHub Release (versions are immutable)
         if: github.event_name == 'push' && github.ref == 'refs/heads/main'
         shell: bash
         env:
@@ -146,12 +146,14 @@ jobs:
           Commit: $GITHUB_SHA
           EOF
           )
+          # 已发布的版本不可变：同一个 versionName 下换掉 APK，用户 A 和用户 B
+          # 装到的会是两个不同的包，而“检查更新”只比 versionName，谁都不会知道。
+          # 所以 tag 已存在就直接失败，提示先 bump 版本号，绝不 --clobber。
           if gh release view "$TAG" >/dev/null 2>&1; then
-            gh release upload "$TAG" out/IwaraFlow-signed.apk --clobber
-            gh release edit "$TAG" --title "IwaraFlow $TAG" --notes "$NOTES"
-          else
-            gh release create "$TAG" out/IwaraFlow-signed.apk \
-              --target "$GITHUB_SHA" \
-              --title "IwaraFlow $TAG" \
-              --notes "$NOTES"
+            echo "::error::Release $TAG 已经存在。已发布的版本不可覆盖——请先在 app/build.gradle.kts 里 bump versionCode / versionName 再推送。"
+            exit 1
           fi
+          gh release create "$TAG" out/IwaraFlow-signed.apk \
+            --target "$GITHUB_SHA" \
+            --title "IwaraFlow $TAG" \
+            --notes "$NOTES"

@@ -39,7 +39,9 @@ class LikedVideoSyncTest {
                 val results = JSONArray()
                 for (index in page * served until minOf((page + 1) * served, total)) {
                     results.put(JSONObject().put("video", JSONObject()
-                        .put("id", "liked-$index").put("title", "点赞 $index")))
+                        .put("id", "liked-$index").put("title", "点赞 $index")
+                        .put("user", JSONObject().put("id", "author-$page").put("name", "作者$page"))
+                        .put("tags", JSONArray().put(JSONObject().put("id", "tag-$page")))))
                 }
                 val body = JSONObject()
                     .put("count", total).put("limit", served).put("page", page).put("results", results)
@@ -79,6 +81,28 @@ class LikedVideoSyncTest {
             assertTrue("第二页的点赞", history.isSeen("liked-60"))
             assertTrue("最后一页的点赞", history.isSeen("liked-136"))
             assertTrue("同步完成要记时间戳", prefs.likedSyncAt > 0L)
+        } finally { liked.close(); api.close(); history.close() }
+    }
+
+    /**
+     * 登录之后先只种第一页：一个用了多年的账号，第一屏推荐就该已经个性化，
+     * 而不是等完整同步翻完几十页、第二次刷新才像样。
+     */
+    @Test fun loggingInSeedsTheProfileFromTheFirstPageBeforeTheFullSync() {
+        val api = loggedInApi()
+        val history = HistoryStore(RuntimeEnvironment.getApplication())
+        val prefs = AppPrefs(RuntimeEnvironment.getApplication()).apply { likedSyncAt = 0L }
+        val liked = sync(api, history, prefs)
+        try {
+            val done = java.util.concurrent.CountDownLatch(1)
+            liked.seedFirstPage { done.countDown() }
+            assertTrue("种子应该很快回来", done.await(5, java.util.concurrent.TimeUnit.SECONDS))
+
+            val profile = history.preferenceProfile()
+            assertTrue("第一页的作者要进画像", (profile.authorIdWeights["author-0"] ?: 0.0) > 0.0)
+            assertTrue("第一页的点赞算已看", history.isSeen("liked-0"))
+            assertFalse("只种第一页，剩下的交给后台同步", history.isSeen("liked-60"))
+            assertEquals("这一步不算完整同步，时间戳不能写", 0L, prefs.likedSyncAt)
         } finally { liked.close(); api.close(); history.close() }
     }
 

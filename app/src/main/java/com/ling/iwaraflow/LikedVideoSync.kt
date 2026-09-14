@@ -40,6 +40,29 @@ class LikedVideoSync(
         }.onFailure { running = false }
     }
 
+    /**
+     * 登录之后先把**第一页**（最多 50 个）官方点赞种进画像，再回调。
+     *
+     * 完整同步要翻几十页，而登录成功和「生成第一批推荐」几乎是同时发生的，
+     * 于是一个用了多年 Iwara 的账号刚登录时第一屏仍然是冷启动，第二次刷新才像样。
+     * 一页就足够让画像有方向；剩下的交给 [syncIfStale] 在后台慢慢补。
+     *
+     * 回调在后台线程，成功与否都会回调一次（失败就是没种子，照常出推荐）。
+     */
+    fun seedFirstPage(onDone: () -> Unit) {
+        if (closed || !api.isLoggedIn()) { onDone(); return }
+        runCatching {
+            io.execute {
+                runCatching {
+                    val first = api.getFavoritesPageBlocking(0)
+                    history.markSeen(first.videos.map { it.id })
+                    history.seedCloudLikes(first.videos)
+                }
+                if (!closed) onDone()
+            }
+        }.onFailure { onDone() }
+    }
+
     /** 返回这次标记的点赞条数。中途失败不写时间戳，下次启动会重来。 */
     fun syncBlocking(): Int {
         var page = 0

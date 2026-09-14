@@ -152,29 +152,35 @@ class PlayableVideoGate(
     // 所以按 视频 id + 清晰度 记一小段时间：可播的记 10 分钟（CDN 地址本来就会过期，
     // 播放器有自动重解析兜底），明确不可播的（私密 / 已删除 / 无权限）记 1 小时。
 
+    /**
+     * 一次验证的结论。**分三类**，因为「不可播放」的原因差别很大：
+     * - [Outcome.PLAYABLE]：能播，记 10 分钟（CDN 地址本来就会过期，播放器有兜底）；
+     * - [Outcome.PERMANENT]：私密 / 已删除 / 无权限 / 仍在处理——换谁来验都一样，记 1 小时；
+     * - [Outcome.TRANSIENT]：连不上、超时、连接被重置——多半是网络或代理抖了一下，
+     *   只记几十秒。以前这类和“确定播不了”一样记 1 小时，弱网上闪断一次，
+     *   那条视频接下来一小时都被当成坏的。
+     */
+    private enum class Outcome { PLAYABLE, TRANSIENT, PERMANENT }
+
     private class Verdict(
         val at: Long,
+        val outcome: Outcome,
         val issue: String?,
         val sources: List<VideoSource>?,
         val streamUrl: String?,
         val quality: String?
     )
 
-    /**
-     * 这一个 gate 自己的缓存。页面各自持有一个 gate，一个页面里同一条视频会被反复验证
-     * （首屏窗口、续页、重排之后再来一遍），省掉的就是这些重复往返。
-     */
-    private val verdicts = object : LinkedHashMap<String, Verdict>(64, 0.75f, true) {
-        override fun removeEldestEntry(eldest: MutableMap.MutableEntry<String, Verdict>?): Boolean =
-            size > VERDICT_CACHE_MAX
-    }
-
     private fun cacheKey(item: VideoItem, quality: String): String =
         item.id + "@" + (item.selectedQuality ?: quality)
 
     private fun cached(key: String): Verdict? = synchronized(verdicts) {
         val verdict = verdicts[key] ?: return null
-        val ttl = if (verdict.issue != null) ISSUE_TTL_MS else PLAYABLE_TTL_MS
+        val ttl = when (verdict.outcome) {
+            Outcome.PLAYABLE -> PLAYABLE_TTL_MS
+            Outcome.PERMANENT -> ISSUE_TTL_MS
+            Outcome.TRANSIENT -> TRANSIENT_TTL_MS
+        }
         if (System.currentTimeMillis() - verdict.at > ttl) {
             verdicts.remove(key)
             return null
@@ -183,8 +189,14 @@ class PlayableVideoGate(
     }
 
     private fun remember(key: String, item: VideoItem) {
-        if (item.playbackIssue == null) passed.incrementAndGet()
-        val verdict = Verdict(System.currentTimeMillis(), item.playbackIssue, item.sources, item.streamUrl, item.selectedQuality)
+        val issue = item.playbackIssue
+        if (issue == null) passed.incrementAndGet()
+        val outcome = when {
+            issue == null -> Outcome.PLAYABLE
+            issue in PERMANENT_ISSUES -> Outcome.PERMANENT
+            else -> Outcome.TRANSIENT
+        }
+        val verdict = Verdict(System.currentTimeMillis(), outcome, issue, item.sources, item.streamUrl, item.selectedQuality)
         synchronized(verdicts) { verdicts[key] = verdict }
     }
 
@@ -242,8 +254,25 @@ class PlayableVideoGate(
 
         /** 验证结果缓存：可播的记这么久（CDN 地址本来就会过期，播放器有兜底）。 */
         internal const val PLAYABLE_TTL_MS = 10L * 60 * 1000
-        /** 明确不可播的（私密 / 已删除 / 无权限）记久一点，别反复去撞同一堵墙。 */
+        /** 明确不可播的（私密 / 已删除 / 无权限 / 仍在处理）记久一点，别反复去撞同一堵墙。 */
         internal const val ISSUE_TTL_MS = 60L * 60 * 1000
-        private const val VERDICT_CACHE_MAX = 400
+        /** 连不上 / 超时 / 连接被重置：多半是网络抖了一下，只记几十秒。 */
+        internal const val TRANSIENT_TTL_MS = 30L * 1000
+        private const val VERDICT_CACHE_MAX = 500
+
+        /** 换谁来验都一样的失败原因，见 [remember]。 */
+        internal val PERMANENT_ISSUES = setOf("仅限好友观看", "视频仍在处理中", "视频已删除或不存在", "没有观看权限")
+
+        /**
+         * **进程级**的验证缓存：主页验过的视频，切到搜索页、作者页不该再验一遍。
+         * 预缓存（MediaPreloadCache）本来就是进程级共享的，这里照同一个思路。
+         */
+        private val verdicts = object : LinkedHashMap<String, Verdict>(64, 0.75f, true) {
+            override fun removeEldestEntry(eldest: MutableMap.MutableEntry<String, Verdict>?): Boolean =
+                size > VERDICT_CACHE_MAX
+        }
+
+        /** 测试用：清掉进程级缓存，免得用例之间互相串。 */
+        internal fun clearProcessCache() = synchronized(verdicts) { verdicts.clear() }
     }
 }

@@ -5,6 +5,9 @@ import org.junit.Test
 
 /** 弱网/计量网络下少提前下点东西，画质不受影响。 */
 class NetworkProfileTest {
+    /** 验证缓存是进程级的，用例之间要清掉，免得上一条用例的结论串过来。 */
+    @org.junit.Before fun clearPlayableCache() { PlayableVideoGate.clearProcessCache() }
+
     @Test fun wifiKeepsPrefetchingTwoVideosAhead() {
         assertEquals(2, NetworkProfile.prefetchCount(metered = false, downstreamKbps = 40_000))
     }

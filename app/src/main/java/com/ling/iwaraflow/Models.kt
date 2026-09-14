@@ -168,12 +168,18 @@ data class PreferenceProfile(
             (item.author.isNotBlank() && item.author.lowercase() in mutedAuthors) ||
             item.tags.any { it.lowercase() in mutedTags }
 
-    /** 权重最高的几个标签（至少 [minWeight]），给个性化召回用。 */
+    /**
+     * 权重最高的几个标签（至少 [minWeight]），给个性化召回用。
+     * **拉黑的直接排除**：一个标签既被点过「不感兴趣」、又因为看过几条同类视频攒了正权重，
+     * 是完全可能的；不排掉的话召回还会专门去抓它，抓回来再被硬过滤掉，白跑一趟请求。
+     */
     fun topTags(count: Int, minWeight: Double): List<String> =
-        tagWeights.entries.filter { it.value >= minWeight }.sortedByDescending { it.value }.take(count).map { it.key }
+        tagWeights.entries.filter { it.value >= minWeight && it.key !in mutedTags }
+            .sortedByDescending { it.value }.take(count).map { it.key }
 
     fun topAuthorIds(count: Int, minWeight: Double): List<String> =
-        authorIdWeights.entries.filter { it.value >= minWeight }.sortedByDescending { it.value }.take(count).map { it.key }
+        authorIdWeights.entries.filter { it.value >= minWeight && it.key !in mutedAuthorIds }
+            .sortedByDescending { it.value }.take(count).map { it.key }
 
     companion object {
         /** 一条视频最多按几个标签算分。 */

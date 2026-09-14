@@ -8,7 +8,14 @@ import android.database.sqlite.SQLiteOpenHelper
 /** 一条下载记录：哪个视频、哪个清晰度、系统下载器给的编号。 */
 data class DownloadRecord(val item: VideoItem, val quality: String, val downloadId: Long)
 
-class HistoryStore(context: Context) : SQLiteOpenHelper(context, "iwaraflow.db", null, 6) {
+/** 用户明确拉黑的作者 / 标签。不随时间衰减，也不会滚出行为窗口。 */
+data class MutedEntities(
+    val authors: Set<String> = emptySet(),
+    val authorIds: Set<String> = emptySet(),
+    val tags: Set<String> = emptySet()
+)
+
+class HistoryStore(context: Context) : SQLiteOpenHelper(context, "iwaraflow.db", null, 7) {
     override fun onCreate(db: SQLiteDatabase) {
         db.execSQL(
             """CREATE TABLE history(
@@ -51,6 +58,7 @@ class HistoryStore(context: Context) : SQLiteOpenHelper(context, "iwaraflow.db",
             )""".trimIndent()
         )
         db.execSQL(DOWNLOADS_TABLE)
+        db.execSQL(MUTED_TABLE)
         db.execSQL("CREATE INDEX idx_history_time ON history(watched_at DESC)")
         db.execSQL("CREATE INDEX idx_interactions_time ON interactions(created_at DESC)")
         db.execSQL("CREATE INDEX idx_seen_last_time ON seen_videos(last_seen_at DESC)")
@@ -88,6 +96,99 @@ class HistoryStore(context: Context) : SQLiteOpenHelper(context, "iwaraflow.db",
             // 5 → 6：行为记录带上作者 id，画像才能按作者 id 去召回作品。
             try { db.execSQL("ALTER TABLE interactions ADD COLUMN author_id TEXT NOT NULL DEFAULT ''") } catch (_: Throwable) { }
         }
+        if (oldVersion < 7) {
+            // 6 → 7：「不感兴趣：作者 / 标签」搬进自己的表。
+            // 以前它只是 interactions 里的一行，而那张表是滚动窗口（只留最近 3000 条、
+            // 画像只读最近 2000 条）——刷得够多，几个月前拉黑的作者就会悄悄回到推荐里。
+            // 拉黑是**显式**的意思表示，只有兴趣管理里的“恢复”能解除，不该被时间冲掉。
+            db.execSQL(MUTED_TABLE)
+            backfillMutes(db)
+        }
+    }
+
+    /** 把老版本记在 interactions 里的「不感兴趣：作者 / 标签」搬进 [MUTED_TABLE]。 */
+    private fun backfillMutes(db: SQLiteDatabase) {
+        val rows = ArrayList<Triple<String, String, Long>>()
+        runCatching {
+            db.query(
+                "interactions", arrayOf("author", "author_id", "tags", "action", "created_at"),
+                "action IN (?, ?)", arrayOf(ACTION_DISLIKE_AUTHOR, ACTION_DISLIKE_TAG),
+                null, null, null
+            ).use { c ->
+                while (c.moveToNext()) {
+                    val at = c.getLong(4)
+                    if (c.getString(3) == ACTION_DISLIKE_AUTHOR) {
+                        c.getString(0).orEmpty().lowercase().takeIf { it.isNotBlank() }
+                            ?.let { rows += Triple(MUTE_AUTHOR, it, at) }
+                        c.getString(1).orEmpty().takeIf { it.isNotBlank() }
+                            ?.let { rows += Triple(MUTE_AUTHOR_ID, it, at) }
+                    } else {
+                        splitTags(c.getString(2)).forEach { tag ->
+                            rows += Triple(MUTE_TAG, tag.lowercase(), at)
+                        }
+                    }
+                }
+            }
+        }
+        if (rows.isEmpty()) return
+        db.beginTransaction()
+        try {
+            rows.forEach { (type, key, at) -> insertMute(db, type, key, at) }
+            db.setTransactionSuccessful()
+        } finally {
+            db.endTransaction()
+        }
+    }
+
+    private fun insertMute(db: SQLiteDatabase, type: String, key: String, at: Long) {
+        val values = ContentValues().apply {
+            put("type", type)
+            put("entity_key", key)
+            put("created_at", at)
+        }
+        db.insertWithOnConflict("muted_entities", null, values, SQLiteDatabase.CONFLICT_IGNORE)
+    }
+
+    /**
+     * 记一条永久静音。和 [recordInteraction] 里那条负反馈是两回事：
+     * 那条只是把打分压下去（会随时间衰减、会滚出窗口），这条是硬屏蔽，只有“恢复”能删。
+     */
+    @Synchronized
+    fun mute(type: String, key: String) {
+        val value = key.trim().let { if (type == MUTE_AUTHOR_ID) it else it.lowercase() }
+        if (value.isBlank()) return
+        insertMute(writableDatabase, type, value, System.currentTimeMillis())
+    }
+
+    /** 兴趣管理里的“恢复”：解除静音，返回删掉了几条。 */
+    @Synchronized
+    fun unmute(type: String, key: String): Int {
+        val value = key.trim().let { if (type == MUTE_AUTHOR_ID) it else it.lowercase() }
+        if (value.isBlank()) return 0
+        return writableDatabase.delete("muted_entities", "type=? AND entity_key=?", arrayOf(type, value))
+    }
+
+    /** 当前所有的硬屏蔽：作者名、作者 id、标签各一份。 */
+    @Synchronized
+    fun mutedEntities(): MutedEntities {
+        val authors = HashSet<String>()
+        val authorIds = HashSet<String>()
+        val tags = HashSet<String>()
+        runCatching {
+            readableDatabase.query("muted_entities", arrayOf("type", "entity_key"), null, null, null, null, null)
+                .use { c ->
+                    while (c.moveToNext()) {
+                        val key = c.getString(1).orEmpty()
+                        if (key.isBlank()) continue
+                        when (c.getString(0)) {
+                            MUTE_AUTHOR -> authors += key
+                            MUTE_AUTHOR_ID -> authorIds += key
+                            MUTE_TAG -> tags += key
+                        }
+                    }
+                }
+        }
+        return MutedEntities(authors, authorIds, tags)
     }
 
     /** 下载的时候记一笔，"已下载"那一页读的就是这张表。 */
@@ -394,10 +495,9 @@ class HistoryStore(context: Context) : SQLiteOpenHelper(context, "iwaraflow.db",
         val authorSkips = HashMap<String, Int>()
         val authorIdSkips = HashMap<String, Int>()
         val tagSkips = HashMap<String, Int>()
-        // 明确点过「不感兴趣：作者 / 标签」的：这类内容连探索位都不给。
-        val mutedAuthors = HashSet<String>()
-        val mutedAuthorIds = HashSet<String>()
-        val mutedTags = HashSet<String>()
+        // 明确点过「不感兴趣：作者 / 标签」的：这类内容在打分之前就被剔掉，连探索位都不给。
+        // 读的是独立的 muted_entities 表，不是下面这个滚动窗口——拉黑是永久的。
+        val muted = mutedEntities()
         readableDatabase.query(
             "interactions",
             arrayOf("author", "tags", "weight", "created_at", "author_id", "action", "video_id"),
@@ -432,17 +532,12 @@ class HistoryStore(context: Context) : SQLiteOpenHelper(context, "iwaraflow.db",
                     if (id.isNotBlank()) authorIdSkips[id] = (authorIdSkips[id] ?: 0) + 1
                     itemTags.forEach { key -> tagSkips[key] = (tagSkips[key] ?: 0) + 1 }
                 }
-                if (action == ACTION_DISLIKE_AUTHOR) {
-                    if (a.isNotBlank()) mutedAuthors += a
-                    if (id.isNotBlank()) mutedAuthorIds += id
-                }
-                if (action == ACTION_DISLIKE_TAG) mutedTags += itemTags
             }
         }
         authorSkips.forEach { (key, n) -> if (n >= LONG_TERM_SKIPS) author[key] = (author[key] ?: 0.0) - LONG_TERM_AUTHOR_PENALTY }
         authorIdSkips.forEach { (key, n) -> if (n >= LONG_TERM_SKIPS) authorIds[key] = (authorIds[key] ?: 0.0) - LONG_TERM_AUTHOR_PENALTY }
         tagSkips.forEach { (key, n) -> if (n >= LONG_TERM_SKIPS) tags[key] = (tags[key] ?: 0.0) - LONG_TERM_TAG_PENALTY }
-        return PreferenceProfile(author, tags, authorIds, videos, mutedAuthors, mutedAuthorIds, mutedTags)
+        return PreferenceProfile(author, tags, authorIds, videos, muted.authors, muted.authorIds, muted.tags)
     }
 
     /**
@@ -502,7 +597,8 @@ class HistoryStore(context: Context) : SQLiteOpenHelper(context, "iwaraflow.db",
 
     /**
      * 兴趣管理里的“恢复”：把某个作者 / 标签的「不感兴趣」记录删掉，
-     * 它就不再被静音，也能重新参与推荐和探索。返回删掉了几条。
+     * 既解除硬屏蔽（muted_entities），也删掉行为表里那条压分的负反馈，
+     * 它就能重新参与推荐和探索。返回一共删掉了几条。
      */
     @Synchronized
     fun forgetDislike(kind: DislikeSheet.Kind, key: String): Int {
@@ -510,12 +606,13 @@ class HistoryStore(context: Context) : SQLiteOpenHelper(context, "iwaraflow.db",
         if (value.isBlank()) return 0
         val db = writableDatabase
         return when (kind) {
-            DislikeSheet.Kind.AUTHOR -> db.delete(
+            // 兴趣管理里列的是作者名，老记录里也可能只有作者 id，两种键都试着解除。
+            DislikeSheet.Kind.AUTHOR -> unmute(MUTE_AUTHOR, value) + unmute(MUTE_AUTHOR_ID, value) + db.delete(
                 "interactions",
                 "action=? AND (LOWER(author)=? OR author_id=?)",
                 arrayOf(ACTION_DISLIKE_AUTHOR, value.lowercase(), value)
             )
-            DislikeSheet.Kind.TAG -> db.delete(
+            DislikeSheet.Kind.TAG -> unmute(MUTE_TAG, value) + db.delete(
                 "interactions",
                 "action=? AND (LOWER(tags)=? OR LOWER(tags) LIKE ? OR LOWER(tags) LIKE ? OR LOWER(tags) LIKE ?)",
                 arrayOf(
@@ -563,6 +660,11 @@ class HistoryStore(context: Context) : SQLiteOpenHelper(context, "iwaraflow.db",
         const val ACTION_DISLIKE_AUTHOR = "dislike_author"
         const val ACTION_DISLIKE_TAG = "dislike_tag"
 
+        /** [MUTED_TABLE] 里的三种键：作者名（小写）、作者 id、标签（小写）。 */
+        const val MUTE_AUTHOR = "author"
+        const val MUTE_AUTHOR_ID = "author_id"
+        const val MUTE_TAG = "tag"
+
         /**
          * 搜索关键词只当**短期意图**：权重小、几个小时就淡掉。
          * 一次好奇的搜索不该把长期画像带偏；真正点开搜索结果才是兴趣。
@@ -589,6 +691,17 @@ class HistoryStore(context: Context) : SQLiteOpenHelper(context, "iwaraflow.db",
                 author_username TEXT NOT NULL DEFAULT '',
                 description TEXT NOT NULL DEFAULT '',
                 PRIMARY KEY(video_id, quality)
+            )""".trimIndent()
+
+        /**
+         * 硬屏蔽表。**故意独立于 interactions**：那张表是滚动窗口，会被新行为挤掉；
+         * 「不感兴趣：作者 / 标签」是用户明说的，只有兴趣管理里的“恢复”能解除。
+         */
+        private val MUTED_TABLE = """CREATE TABLE IF NOT EXISTS muted_entities(
+                type TEXT NOT NULL,
+                entity_key TEXT NOT NULL,
+                created_at INTEGER NOT NULL,
+                PRIMARY KEY(type, entity_key)
             )""".trimIndent()
     }
 }

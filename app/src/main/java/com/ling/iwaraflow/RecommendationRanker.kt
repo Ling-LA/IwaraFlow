@@ -51,15 +51,27 @@ class RecommendationRanker(private val random: Random = Random()) {
             candidate.baseQuality = qualityScore(candidate.item.likes, candidate.item.views)
             candidates[candidate.item.id] = candidate
         }
-        return merged.values.map { it.item }.sortedByDescending { scoreOf(it, taste, now) }
+        return hardMuteFilter(merged.values.map { it.item }, taste).sortedByDescending { scoreOf(it, taste, now) }
     }
+
+    /**
+     * **打分之前**先把用户明说不想看的剔掉：点过「不感兴趣：作者 / 标签」的内容，
+     * 不管站方质量多高、画像里其它信号多正，都不进推荐流。
+     *
+     * 以前拉黑只是一个很负的权重，和“看得久”“点过赞”这些正信号加在一起算；
+     * 一个又拉黑过、又恰好命中好几个喜欢的标签的作者，照样能排上来。显式负反馈
+     * 应该压过所有隐式正反馈，所以改成硬过滤——顺序是：候选 → 硬过滤 → 打分 → 多样性 → 探索。
+     * 解除只有一条路：兴趣管理里的“恢复”。
+     */
+    fun hardMuteFilter(items: List<VideoItem>, taste: PreferenceProfile = profile): List<VideoItem> =
+        if (items.isEmpty()) items else items.filterNot { taste.isMuted(it) }
 
     /**
      * 重排：和 [rank] 是同一套口径，**来源分照旧算进去**。
      * 以前重排只算质量 + 新鲜度 + 画像，于是用户点一次赞，整条队列就换了一套评分体系。
      */
     fun rerank(items: List<VideoItem>, taste: PreferenceProfile, now: Long): List<VideoItem> =
-        diversify(spreadAuthors(items.sortedByDescending { scoreOf(it, taste, now) }))
+        diversify(spreadAuthors(hardMuteFilter(items, taste).sortedByDescending { scoreOf(it, taste, now) }))
 
     /** 一条候选此刻的得分：来源 + 质量 + 新鲜度 + 画像 + 稳定抖动。 */
     fun scoreOf(item: VideoItem, taste: PreferenceProfile, now: Long): Double {
@@ -102,7 +114,7 @@ class RecommendationRanker(private val random: Random = Random()) {
     fun rankClassics(items: List<VideoItem>): List<VideoItem> {
         if (items.size <= 1) return items
         val taste = profile
-        return diversify(items.sortedByDescending { item ->
+        return diversify(hardMuteFilter(items, taste).sortedByDescending { item ->
             qualityScore(item.likes, item.views) + taste.score(item).coerceIn(-6.0, 8.0) * CLASSIC_TASTE_WEIGHT
         })
     }
@@ -192,15 +204,20 @@ class RecommendationRanker(private val random: Random = Random()) {
         val pending = ArrayDeque(items)
         val out = ArrayList<VideoItem>(items.size)
         while (pending.isNotEmpty()) {
-            val recent = out.takeLast(window)
-            val pick = pending.firstOrNull { candidate ->
-                recent.none { it.author.equals(candidate.author, ignoreCase = true) }
-            } ?: pending.first()
+            val recent = out.takeLast(window).map(::authorKey)
+            val pick = pending.firstOrNull { candidate -> authorKey(candidate) !in recent } ?: pending.first()
             pending.remove(pick)
             out += pick
         }
         return out
     }
+
+    /**
+     * 认作者优先用 id：两个碰巧同名的作者不该被当成一个人，同一个作者改了名字
+     * 也不该被当成两个人。没有 id 时才退回小写的显示名。
+     */
+    internal fun authorKey(item: VideoItem): String =
+        item.authorId.takeIf { it.isNotBlank() } ?: item.author.lowercase()
 
     /**
      * 视频质量分：**平滑点赞率**为主，绝对热度为辅。

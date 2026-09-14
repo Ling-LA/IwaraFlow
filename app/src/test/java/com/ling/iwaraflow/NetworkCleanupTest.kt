@@ -19,6 +19,9 @@ import java.util.concurrent.TimeUnit
 @RunWith(RobolectricTestRunner::class)
 @Config(sdk = [36])
 class NetworkCleanupTest {
+    /** 验证缓存是进程级的，用例之间要清掉，免得上一条用例的结论串过来。 */
+    @org.junit.Before fun clearPlayableCache() { PlayableVideoGate.clearProcessCache() }
+
     private fun setClient(owner: Any, field: String, client: OkHttpClient) {
         owner.javaClass.getDeclaredField(field).apply { isAccessible = true }.set(owner, client)
     }

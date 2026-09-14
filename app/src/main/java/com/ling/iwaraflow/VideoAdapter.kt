@@ -91,8 +91,12 @@ class VideoAdapter(
 
     fun setActive(position: Int) {
         if (released) return
-        if (position != activePosition) {
+        if (position != activePosition && playbackEnabled) {
             // 翻页离开的那张卡片：在停播之前先记下“看了多久 / 是不是很快划走”。
+            //
+            // 只有**页面还在前台、用户真的划到了下一条**才算划走。关掉应用、切到后台、
+            // 进小窗、换榜单重新加载、恢复上次会话都会把 playbackEnabled 关掉或者先
+            // replace 一次，那些位置变化只记正面信号，绝不能被判成“不感兴趣”。
             holders.toList().forEach { if (it.bindingAdapterPosition == activePosition) it.noteSwipedAway() }
         }
         activePosition = position

@@ -88,6 +88,9 @@ class MainActivityV3 : AppCompatActivity() {
     /** 预检给出的确定性不可播放原因；这些视频直接播放同样放不了。 */
     private val permanentIssues = setOf("仅限好友观看", "视频仍在处理中", "视频已删除或不存在", "没有观看权限")
 
+    /** 查本地库（排除已看之类）用的后台线程：不在主线程上碰数据库。 */
+    private val dbExecutor = java.util.concurrent.Executors.newSingleThreadExecutor()
+
     /** 推荐算法一次产出的剩余候选，推荐流翻页从这里取，取完再重新生成。 */
     private val recommendQueue = ArrayList<VideoItem>()
     /** 连续几次重新生成推荐都没拿到新内容。拿到就归零。 */
@@ -426,11 +429,25 @@ class MainActivityV3 : AppCompatActivity() {
     /**
      * 推荐流回退到官方榜单时，官方候选也要过一遍本地这一套：排除已看 → 本地评分 →
      * 作者打散。原样贴一页 trending 上来，等于这一页完全没有个性化。
-     * 其它几个榜单页（最新 / 流行 / 人气）是用户自己选的排序，不动。
+     *
+     * 其它几个榜单页（最新 / 流行 / 人气）是用户自己选的排序，顺序不动；只有在设置里
+     * 打开「最新 / 流行 / 人气 也排除已看」之后，才在这里把看过的滤掉。
      */
     private fun prepareOfficialCandidates(raw: List<VideoItem>, next: (List<VideoItem>) -> Unit) {
-        if (mode != "recommend" || raw.size < 2) { next(raw); return }
-        recommender.rankOfficial(raw, prefs.skipSeen) { ranked -> next(ranked) }
+        if (mode == "recommend") {
+            if (raw.size < 2) { next(raw); return }
+            recommender.rankOfficial(raw, prefs.skipSeen) { ranked -> next(ranked) }
+            return
+        }
+        if (!prefs.skipSeenEverywhere || raw.isEmpty()) { next(raw); return }
+        dbExecutor.execute {
+            val unseen = runCatching {
+                val seen = history.loadStatuses(raw.map { it.id }).seen
+                raw.filterNot { it.id in seen }
+            }.getOrDefault(raw)
+            // 整页都看过就别把这一页也扔了，不然只能翻到空页。
+            next(if (unseen.isEmpty()) raw else unseen)
+        }
     }
 
     /**
@@ -534,7 +551,7 @@ class MainActivityV3 : AppCompatActivity() {
         if (entries.isEmpty()) {
             AlertDialog.Builder(this)
                 .setTitle("兴趣管理")
-                .setMessage("还没有点过「不感兴趣：作者 / 标签」。\n\n点过之后这类内容基本不再出现，可以随时在这里恢复。")
+                .setMessage("还没有点过「不感兴趣：作者 / 标签」。\n\n点过之后这类内容就不再进入推荐，也不会随时间自己恢复；只有在这里点“恢复”才会回来。")
                 .setPositiveButton("知道了", null)
                 .show()
             return
@@ -931,7 +948,15 @@ class MainActivityV3 : AppCompatActivity() {
         val panel = LinearLayout(this).apply { orientation = LinearLayout.VERTICAL; setPadding(dp(24), dp(8), dp(24), dp(8)) }
         panel.addView(sectionTitle("推荐"))
         val skipSeen = CheckBox(this).apply { text = "刷新推荐时排除已看视频"; isChecked = prefs.skipSeen }
+        val skipSeenEverywhere = CheckBox(this).apply {
+            text = "「最新 / 流行 / 人气」也排除已看视频"; isChecked = prefs.skipSeenEverywhere
+        }
         panel.addView(skipSeen)
+        panel.addView(skipSeenEverywhere)
+        panel.addView(TextView(this).apply {
+            text = "三个榜单页默认照着官方顺序看，刷过的还会出现。打开后它们和推荐流一个口径：看过的不再重复露面（整页都看过时仍然照常显示，不给空页）。"
+            textSize = 12f; setTextColor(0xFF607D93.toInt()); setPadding(dp(4), dp(4), 0, dp(8))
+        })
         panel.addView(TextView(this).apply {
             text = "开启后只在生成新的推荐列表时过滤历史记录，不会在滑动过程中连续自动跳过。"; textSize = 12f
             setTextColor(0xFF607D93.toInt()); setPadding(dp(4), 0, 0, dp(8))
@@ -944,7 +969,7 @@ class MainActivityV3 : AppCompatActivity() {
         }
         panel.addView(classics)
         panel.addView(TextView(this).apply {
-            text = "老片指点赞很高、发布超过半年的作品，随机插在每一组里的任意位置。避免短时间刷太多把新片刷没、后面越刷越旧，也避免一直碰不到历史上的高质量作品。"
+            text = "老片指点赞很高、发布超过一年的作品，随机插在每一组里的任意位置。避免短时间刷太多把新片刷没、后面越刷越旧，也避免一直碰不到历史上的高质量作品。"
             textSize = 12f; setTextColor(0xFF607D93.toInt()); setPadding(dp(4), dp(4), 0, dp(8))
         })
         panel.addView(sectionTitle("播放"))
@@ -1074,7 +1099,7 @@ class MainActivityV3 : AppCompatActivity() {
 
         panel.addView(sectionTitle("维护"))
         panel.addView(actionRow("同步点赞记录", "把在网页端点过的赞补进“已看”，刷新推荐后生效。") { syncLikedVideos() })
-        panel.addView(actionRow("兴趣管理", "点过「不感兴趣」的作者和标签列在这里，可以随时恢复。") { showInterestManager() })
+        panel.addView(actionRow("兴趣管理", "点过「不感兴趣」的作者和标签列在这里，它们不再进入推荐，可以随时恢复。") { showInterestManager() })
         panel.addView(actionRow("诊断信息", "最近的异常、退出原因和加载线索、推荐质量指标，只存在本机，不会上传。") {
             NavigationDiagnostics.show(this)
         })
@@ -1111,10 +1136,12 @@ class MainActivityV3 : AppCompatActivity() {
             // 只有“排除已看视频”和“老片穿插”会改变推荐候选，也只有推荐流受它们影响；
             // 其它几项重拉一遍列表只会把用户刷到一半的位置冲掉。
             val newClassics = classicsValues[classics.selectedItemPosition]
-            val reloadFeed = mode == "recommend" &&
-                (prefs.skipSeen != skipSeen.isChecked || prefs.classicsEvery != newClassics)
+            val reloadFeed = (mode == "recommend" &&
+                (prefs.skipSeen != skipSeen.isChecked || prefs.classicsEvery != newClassics)) ||
+                (mode != "recommend" && prefs.skipSeenEverywhere != skipSeenEverywhere.isChecked)
             prefs.classicsEvery = newClassics; recommender.classicsEvery = newClassics
             prefs.skipSeen = skipSeen.isChecked; prefs.autoNext = autoNext.isChecked; prefs.autoPip = autoPip.isChecked
+            prefs.skipSeenEverywhere = skipSeenEverywhere.isChecked
             prefs.showPauseIndicator = pauseIcon.isChecked
             prefs.tapToPause = tapPause.isChecked
             prefs.skipSeconds = skipValues[skip.selectedItemPosition]
@@ -1397,6 +1424,7 @@ class MainActivityV3 : AppCompatActivity() {
 
     override fun onDestroy() {
         invalidateRequests()
+        dbExecutor.shutdownNow()
         if (::comments.isInitialized) comments.release()
         adapter.releaseAll(); playableGate.close(); mediaCache.close(); recommender.close()
         likedSync.close(); updates.close(); api.close(); history.close(); super.onDestroy()

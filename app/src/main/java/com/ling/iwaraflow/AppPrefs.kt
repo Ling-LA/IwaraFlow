@@ -16,6 +16,16 @@ class AppPrefs(context: Context) {
         get() = prefs.getBoolean("skip_seen", true)
         set(value) = prefs.edit().putBoolean("skip_seen", value).apply()
 
+    /**
+     * 「最新 / 流行 / 人气」三个榜单页也排除已看视频。
+     *
+     * 默认关：那三个页面是照着官方榜单看的，少掉几条会让人觉得“榜单不对”。
+     * 打开之后它们和推荐流一个口径，刷过的不再重复出现。
+     */
+    var skipSeenEverywhere: Boolean
+        get() = prefs.getBoolean("skip_seen_everywhere", false)
+        set(value) = prefs.edit().putBoolean("skip_seen_everywhere", value).apply()
+
     /** 推荐里每多少条穿插一条老片，0 = 关闭。 */
     var classicsEvery: Int
         get() = prefs.getInt("classics_every", RecommendationEngine.DEFAULT_CLASSICS_EVERY)

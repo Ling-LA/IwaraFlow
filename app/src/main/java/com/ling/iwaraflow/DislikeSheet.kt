@@ -115,12 +115,16 @@ object DislikeSheet {
                 Toast.makeText(context, "已跳过这条视频", Toast.LENGTH_SHORT).show()
             }
             Kind.AUTHOR -> {
+                // 两笔都要记：行为表那条负责压分（会衰减），muted_entities 那条是永久硬屏蔽。
                 history.recordInteraction(VideoItem(item.id, item.title, item.author, emptyList(), 0, authorId = item.authorId), HistoryStore.ACTION_DISLIKE_AUTHOR, AUTHOR_WEIGHT)
-                Toast.makeText(context, "会减少 @${item.author} 的推荐", Toast.LENGTH_SHORT).show()
+                history.mute(HistoryStore.MUTE_AUTHOR, item.author)
+                if (item.authorId.isNotBlank()) history.mute(HistoryStore.MUTE_AUTHOR_ID, item.authorId)
+                Toast.makeText(context, "不再推荐 @${item.author}", Toast.LENGTH_SHORT).show()
             }
             Kind.TAG -> {
                 history.recordInteraction(VideoItem(item.id, item.title, "", listOf(tag), 0), HistoryStore.ACTION_DISLIKE_TAG, TAG_WEIGHT)
-                Toast.makeText(context, "会减少 #$tag 的推荐", Toast.LENGTH_SHORT).show()
+                history.mute(HistoryStore.MUTE_TAG, tag)
+                Toast.makeText(context, "不再推荐 #$tag", Toast.LENGTH_SHORT).show()
             }
         }
         history.markSeen(item.id)

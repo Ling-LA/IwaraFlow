@@ -365,6 +365,10 @@ class HistoryStore(context: Context) : SQLiteOpenHelper(context, "iwaraflow.db",
         val authorSkips = HashMap<String, Int>()
         val authorIdSkips = HashMap<String, Int>()
         val tagSkips = HashMap<String, Int>()
+        // 明确点过「不感兴趣：作者 / 标签」的：这类内容连探索位都不给。
+        val mutedAuthors = HashSet<String>()
+        val mutedAuthorIds = HashSet<String>()
+        val mutedTags = HashSet<String>()
         readableDatabase.query(
             "interactions",
             arrayOf("author", "tags", "weight", "created_at", "author_id", "action", "video_id"),
@@ -374,7 +378,12 @@ class HistoryStore(context: Context) : SQLiteOpenHelper(context, "iwaraflow.db",
                 val at = c.getLong(3)
                 val action = c.getString(5)
                 val ageDays = ((now - at).coerceAtLeast(0) / 86_400_000.0)
-                val decay = 1.0 / (1.0 + ageDays / 30.0)
+                // 搜索只是“我想看看这是什么”，不代表“以后多给我推这个”：几个小时就淡掉。
+                // 真正点开结果、看得久、点赞收藏之后才会变成长期兴趣。
+                val decay = if (action == ACTION_SEARCH) {
+                    val ageHours = ((now - at).coerceAtLeast(0) / 3_600_000.0)
+                    1.0 / (1.0 + ageHours / SEARCH_HALF_LIFE_HOURS)
+                } else 1.0 / (1.0 + ageDays / 30.0)
                 val session = if (now - at <= SESSION_WINDOW_MS && action != ACTION_CLOUD_LIKE) SESSION_BOOST else 1.0
                 val w = c.getDouble(2) * decay * session
                 // 「不感兴趣：当前视频」是视频级的：只压这一条，不落到作者和标签上。
@@ -394,12 +403,17 @@ class HistoryStore(context: Context) : SQLiteOpenHelper(context, "iwaraflow.db",
                     if (id.isNotBlank()) authorIdSkips[id] = (authorIdSkips[id] ?: 0) + 1
                     itemTags.forEach { key -> tagSkips[key] = (tagSkips[key] ?: 0) + 1 }
                 }
+                if (action == ACTION_DISLIKE_AUTHOR) {
+                    if (a.isNotBlank()) mutedAuthors += a
+                    if (id.isNotBlank()) mutedAuthorIds += id
+                }
+                if (action == ACTION_DISLIKE_TAG) mutedTags += itemTags
             }
         }
         authorSkips.forEach { (key, n) -> if (n >= LONG_TERM_SKIPS) author[key] = (author[key] ?: 0.0) - LONG_TERM_AUTHOR_PENALTY }
         authorIdSkips.forEach { (key, n) -> if (n >= LONG_TERM_SKIPS) authorIds[key] = (authorIds[key] ?: 0.0) - LONG_TERM_AUTHOR_PENALTY }
         tagSkips.forEach { (key, n) -> if (n >= LONG_TERM_SKIPS) tags[key] = (tags[key] ?: 0.0) - LONG_TERM_TAG_PENALTY }
-        return PreferenceProfile(author, tags, authorIds, videos)
+        return PreferenceProfile(author, tags, authorIds, videos, mutedAuthors, mutedAuthorIds, mutedTags)
     }
 
     /**
@@ -428,6 +442,19 @@ class HistoryStore(context: Context) : SQLiteOpenHelper(context, "iwaraflow.db",
         const val ACTION_SKIP = "skip"
         /** 「不感兴趣：当前视频」。只作用于这条视频本身，见 [preferenceProfileAt]。 */
         const val ACTION_DISLIKE_VIDEO = "dislike_video"
+        /** 「不感兴趣：作者 / 标签」。明确的负反馈，比“划走得快”重得多，连探索位都不给。 */
+        const val ACTION_DISLIKE_AUTHOR = "dislike_author"
+        const val ACTION_DISLIKE_TAG = "dislike_tag"
+
+        /**
+         * 搜索关键词只当**短期意图**：权重小、几个小时就淡掉。
+         * 一次好奇的搜索不该把长期画像带偏；真正点开搜索结果才是兴趣。
+         */
+        const val ACTION_SEARCH = "search"
+        const val SEARCH_WEIGHT = 0.25
+        const val SEARCH_OPEN_WEIGHT = 1.0
+        /** 搜索行为的衰减尺度（小时）：3 小时后权重减半。 */
+        const val SEARCH_HALF_LIFE_HOURS = 3.0
         const val LONG_TERM_SKIPS = 5
         const val LONG_TERM_AUTHOR_PENALTY = 1.5
         const val LONG_TERM_TAG_PENALTY = 0.8

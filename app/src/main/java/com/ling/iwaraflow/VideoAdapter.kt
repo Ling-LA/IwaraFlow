@@ -376,6 +376,7 @@ class VideoAdapter(
                 p.seekTo(target)
             }
             val delta = target - seekFrom
+            if (delta < 0L) rewound = true
             val sign = if (delta >= 0) "+" else "-"
             seekPreview.text = "${formatTime(target)} / ${formatTime(duration)}   $sign${formatTime(abs(delta))}"
             if (seekPreview.visibility != View.VISIBLE) seekPreview.visibility = View.VISIBLE
@@ -442,10 +443,12 @@ class VideoAdapter(
         private var endedOnce = false
         private var hadError = false
         private var signalsDone = false
+        /** 这一条里主动往回拖过 / 点过后退：看了还想再看一遍，是正面信号。 */
+        private var rewound = false
 
         private fun resetWatchSignals() {
             playedMs = 0L; playingSince = 0L
-            readyOnce = false; endedOnce = false; hadError = false; signalsDone = false
+            readyOnce = false; endedOnce = false; hadError = false; signalsDone = false; rewound = false
         }
 
         private fun notePlaying(isPlaying: Boolean) {
@@ -465,17 +468,25 @@ class VideoAdapter(
             signalsDone = true
             val p = player
             if (p?.isPlaying == true) notePlaying(false)
+            if (hadError || !readyOnce) return
             val duration = p?.duration?.takeIf { it > 0L } ?: 0L
-            val position = p?.currentPosition?.coerceAtLeast(0L) ?: 0L
-            val ratio = if (duration > 0L) position.toDouble() / duration else 0.0
+            // 兴趣是连续的：43 秒和 45 秒不该一个没信号、一个 +0.8。
+            val interest = watchInterest(
+                playedMs = playedMs,
+                durationMs = duration,
+                completed = endedOnce,
+                repeated = item.resumePositionMs > 0L,
+                rewound = rewound,
+                reacted = item.liked || item.localFavorite
+            )
             when {
-                hadError || !readyOnce || endedOnce -> Unit
-                playedMs >= LONG_WATCH_MS || ratio >= 0.5 -> {
-                    history.recordInteraction(item, "watch", 0.8)
+                interest >= WATCH_SIGNAL_FLOOR -> {
+                    history.recordInteraction(item, "watch", interest)
                     lastSkipped = null
                 }
-                swipedAway && playedMs < QUICK_SKIP_MS && ratio < 0.2 -> {
-                    history.recordInteraction(item, "skip", -0.5)
+                // 划走才算负反馈：切后台、开别的页面不是态度。
+                interest <= -WATCH_SIGNAL_FLOOR && swipedAway -> {
+                    history.recordInteraction(item, HistoryStore.ACTION_SKIP, interest)
                     noteSkipStreak(item)
                 }
             }
@@ -693,7 +704,8 @@ class VideoAdapter(
                         }
                         if (playbackState == Player.STATE_ENDED && active && bound?.id == item.id) {
                             persistHistory(completed = true)
-                            history.recordInteraction(item, "completed", 0.7)
+                            // 播完不再单记一笔固定分：离开这条时按连续兴趣值统一记（播完有加成），
+                            // 免得出现“播完 +0.7 反而比看满 45 秒 +0.8 低”。
                             if (prefs.autoNext) {
                                 val position = bindingAdapterPosition
                                 if (position != RecyclerView.NO_POSITION) onEnded(position)
@@ -806,6 +818,7 @@ class VideoAdapter(
         /** 暂停控制行的前进 / 后退：夹在 0 和片长之间，片长未知时只保证不为负。 */
         private fun skipBy(deltaMs: Long) {
             val p = player ?: return
+            if (deltaMs < 0L) rewound = true
             val duration = p.duration
             val target = (p.currentPosition + deltaMs).coerceAtLeast(0L)
             p.seekTo(if (duration > 0L) target.coerceAtMost(duration) else target)
@@ -1162,6 +1175,55 @@ class VideoAdapter(
         const val QUICK_SKIP_MS = 4_000L
         /** 真播了这么久算“看得久”（正反馈），看过一半也算。 */
         const val LONG_WATCH_MS = 45_000L
+
+        // ---- 连续的观看兴趣值：不再是“几个固定档位”
+        /** 绝对值不到这么多就当没有态度，不记进画像。 */
+        const val WATCH_SIGNAL_FLOOR = 0.08
+        /** 看多久算“不好不坏”的分界（秒）：比这短是负的，比这长是正的。 */
+        const val NEUTRAL_WATCH_SECONDS = 10.0
+        /** 时长项的尺度：ln(1 + 秒数 / 12) × 0.38。 */
+        const val WATCH_TIME_SCALE = 12.0
+        const val WATCH_TIME_WEIGHT = 0.38
+        /** 看了多大比例：长视频看三成也是认真在看。 */
+        const val WATCH_RATIO_WEIGHT = 0.9
+        const val COMPLETED_BONUS = 0.35
+        const val REPEAT_BONUS = 0.3
+        const val REWIND_BONUS = 0.15
+        const val REACTED_BONUS = 0.25
+        /** 起播就划走的最大负分（刚起播就走是这么多，到 [QUICK_SKIP_MS] 线性归零）。 */
+        const val QUICK_SKIP_PENALTY = 0.45
+
+        /**
+         * 一次观看值多少兴趣。**连续值**，不再是“45 秒 +0.8 / 4 秒 −0.5”这种固定档位：
+         * 43 秒和 45 秒不该一个没信号一个满分。
+         *
+         * 由这几项合成：真播了多久（对数增长，边际递减）、看了多大比例、是否播完、
+         * 是否是重看、有没有往回拖着再看、看的过程中有没有点赞收藏；再减掉一个
+         * “不好不坏”的基线（[NEUTRAL_WATCH_SECONDS] 秒）。起播没几秒就走额外扣分，越快越扣。
+         */
+        fun watchInterest(
+            playedMs: Long,
+            durationMs: Long,
+            completed: Boolean = false,
+            repeated: Boolean = false,
+            rewound: Boolean = false,
+            reacted: Boolean = false
+        ): Double {
+            val seconds = (playedMs.coerceAtLeast(0L)) / 1000.0
+            val ratio = if (durationMs > 0L) (playedMs.toDouble() / durationMs).coerceIn(0.0, 1.0) else 0.0
+            val baseline = kotlin.math.ln(1.0 + NEUTRAL_WATCH_SECONDS / WATCH_TIME_SCALE) * WATCH_TIME_WEIGHT
+            var score = kotlin.math.ln(1.0 + seconds / WATCH_TIME_SCALE) * WATCH_TIME_WEIGHT +
+                ratio * WATCH_RATIO_WEIGHT - baseline
+            if (completed) score += COMPLETED_BONUS
+            if (repeated) score += REPEAT_BONUS
+            if (rewound) score += REWIND_BONUS
+            if (reacted) score += REACTED_BONUS
+            // 起播就划走：越快越负，到 QUICK_SKIP_MS 这条线归零。看过一部分的不算。
+            if (!completed && ratio < 0.2 && playedMs < QUICK_SKIP_MS) {
+                score -= QUICK_SKIP_PENALTY * (1.0 - playedMs.toDouble() / QUICK_SKIP_MS)
+            }
+            return score
+        }
         /** 连续快速划走同类内容时，对共同的作者 / 标签额外的负反馈。 */
         const val SKIP_STREAK_WEIGHT = -0.5
         /** 横向滑动调进度：位移比例的指数，越大越偏向“小幅=微调”。 */

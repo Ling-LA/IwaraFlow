@@ -72,16 +72,28 @@ class ClassicsWeaveTest {
     private val day = 86_400_000L
     private fun dated(id: String, ageDays: Int) = VideoItem(id, id, "作者", emptyList(), 1, createdAt = now - ageDays * day)
 
-    @Test fun videosOlderThanHalfAYearAreSplitOffInOrder() {
-        val items = listOf(dated("a", 10), dated("old-1", 400), dated("b", 170), VideoItem("c", "c", "作者", emptyList(), 1), dated("old-2", 181))
+    /** 年龄是软分桶：近期和中期都留在主体，超过一年才进老片池。 */
+    @Test fun onlyVideosOlderThanAYearAreSplitOffInOrder() {
+        val items = listOf(
+            dated("a", 10), dated("old-1", 400), dated("b", 170),
+            VideoItem("c", "c", "作者", emptyList(), 1), dated("d", 300), dated("old-2", 500)
+        )
         val (recent, aged) = engine(12).splitByAge(items, now)
-        assertEquals("没有发布时间的算近期", listOf("a", "b", "c"), recent.map { it.id })
+        assertEquals("没有发布时间的算近期；半年、十个月的还在主体", listOf("a", "b", "c", "d"), recent.map { it.id })
         assertEquals(listOf("old-1", "old-2"), aged.map { it.id })
+    }
+
+    @Test fun theAgeBucketsAreRecentMiddleAndClassic() {
+        val e = engine(12)
+        assertEquals("近期", e.ageBucket(dated("x", 10), now))
+        assertEquals("中期", e.ageBucket(dated("x", 200), now))
+        assertEquals("经典", e.ageBucket(dated("x", 400), now))
+        assertEquals("没有时间的当近期", "近期", e.ageBucket(VideoItem("x", "x", "作者", emptyList(), 1), now))
     }
 
     @Test fun oldCandidatesOnlyAppearAsWovenClassics() {
         val engine = engine(12)
-        val ranked = (0 until 40).map { dated("old-aged-$it", 365 + it) } + (0 until 48).map { dated("new-$it", it % 100) }
+        val ranked = (0 until 40).map { dated("old-aged-$it", 400 + it) } + (0 until 48).map { dated("new-$it", it % 100) }
         val out = engine.assemble(ranked, emptySet(), classics(3))
         val groups = out.chunked(13)
         groups.forEachIndexed { index, group ->

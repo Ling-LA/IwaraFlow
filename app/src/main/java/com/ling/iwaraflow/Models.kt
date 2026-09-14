@@ -102,14 +102,35 @@ data class PreferenceProfile(
      * 视频级反馈。「不感兴趣：当前视频」只压这一条视频，不碰作者也不碰它的标签——
      * 用户说的是“我不想看这一条”，不是“我不喜欢这个作者和这十个标签”。
      */
-    val videoWeights: Map<String, Double> = emptyMap()
+    val videoWeights: Map<String, Double> = emptyMap(),
+    /** 用户明确点过「不感兴趣：作者」的作者名。 */
+    val mutedAuthors: Set<String> = emptySet(),
+    val mutedAuthorIds: Set<String> = emptySet(),
+    /** 用户明确点过「不感兴趣：标签」的标签。 */
+    val mutedTags: Set<String> = emptySet()
 ) {
     fun score(item: VideoItem): Double {
         val byId = item.authorId.takeIf { it.isNotBlank() }?.let { authorIdWeights[it] }
         val author = byId ?: authorWeights[item.author.lowercase()] ?: 0.0
-        val tags = item.tags.sumOf { tagWeights[it.lowercase()] ?: 0.0 }
-        return author + tags + (videoWeights[item.id] ?: 0.0)
+        return author + matchedTagScore(item) + (videoWeights[item.id] ?: 0.0)
     }
+
+    /**
+     * 只算命中最强的几个标签，而不是把所有标签的权重直接相加：
+     * 标签有 15 个的视频只要沾到几个正兴趣标签，就会无脑压过只有 3 个标签的视频。
+     * 按绝对值取前 [TOP_TAGS] 个，强负反馈的标签同样算得进来。
+     */
+    private fun matchedTagScore(item: VideoItem): Double =
+        item.tags.mapNotNull { tagWeights[it.lowercase()] }
+            .sortedByDescending { kotlin.math.abs(it) }
+            .take(TOP_TAGS)
+            .sum()
+
+    /** 用户明确说过不想看这个作者 / 标签。这类内容连探索位都不该给。 */
+    fun isMuted(item: VideoItem): Boolean =
+        (item.authorId.isNotBlank() && item.authorId in mutedAuthorIds) ||
+            (item.author.isNotBlank() && item.author.lowercase() in mutedAuthors) ||
+            item.tags.any { it.lowercase() in mutedTags }
 
     /** 权重最高的几个标签（至少 [minWeight]），给个性化召回用。 */
     fun topTags(count: Int, minWeight: Double): List<String> =
@@ -117,4 +138,9 @@ data class PreferenceProfile(
 
     fun topAuthorIds(count: Int, minWeight: Double): List<String> =
         authorIdWeights.entries.filter { it.value >= minWeight }.sortedByDescending { it.value }.take(count).map { it.key }
+
+    companion object {
+        /** 一条视频最多按几个标签算分。 */
+        const val TOP_TAGS = 4
+    }
 }

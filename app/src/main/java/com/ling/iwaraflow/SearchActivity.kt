@@ -267,7 +267,7 @@ class SearchActivity : AppCompatActivity() {
         querySerial++
         // 主动搜什么就是对什么感兴趣：关键词按标签记进画像。
         val terms = trimmed.split(Regex("[\\s,，、]+")).filter { it.isNotBlank() }.take(6)
-        if (terms.isNotEmpty()) history.recordInteraction(VideoItem("search:$trimmed", trimmed, "", terms, 0), "search", 1.2)
+        if (terms.isNotEmpty()) history.recordInteraction(VideoItem("search:$trimmed", trimmed, "", terms, 0), HistoryStore.ACTION_SEARCH, HistoryStore.SEARCH_WEIGHT)
         // 已经翻过的词直接用四种写法开搜；没翻过的先按原词搜着，译文回来再补进去。
         // 作者名只按输入的原词搜：作者的用户名就是他自己起的那一个，翻成别的语言反而搜偏。
         val start = QueryTranslator.cached(trimmed) ?: listOf(trimmed)
@@ -570,7 +570,7 @@ class SearchActivity : AppCompatActivity() {
         val state = videoState(tab) ?: return
         val index = state.playable.indexOfFirst { it.id == item.id }
         // 从搜索结果里点开的：比刷到的更能说明兴趣。
-        history.recordInteraction(item, "search_open", 0.6)
+        history.recordInteraction(item, "search_open", HistoryStore.SEARCH_OPEN_WEIGHT)
         if (index < 0) return
         inFeed = true
         feedTab = tab

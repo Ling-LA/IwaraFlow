@@ -115,11 +115,11 @@ object DislikeSheet {
                 Toast.makeText(context, "已跳过这条视频", Toast.LENGTH_SHORT).show()
             }
             Kind.AUTHOR -> {
-                history.recordInteraction(VideoItem(item.id, item.title, item.author, emptyList(), 0, authorId = item.authorId), "dislike_author", AUTHOR_WEIGHT)
+                history.recordInteraction(VideoItem(item.id, item.title, item.author, emptyList(), 0, authorId = item.authorId), HistoryStore.ACTION_DISLIKE_AUTHOR, AUTHOR_WEIGHT)
                 Toast.makeText(context, "会减少 @${item.author} 的推荐", Toast.LENGTH_SHORT).show()
             }
             Kind.TAG -> {
-                history.recordInteraction(VideoItem(item.id, item.title, "", listOf(tag), 0), "dislike_tag", TAG_WEIGHT)
+                history.recordInteraction(VideoItem(item.id, item.title, "", listOf(tag), 0), HistoryStore.ACTION_DISLIKE_TAG, TAG_WEIGHT)
                 Toast.makeText(context, "会减少 #$tag 的推荐", Toast.LENGTH_SHORT).show()
             }
         }

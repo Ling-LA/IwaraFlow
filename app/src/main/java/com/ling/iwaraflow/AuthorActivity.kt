@@ -284,7 +284,7 @@ class AuthorActivity : AppCompatActivity() {
     /** 简介页点了标签：开搜索页搜这个标签。 */
     private fun openTagSearch(tag: String) {
         if (tag.isBlank() || exiting) return
-        history.recordInteraction(VideoItem("tag:$tag", tag, "", listOf(tag), 0), "search", 1.2)
+        history.recordInteraction(VideoItem("tag:$tag", tag, "", listOf(tag), 0), HistoryStore.ACTION_SEARCH, HistoryStore.SEARCH_WEIGHT)
         comments.close()
         feedAdapter.pauseAll()
         startActivity(Intent(this, SearchActivity::class.java)

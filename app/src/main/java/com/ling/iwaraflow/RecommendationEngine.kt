@@ -102,7 +102,7 @@ class RecommendationEngine(
      * 现在来源分从候选表里取回来（见 [candidates]），只有口味那一项跟着新画像变。
      */
     internal fun rerankBlocking(items: List<VideoItem>, taste: PreferenceProfile, now: Long): List<VideoItem> =
-        spreadAuthors(items.sortedByDescending { scoreOf(it, taste, now) })
+        diversify(spreadAuthors(items.sortedByDescending { scoreOf(it, taste, now) }))
 
     /** 一条候选此刻的得分：来源 + 质量 + 新鲜度 + 画像 + 稳定抖动。 */
     private fun scoreOf(item: VideoItem, taste: PreferenceProfile, now: Long): Double {
@@ -225,8 +225,68 @@ class RecommendationEngine(
     internal fun assemble(ranked: List<VideoItem>, subscribed: Set<String>, classics: List<VideoItem>): List<VideoItem> {
         val (recent, aged) = splitByAge(ranked, System.currentTimeMillis())
         val feed = if (recent.size >= MIN_RECENT_FEED) recent else recent + aged.take(MIN_RECENT_FEED - recent.size)
-        val pool = if (classicsEvery > 0) classics + aged else emptyList()
-        return weaveClassics(interleave(exploreDisliked(spreadAuthors(feed)), subscribed), pool).take(MAX_RESULTS)
+        // 老片池也按“质量 × 口味”排一遍：穿插进来的应该是“你可能喜欢的经典”，不是全站经典。
+        val pool = if (classicsEvery > 0) rankClassics(classics + aged) else emptyList()
+        return weaveClassics(
+            interleave(exploreDisliked(diversify(spreadAuthors(feed))), subscribed),
+            pool
+        ).take(MAX_RESULTS)
+    }
+
+    /**
+     * 老片的个性化排序：质量 × 画像，**不算新鲜度**（老片本来就老，算了等于按年龄再罚一次）。
+     * 排完同样做一次多样性重排，免得穿插位连着几条都是同一类内容。
+     */
+    internal fun rankClassics(items: List<VideoItem>): List<VideoItem> {
+        if (items.size <= 1) return items
+        val taste = profile
+        return diversify(items.sortedByDescending { item ->
+            qualityScore(item.likes, item.views) + taste.score(item).coerceIn(-6.0, 8.0) * CLASSIC_TASTE_WEIGHT
+        })
+    }
+
+    /**
+     * 两条视频有多像：同一个作者直接算最像，否则看标签的 Jaccard 相似度。
+     * 不用任何模型，够用来判断“又是同一种内容”。
+     */
+    internal fun similarity(a: VideoItem, b: VideoItem): Double {
+        // 有 id 就按 id 认人；只有名字时才比名字（不同 id 同名的是两个人）。
+        if (a.authorId.isNotBlank() && b.authorId.isNotBlank()) {
+            if (a.authorId == b.authorId) return 1.0
+        } else if (a.author.isNotBlank() && a.author.equals(b.author, ignoreCase = true)) return 1.0
+        val x = a.tags.mapTo(HashSet()) { it.lowercase() }
+        val y = b.tags.mapTo(HashSet()) { it.lowercase() }
+        if (x.isEmpty() || y.isEmpty()) return 0.0
+        val overlap = x.count { it in y }.toDouble()
+        val union = x.size + y.size - overlap
+        return if (union <= 0.0) 0.0 else overlap / union
+    }
+
+    /**
+     * 轻量 MMR 多样性重排：**最终价值 = 原来的名次 − 与最近几条的相似度惩罚**。
+     *
+     * 打散作者只解决了“连着五条同一个人”，解决不了“二十条不同作者、但全是同一种内容”。
+     * 这里每次只在最前面的 [DIVERSITY_LOOKAHEAD] 条里挑一条和最近 [SIMILARITY_WINDOW] 条最不像的，
+     * 挑不动就还是原来那条——没有相似内容时结果和原顺序完全一致。
+     */
+    internal fun diversify(items: List<VideoItem>, window: Int = SIMILARITY_WINDOW): List<VideoItem> {
+        if (items.size <= 2) return items
+        val pending = ArrayList(items)
+        val out = ArrayList<VideoItem>(items.size)
+        while (pending.isNotEmpty()) {
+            val lookAhead = minOf(DIVERSITY_LOOKAHEAD, pending.size)
+            var bestIndex = 0
+            var bestCost = Double.MAX_VALUE
+            val recent = out.takeLast(window)
+            for (i in 0 until lookAhead) {
+                val candidate = pending[i]
+                val similar = recent.maxOfOrNull { similarity(it, candidate) } ?: 0.0
+                val cost = i * POSITION_COST + similar * SIMILARITY_PENALTY
+                if (cost < bestCost) { bestCost = cost; bestIndex = i }
+            }
+            out += pending.removeAt(bestIndex)
+        }
+        return out
     }
 
     /**
@@ -239,8 +299,13 @@ class RecommendationEngine(
         val taste = profile
         val (open, buried) = feed.partition { taste.score(it) >= EXPLORE_NEGATIVE_THRESHOLD }
         if (buried.isEmpty() || open.isEmpty()) return feed
-        val slots = (open.size / EXPLORE_EVERY).coerceAtLeast(1).coerceAtMost(buried.size)
-        val explore = ArrayDeque(buried.take(slots))
+        // 探索位要探索的是“还不知道你喜不喜欢”，不是“你已经明说不喜欢”：
+        // 点过「不感兴趣：作者 / 标签」的内容不进探索位（在兴趣管理里恢复之前都不进），
+        // 剩下的按离 0 最近的优先——弱负反馈（划得快几次）比重负反馈更值得再试一次。
+        val retryable = buried.filterNot { taste.isMuted(it) }.sortedByDescending { taste.score(it) }
+        if (retryable.isEmpty()) return feed
+        val slots = (open.size / EXPLORE_EVERY).coerceAtLeast(1).coerceAtMost(retryable.size)
+        val explore = ArrayDeque(retryable.take(slots))
         explore.forEach { candidates[it.id]?.exploration = true }
         val rest = ArrayDeque(open)
         val out = ArrayList<VideoItem>(feed.size)
@@ -250,7 +315,9 @@ class RecommendationEngine(
             if (explore.isNotEmpty()) block.add(random.nextInt(block.size + 1), explore.removeFirst())
             out += block
         }
-        out += buried.drop(slots)
+        // 没被选去探索的（包括明确拉黑的）照旧沉在底部，顺序不变。
+        val used = retryable.take(slots).mapTo(HashSet()) { it.id }
+        out += buried.filterNot { it.id in used }
         return out
     }
 
@@ -303,10 +370,27 @@ class RecommendationEngine(
         return listOf(current, format.format(calendar.time))
     }
 
-    /** 按发布时间分成（近期，老片）两堆，顺序不变；没有发布时间的算近期。 */
+    /**
+     * 按发布时间分成（主体，经典池）两堆，顺序不变；没有发布时间的算主体。
+     *
+     * 年龄不再是一刀切：**近期**（[RECENT_MAX_AGE_MS] 以内）和**中期**（到
+     * [CLASSIC_MIN_AGE_MS] 为止）都留在主体里，只是新鲜度按连续曲线自然衰减；
+     * 超过一年的才进经典池按间隔穿插。以前半年是硬切线，179 天和 181 天的待遇天差地别。
+     */
     internal fun splitByAge(items: List<VideoItem>, now: Long): Pair<List<VideoItem>, List<VideoItem>> {
         val cutoff = now - CLASSIC_MIN_AGE_MS
         return items.partition { it.createdAt <= 0L || it.createdAt >= cutoff }
+    }
+
+    /** 年龄桶，只用于诊断和文档口径：近期 / 中期 / 经典。 */
+    internal fun ageBucket(item: VideoItem, now: Long): String {
+        if (item.createdAt <= 0L) return "近期"
+        val age = (now - item.createdAt).coerceAtLeast(0L)
+        return when {
+            age <= RECENT_MAX_AGE_MS -> "近期"
+            age < CLASSIC_MIN_AGE_MS -> "中期"
+            else -> "经典"
+        }
     }
 
     /**
@@ -717,8 +801,19 @@ class RecommendationEngine(
         internal const val CLASSICS_SORT = "likes"
         internal const val CLASSICS_MIN_PAGE = 8
         internal const val CLASSICS_DEPTH = 300
-        /** 发布不满半年的不算老片；反过来，超过半年的也不进推荐流主体，只按间隔穿插。 */
-        internal const val CLASSIC_MIN_AGE_MS = 180L * 24 * 60 * 60 * 1000
+        /**
+         * 年龄软分桶：90 天内是「近期」，90 天～1 年是「中期」（仍在推荐流主体里，
+         * 只是新鲜度分自然更低），超过 1 年才是「经典」，进老片池按间隔穿插。
+         */
+        internal const val RECENT_MAX_AGE_MS = 90L * 24 * 60 * 60 * 1000
+        internal const val CLASSIC_MIN_AGE_MS = 365L * 24 * 60 * 60 * 1000
+        /** 老片排序里口味占的比重：比主流里的 0.38 更重，老片本来就该挑合口味的。 */
+        internal const val CLASSIC_TASTE_WEIGHT = 0.5
+        /** 多样性重排：和最近几条比、最多往后看几条、名次代价、相似度惩罚。 */
+        internal const val SIMILARITY_WINDOW = 3
+        internal const val DIVERSITY_LOOKAHEAD = 16
+        internal const val POSITION_COST = 0.06
+        internal const val SIMILARITY_PENALTY = 1.2
         /** 近期视频至少凑到这么多条，不够才拿老的补。 */
         internal const val MIN_RECENT_FEED = 24
         /** 设置里的默认：每 12 条穿插一条。 */

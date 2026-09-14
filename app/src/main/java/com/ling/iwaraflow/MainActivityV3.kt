@@ -706,7 +706,7 @@ class MainActivityV3 : AppCompatActivity() {
     /** 简介页点了标签：收起面板去搜这个标签，并记一笔兴趣。 */
     private fun openTagSearch(tag: String) {
         if (tag.isBlank()) return
-        history.recordInteraction(VideoItem("tag:$tag", tag, "", listOf(tag), 0), "search", 1.2)
+        history.recordInteraction(VideoItem("tag:$tag", tag, "", listOf(tag), 0), HistoryStore.ACTION_SEARCH, HistoryStore.SEARCH_WEIGHT)
         comments.close()
         launchSearch(tag, asTag = true)
     }

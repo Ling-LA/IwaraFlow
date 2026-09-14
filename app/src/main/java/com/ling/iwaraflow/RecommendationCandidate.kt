@@ -27,7 +27,16 @@ data class RecommendationCandidate(
     /** 老片穿插位。 */
     var classic: Boolean = false,
     /** 探索位：画像还不知道用户喜不喜欢的内容。 */
-    var exploration: Boolean = false
+    var exploration: Boolean = false,
+    /**
+     * 这条候选属于哪一轮推荐（每次完整刷新 +1）。
+     *
+     * 同一个视频可能在好几轮里被召回，来源却完全不同：这一轮是标签召回来的，
+     * 下一轮可能只是官方榜单的回退结果。以前 `remember()` 是 `getOrPut`，
+     * 于是新一轮会沿用上一轮的来源分、命中标签、“探索位 / 老片”标记，
+     * 推荐理由和评分都跟着串。轮次对不上就重建一条，不再接着用旧的。
+     */
+    var generation: Int = 0
 ) {
     /** 「为什么推荐给我」：挑最能说明问题的那一条理由。 */
     fun reason(): String = when {

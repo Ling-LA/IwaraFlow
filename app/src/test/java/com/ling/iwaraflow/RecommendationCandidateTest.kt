@@ -28,6 +28,38 @@ class RecommendationCandidateTest {
         assertEquals("综合推荐", RecommendationCandidate(item()).reason())
     }
 
+    /**
+     * 同一条视频在新一轮里被重新召回时，不能沿用上一轮的来源和标记：
+     * 上一轮它是“为你探索的新内容”，这一轮可能只是官方榜单回退来的。
+     */
+    @Test fun aNewRoundDoesNotInheritTheLastRoundsCandidate() {
+        val ranker = RecommendationRanker()
+        ranker.remember(item()) {
+            it.exploration = true
+            it.sourceScore = 9.0
+            it.matchedTags += "miku"
+        }
+        assertEquals("为你探索的新内容", ranker.reasonFor("v1"))
+
+        ranker.startGeneration()
+        ranker.remember(item()) { it.sources += RecommendationCandidate.Source.OFFICIAL }
+        val fresh = ranker.candidateFor("v1")!!
+        assertEquals("综合推荐", fresh.reason())
+        assertFalse("上一轮的探索位标记不该带过来", fresh.exploration)
+        assertEquals("上一轮的来源分也不该带过来", 0.0, fresh.sourceScore, 1e-9)
+        assertTrue(fresh.matchedTags.isEmpty())
+    }
+
+    /** 同一轮里再记一次是补充信息，不是重来一次。 */
+    @Test fun rememberingTwiceInOneRoundKeepsWhatIsAlreadyThere() {
+        val ranker = RecommendationRanker()
+        ranker.remember(item()) { it.sourceScore = 4.0 }
+        ranker.remember(item()) { it.classic = true }
+        val candidate = ranker.candidateFor("v1")!!
+        assertEquals(4.0, candidate.sourceScore, 1e-9)
+        assertTrue(candidate.classic)
+    }
+
     /** 关注 / 取关立刻改推荐引擎的关注名单，不用等最长 6 小时的缓存过期。 */
     @Test fun followingChangesReachTheEngineRightAway() {
         val engine = RecommendationEngine(mock(IwaraApi::class.java), mock(HistoryStore::class.java))

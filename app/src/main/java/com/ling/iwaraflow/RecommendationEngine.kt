@@ -133,6 +133,8 @@ class RecommendationEngine(
     }
 
     private fun loadBlocking(skipSeen: Boolean): List<VideoItem> {
+        // 新的一轮：这一轮记下的候选不再沿用上一轮的来源分和标记，见 RecommendationCandidate.generation。
+        ranker.startGeneration()
         // 一轮最多同时发这么多请求：卡住的那个不能把后面排队的也拖住。
         val pool = Executors.newFixedThreadPool(MAX_PARALLEL_REQUESTS)
         try {

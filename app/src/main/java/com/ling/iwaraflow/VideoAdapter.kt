@@ -181,7 +181,7 @@ class VideoAdapter(
         val sameAuthor = item.author.isNotBlank() && last.author.equals(item.author, ignoreCase = true)
         val shared = item.tags.filter { tag -> last.tags.any { it.equals(tag, ignoreCase = true) } }
         if (!sameAuthor && shared.isEmpty()) return
-        history.recordInteraction(
+        history.recordInteractionAsync(
             VideoItem(item.id, item.title, if (sameAuthor) item.author else "", shared, 0, authorId = if (sameAuthor) item.authorId else ""),
             "skip_streak", SKIP_STREAK_WEIGHT
         )
@@ -485,12 +485,12 @@ class VideoAdapter(
             )
             when {
                 interest >= WATCH_SIGNAL_FLOOR -> {
-                    history.recordInteraction(item, "watch", interest)
+                    history.recordInteractionAsync(item, "watch", interest)
                     lastSkipped = null
                 }
                 // 划走才算负反馈：切后台、开别的页面不是态度。
                 interest <= -WATCH_SIGNAL_FLOOR && swipedAway -> {
-                    history.recordInteraction(item, HistoryStore.ACTION_SKIP, interest)
+                    history.recordInteractionAsync(item, HistoryStore.ACTION_SKIP, interest)
                     noteSkipStreak(item)
                 }
             }
@@ -511,7 +511,7 @@ class VideoAdapter(
             comments.visibility = if (onComments == null) View.GONE else View.VISIBLE
             comments.setOnClickListener {
                 // 打开评论区也是一点兴趣，比点赞轻得多。
-                history.recordInteraction(item, "comments", 0.3)
+                history.recordInteractionAsync(item, "comments", 0.3)
                 onSignal?.invoke(item, "comments")
                 onComments?.invoke(item)
             }
@@ -541,14 +541,14 @@ class VideoAdapter(
             }
             favorite.setOnClickListener {
                 val desired = !item.localFavorite
-                history.setLocalFavorite(item, desired)
+                history.setLocalFavoriteAsync(item, desired)
                 if (desired) {
-                    history.recordInteraction(item, "favorite", 1.4)
+                    history.recordInteractionAsync(item, "favorite", 1.4)
                     onSignal?.invoke(item, "favorite")
                     reactionBurst.playOn(favorite, ReactionBurstView.Kind.FAVORITE)
                 } else {
                     // 取消收藏：当初的兴趣不算数了，往回压一点。
-                    history.recordInteraction(item, "unfavorite", -0.9)
+                    history.recordInteractionAsync(item, "unfavorite", -0.9)
                     onSignal?.invoke(item, "unfavorite")
                 }
                 // 收藏有动画、取消有图标变化，不用再弹一层提示挡着视频。
@@ -563,7 +563,7 @@ class VideoAdapter(
             pauseFullscreenExit.setOnClickListener { onFullscreen?.invoke(item, false) }
             share.setOnClickListener {
                 // 愿意分享给别人，是比点赞还强的兴趣信号。
-                history.recordInteraction(item, "share", 1.0)
+                history.recordInteractionAsync(item, "share", 1.0)
                 onSignal?.invoke(item, "share")
                 onShare?.invoke(item) ?: VideoShare.share(itemView.context, item)
             }
@@ -766,7 +766,7 @@ class VideoAdapter(
                 else player?.apply { volume = 1f; playWhenReady = true; play() }
                 bound?.let { item ->
                     val p = player
-                    history.recordWatch(item, p?.currentPosition ?: item.resumePositionMs, (p?.duration ?: 0L).coerceAtLeast(0L), false)
+                    history.recordWatchAsync(item, p?.currentPosition ?: item.resumePositionMs, (p?.duration ?: 0L).coerceAtLeast(0L), false)
                 }
                 startWatchdog()
             } else {
@@ -988,7 +988,7 @@ class VideoAdapter(
             val ended = completed || p.playbackState == Player.STATE_ENDED
             item.resumePositionMs = if (ended) 0L else position
             val completedByProgress = duration > 0 && position >= (duration * 0.9).toLong()
-            history.recordWatch(item, position, duration, completed || completedByProgress)
+            history.recordWatchAsync(item, position, duration, completed || completedByProgress)
         }
 
         fun savePlaybackPosition() = persistHistory(completed = false)
@@ -1010,12 +1010,12 @@ class VideoAdapter(
                         item.liked = desired
                         // 点赞等同于已看：下次生成推荐时要能被“排除已看视频”过滤掉。
                         if (desired) {
-                            history.recordInteraction(item, "like", 2.0)
-                            history.markSeen(item.id)
+                            history.recordInteractionAsync(item, "like", 2.0)
+                            history.markSeenAsync(item.id)
                             onSignal?.invoke(item, "like")
                         } else {
                             // 取消点赞：比“没点过”还差一点。
-                            history.recordInteraction(item, "unlike", -1.2)
+                            history.recordInteractionAsync(item, "unlike", -1.2)
                             onSignal?.invoke(item, "unlike")
                         }
                         updateLikeUi(item)

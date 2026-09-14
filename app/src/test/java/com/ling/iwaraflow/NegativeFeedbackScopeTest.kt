@@ -38,7 +38,11 @@ class NegativeFeedbackScopeTest {
         adapter.onBindViewHolder(holder, 0)
     }
 
-    private fun negatives(): Int = history.recommendationMetrics().let { (it.samples * it.quickSkipRate).toInt() }
+    /** 行为是排队写的（UI 线程不写库），断言之前先等写队列清空，免得白跑一个空断言。 */
+    private fun negatives(): Int {
+        history.awaitWrites()
+        return history.recommendationMetrics().let { (it.samples * it.quickSkipRate).toInt() }
+    }
 
     @Test fun closingTheAppRecordsNoSkip() {
         val adapter = adapter()
@@ -70,6 +74,7 @@ class NegativeFeedbackScopeTest {
             bind(adapter)
             adapter.setActive(1)
             // 卡片没真的起播过（Robolectric 里没有解码器），所以仍然不该有任何信号。
+            history.awaitWrites()
             assertEquals(0, history.recommendationMetrics().samples)
         } finally { adapter.releaseAll() }
     }

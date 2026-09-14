@@ -117,8 +117,7 @@ object DislikeSheet {
             Kind.AUTHOR -> {
                 // 两笔都要记：行为表那条负责压分（会衰减），muted_entities 那条是永久硬屏蔽。
                 history.recordInteraction(VideoItem(item.id, item.title, item.author, emptyList(), 0, authorId = item.authorId), HistoryStore.ACTION_DISLIKE_AUTHOR, AUTHOR_WEIGHT)
-                history.mute(HistoryStore.MUTE_AUTHOR, item.author)
-                if (item.authorId.isNotBlank()) history.mute(HistoryStore.MUTE_AUTHOR_ID, item.authorId)
+                history.muteAuthor(item.author, item.authorId)
                 Toast.makeText(context, "不再推荐 @${item.author}", Toast.LENGTH_SHORT).show()
             }
             Kind.TAG -> {

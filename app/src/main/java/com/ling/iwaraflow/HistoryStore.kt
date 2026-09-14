@@ -4,6 +4,7 @@ import android.content.ContentValues
 import android.content.Context
 import android.database.sqlite.SQLiteDatabase
 import android.database.sqlite.SQLiteOpenHelper
+import java.util.concurrent.Executors
 
 /** 一条下载记录：哪个视频、哪个清晰度、系统下载器给的编号。 */
 data class DownloadRecord(val item: VideoItem, val quality: String, val downloadId: Long)
@@ -16,6 +17,55 @@ data class MutedEntities(
 )
 
 class HistoryStore(context: Context) : SQLiteOpenHelper(context, "iwaraflow.db", null, 7) {
+    /**
+     * **UI 线程不写库**。划一条视频要写好几笔（观看记录、行为、已看标记），
+     * 而这些方法都是 `@Synchronized` 的——和后台算画像抢同一把锁，用久了就是划走那一下的微卡顿。
+     * 写操作都排到这一条线程上，顺序照旧（单线程），只是不再挡住手势。
+     */
+    private val writes = Executors.newSingleThreadExecutor { r ->
+        Thread(r, "IwaraFlow-history-write").apply { isDaemon = true }
+    }
+    @Volatile private var closed = false
+
+    /** 把一次写库交给写线程。页面已经销毁（写队列关掉了）就丢掉，不抛异常。 */
+    fun post(block: () -> Unit) {
+        if (closed) return
+        // shutdown 之后排队的写照旧跑完（close 会等它们），只有新来的才丢。
+        runCatching { writes.execute { runCatching { block() } } }
+    }
+
+    /** 划走 / 点赞这些都发生在 UI 线程上，写库交给写线程。 */
+    fun recordInteractionAsync(item: VideoItem, action: String, weight: Double) =
+        post { recordInteraction(item, action, weight) }
+
+    fun recordWatchAsync(item: VideoItem, positionMs: Long, durationMs: Long, completed: Boolean) =
+        post { recordWatch(item, positionMs, durationMs, completed) }
+
+    fun markSeenAsync(videoId: String) = post { markSeen(videoId) }
+
+    /** 收藏状态 UI 立刻就要用，所以先在调用线程上改好，落库再排队。 */
+    fun setLocalFavoriteAsync(item: VideoItem, enabled: Boolean) {
+        item.localFavorite = enabled
+        post { setLocalFavorite(item, enabled) }
+    }
+
+    /** 等写队列清空。关库前和用例里要用：不等的话读到的是写之前的状态。 */
+    fun awaitWrites(timeoutMs: Long = AWAIT_WRITES_MS) {
+        if (closed) return
+        val done = java.util.concurrent.CountDownLatch(1)
+        post { done.countDown() }
+        runCatching { done.await(timeoutMs, java.util.concurrent.TimeUnit.MILLISECONDS) }
+    }
+
+    override fun close() {
+        if (!closed) {
+            closed = true
+            writes.shutdown()
+            runCatching { writes.awaitTermination(AWAIT_WRITES_MS, java.util.concurrent.TimeUnit.MILLISECONDS) }
+        }
+        super.close()
+    }
+
     override fun onCreate(db: SQLiteDatabase) {
         db.execSQL(
             """CREATE TABLE history(
@@ -106,9 +156,12 @@ class HistoryStore(context: Context) : SQLiteOpenHelper(context, "iwaraflow.db",
         }
     }
 
+    /** 一条待写入的静音：类型、键、互为别名的另一个键、时间。 */
+    private class MuteRow(val type: String, val key: String, val alias: String, val at: Long)
+
     /** 把老版本记在 interactions 里的「不感兴趣：作者 / 标签」搬进 [MUTED_TABLE]。 */
     private fun backfillMutes(db: SQLiteDatabase) {
-        val rows = ArrayList<Triple<String, String, Long>>()
+        val rows = ArrayList<MuteRow>()
         runCatching {
             db.query(
                 "interactions", arrayOf("author", "author_id", "tags", "action", "created_at"),
@@ -118,13 +171,13 @@ class HistoryStore(context: Context) : SQLiteOpenHelper(context, "iwaraflow.db",
                 while (c.moveToNext()) {
                     val at = c.getLong(4)
                     if (c.getString(3) == ACTION_DISLIKE_AUTHOR) {
-                        c.getString(0).orEmpty().lowercase().takeIf { it.isNotBlank() }
-                            ?.let { rows += Triple(MUTE_AUTHOR, it, at) }
-                        c.getString(1).orEmpty().takeIf { it.isNotBlank() }
-                            ?.let { rows += Triple(MUTE_AUTHOR_ID, it, at) }
+                        val name = c.getString(0).orEmpty().lowercase()
+                        val id = c.getString(1).orEmpty()
+                        if (name.isNotBlank()) rows += MuteRow(MUTE_AUTHOR, name, id, at)
+                        if (id.isNotBlank()) rows += MuteRow(MUTE_AUTHOR_ID, id, name, at)
                     } else {
                         splitTags(c.getString(2)).forEach { tag ->
-                            rows += Triple(MUTE_TAG, tag.lowercase(), at)
+                            rows += MuteRow(MUTE_TAG, tag.lowercase(), "", at)
                         }
                     }
                 }
@@ -133,18 +186,19 @@ class HistoryStore(context: Context) : SQLiteOpenHelper(context, "iwaraflow.db",
         if (rows.isEmpty()) return
         db.beginTransaction()
         try {
-            rows.forEach { (type, key, at) -> insertMute(db, type, key, at) }
+            rows.forEach { insertMute(db, it.type, it.key, it.at, it.alias) }
             db.setTransactionSuccessful()
         } finally {
             db.endTransaction()
         }
     }
 
-    private fun insertMute(db: SQLiteDatabase, type: String, key: String, at: Long) {
+    private fun insertMute(db: SQLiteDatabase, type: String, key: String, at: Long, alias: String = "") {
         val values = ContentValues().apply {
             put("type", type)
             put("entity_key", key)
             put("created_at", at)
+            put("alias", alias)
         }
         db.insertWithOnConflict("muted_entities", null, values, SQLiteDatabase.CONFLICT_IGNORE)
     }
@@ -158,6 +212,33 @@ class HistoryStore(context: Context) : SQLiteOpenHelper(context, "iwaraflow.db",
         val value = key.trim().let { if (type == MUTE_AUTHOR_ID) it else it.lowercase() }
         if (value.isBlank()) return
         insertMute(writableDatabase, type, value, System.currentTimeMillis())
+    }
+
+    /**
+     * 拉黑一个作者：名字和 id 各记一行，**互为别名**。
+     * 兴趣管理里列出来的是名字，但拉黑时真正拦住内容的多半是 id（作者可能改名）；
+     * 记下别名，按名字“恢复”时才能把 id 那一行也一起删掉。
+     */
+    @Synchronized
+    fun muteAuthor(name: String, authorId: String) {
+        val label = name.trim().lowercase()
+        val id = authorId.trim()
+        val db = writableDatabase
+        val now = System.currentTimeMillis()
+        if (label.isNotBlank()) insertMute(db, MUTE_AUTHOR, label, now, id)
+        if (id.isNotBlank()) insertMute(db, MUTE_AUTHOR_ID, id, now, label)
+    }
+
+    /** 解除一个作者的静音，名字和 id 传哪个都行：互为别名的两行一起删。 */
+    @Synchronized
+    fun unmuteAuthor(key: String): Int {
+        val value = key.trim()
+        if (value.isBlank()) return 0
+        return writableDatabase.delete(
+            "muted_entities",
+            "type IN (?, ?) AND (entity_key=? OR entity_key=? OR alias=? OR alias=?)",
+            arrayOf(MUTE_AUTHOR, MUTE_AUTHOR_ID, value, value.lowercase(), value, value.lowercase())
+        )
     }
 
     /** 兴趣管理里的“恢复”：解除静音，返回删掉了几条。 */
@@ -386,11 +467,29 @@ class HistoryStore(context: Context) : SQLiteOpenHelper(context, "iwaraflow.db",
         trimInteractions()
     }
 
-    private fun trimInteractions() {
-        writableDatabase.execSQL(
+    /**
+     * 把行为表修剪回 [MAX_INTERACTIONS] 条，**摊销着做**。
+     *
+     * 以前每插一条就跑一次 `DELETE ... NOT IN (SELECT ... LIMIT 3000)`——这条语句要
+     * 先排序三千行再做一次反向匹配，而插入本身只是一行。刷视频时每划一条就写好几笔行为，
+     * 代价全压在划走那一下。现在攒够 [TRIM_EVERY] 次才看一眼，而且只有真的超出
+     * [MAX_INTERACTIONS] + [TRIM_SLACK] 才删；表最多比上限多留几百行，画像只读最近
+     * [PROFILE_ROWS] 条，多出来的那点完全看不见。
+     */
+    private fun trimInteractions(inserted: Int = 1) {
+        writesSinceTrim += inserted
+        if (writesSinceTrim < TRIM_EVERY) return
+        writesSinceTrim = 0
+        val db = writableDatabase
+        val count = runCatching { android.database.DatabaseUtils.queryNumEntries(db, "interactions") }.getOrDefault(0L)
+        if (count <= MAX_INTERACTIONS + TRIM_SLACK) return
+        db.execSQL(
             "DELETE FROM interactions WHERE id NOT IN (SELECT id FROM interactions ORDER BY created_at DESC LIMIT $MAX_INTERACTIONS)"
         )
     }
+
+    /** 距离上一次修剪写进去了多少条行为，见 [trimInteractions]。 */
+    private var writesSinceTrim = 0
 
     /**
      * 把 Iwara 官方的历史点赞作为画像的种子：一个用了 Iwara 多年的账号第一次装上就有准确的偏好。
@@ -418,7 +517,7 @@ class HistoryStore(context: Context) : SQLiteOpenHelper(context, "iwaraflow.db",
         } finally {
             db.endTransaction()
         }
-        if (added > 0) trimInteractions()
+        if (added > 0) trimInteractions(added)
         return added
     }
 
@@ -606,8 +705,8 @@ class HistoryStore(context: Context) : SQLiteOpenHelper(context, "iwaraflow.db",
         if (value.isBlank()) return 0
         val db = writableDatabase
         return when (kind) {
-            // 兴趣管理里列的是作者名，老记录里也可能只有作者 id，两种键都试着解除。
-            DislikeSheet.Kind.AUTHOR -> unmute(MUTE_AUTHOR, value) + unmute(MUTE_AUTHOR_ID, value) + db.delete(
+            // 兴趣管理里列的是作者名，老记录里也可能只有作者 id，两种键都能解除。
+            DislikeSheet.Kind.AUTHOR -> unmuteAuthor(value) + db.delete(
                 "interactions",
                 "action=? AND (LOWER(author)=? OR author_id=?)",
                 arrayOf(ACTION_DISLIKE_AUTHOR, value.lowercase(), value)
@@ -645,6 +744,11 @@ class HistoryStore(context: Context) : SQLiteOpenHelper(context, "iwaraflow.db",
         const val MAX_INTERACTIONS = 3000
         /** 算画像时读多少条最近的行为。 */
         const val PROFILE_ROWS = 2000
+        /** 修剪行为表的摊销参数：攒够这么多条才检查一次，超出上限这么多才真的删，见 [trimInteractions]。 */
+        const val TRIM_EVERY = 100
+        const val TRIM_SLACK = 200
+        /** 等写队列清空最多等这么久（关库、用例里用）。 */
+        const val AWAIT_WRITES_MS = 5000L
         /** 批量查“看过没 / 收藏没”时一次问多少个 id（SQLite 的变量个数有上限）。 */
         const val STATUS_BATCH = 400
         /** 算推荐诊断指标时看最近多少条记录。 */
@@ -701,6 +805,7 @@ class HistoryStore(context: Context) : SQLiteOpenHelper(context, "iwaraflow.db",
                 type TEXT NOT NULL,
                 entity_key TEXT NOT NULL,
                 created_at INTEGER NOT NULL,
+                alias TEXT NOT NULL DEFAULT '',
                 PRIMARY KEY(type, entity_key)
             )""".trimIndent()
     }

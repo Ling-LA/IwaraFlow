@@ -31,8 +31,7 @@ class MutedEntitiesTest {
         VideoItem(id, id, author, tags, 1, authorId = "id-$author")
 
     @Test fun aMuteLivesInItsOwnTableInsteadOfTheBehaviourWindow() {
-        history.mute(HistoryStore.MUTE_AUTHOR, "Muted")
-        history.mute(HistoryStore.MUTE_AUTHOR_ID, "id-Muted")
+        history.muteAuthor("Muted", "id-Muted")
         history.mute(HistoryStore.MUTE_TAG, "Banned")
 
         // 行为表里一条记录都没有：静音不靠行为窗口活着。
@@ -66,6 +65,7 @@ class MutedEntitiesTest {
         DislikeSheet.apply(context, item, history, DislikeSheet.Kind.TAG, "banned", null)
         assertTrue(history.preferenceProfile().isMuted(item))
 
+        // 兴趣管理里列出来的是名字；作者 id 那一行是它的别名，要跟着一起解除。
         assertTrue(history.forgetDislike(DislikeSheet.Kind.AUTHOR, "Muted") > 0)
         assertTrue(history.forgetDislike(DislikeSheet.Kind.TAG, "banned") > 0)
 

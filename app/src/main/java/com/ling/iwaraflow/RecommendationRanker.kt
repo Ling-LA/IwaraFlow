@@ -22,8 +22,25 @@ class RecommendationRanker(private val random: Random = Random()) {
      * 候选的完整信息，按视频 id 记着：来源分、命中的标签 / 作者、是不是关注 / 老片 / 探索位。
      * 实时重排靠它在**原来的完整得分**上更新口味，而不是把第一次排序的信息全扔掉；
      * 「为什么推荐给我」也读这里。
+     *
+     * **有界 LRU**，不是“到 2001 条整张清空”：清空会让当前屏幕上那些视频突然说不出
+     * 自己为什么被推荐。按最近用到的顺序淘汰，屏幕上正在看的那些自然最后才被挤掉。
      */
-    private val candidates = java.util.concurrent.ConcurrentHashMap<String, RecommendationCandidate>()
+    private val candidates: MutableMap<String, RecommendationCandidate> = java.util.Collections.synchronizedMap(
+        object : LinkedHashMap<String, RecommendationCandidate>(256, 0.75f, true) {
+            override fun removeEldestEntry(eldest: MutableMap.MutableEntry<String, RecommendationCandidate>?): Boolean =
+                size > MAX_TRACKED_CANDIDATES
+        }
+    )
+
+    /**
+     * 当前是第几轮推荐。每次完整刷新 +1，候选带着它，见 [RecommendationCandidate.generation]。
+     */
+    @Volatile var generation: Int = 0
+        private set
+
+    /** 开始新一轮推荐：之后记下的候选都属于新一轮，旧一轮的信息不再被沿用。 */
+    fun startGeneration() { generation += 1 }
 
     /** 「为什么推荐给我」：这条视频是怎么被选出来的。没记录就返回 null。 */
     fun reasonFor(videoId: String): String? = candidates[videoId]?.reason()
@@ -32,7 +49,10 @@ class RecommendationRanker(private val random: Random = Random()) {
 
     /** 记下一条候选（老片池、官方榜单回退这些不走 [rank] 的路径用）。 */
     fun remember(item: VideoItem, configure: (RecommendationCandidate) -> Unit) {
-        val candidate = candidates.getOrPut(item.id) { RecommendationCandidate(item) }
+        val known = candidates[item.id]
+        // 上一轮留下的那条不能接着用：来源分、命中标签、“探索位 / 老片”标记全是上一轮的。
+        val candidate = if (known != null && known.generation == generation) known
+        else RecommendationCandidate(item, generation = generation).also { candidates[item.id] = it }
         if (candidate.baseQuality == 0.0) candidate.baseQuality = qualityScore(item.likes, item.views)
         configure(candidate)
     }
@@ -45,10 +65,10 @@ class RecommendationRanker(private val random: Random = Random()) {
     fun rank(merged: Map<String, RecommendationCandidate>): List<VideoItem> {
         val taste = profile
         val now = System.currentTimeMillis()
-        if (candidates.size > MAX_TRACKED_CANDIDATES) candidates.clear()
         merged.values.forEach { candidate ->
             // 站方数据：平滑点赞率 + 热度，见 qualityScore。
             candidate.baseQuality = qualityScore(candidate.item.likes, candidate.item.views)
+            candidate.generation = generation
             candidates[candidate.item.id] = candidate
         }
         return hardMuteFilter(merged.values.map { it.item }, taste).sortedByDescending { scoreOf(it, taste, now) }
@@ -345,7 +365,7 @@ class RecommendationRanker(private val random: Random = Random()) {
         const val MIN_RECENT_FEED = 24
         /** 一次最多产出多少条推荐。 */
         const val MAX_RESULTS = 80
-        /** 候选表最多记这么多条；超了整张清掉（只是少了推荐理由，不影响推荐本身）。 */
+        /** 候选表最多记这么多条，按最近用到的顺序淘汰最老的那条。 */
         const val MAX_TRACKED_CANDIDATES = 2000
     }
 }

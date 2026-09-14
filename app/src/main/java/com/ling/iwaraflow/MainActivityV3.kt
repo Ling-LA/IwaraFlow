@@ -68,7 +68,12 @@ class MainActivityV3 : AppCompatActivity() {
     private val recommendFirstPage = 10
     /** 续页一次验证多少条候选：翻页频率和单页请求量的折中。 */
     private val recommendPageSize = 20
-    private val maxRecommendRefills = 3
+    /**
+     * 连着这么多次重新生成推荐都拿不到新内容，才退回官方榜单分页。
+     * 以前是“固定生成 3 批就降级”，刷得久的用户必然被踢出个性化推荐——
+     * 越刷越不懂你就是这么来的。降级的判据应该是“真的找不到新候选了”。
+     */
+    private val maxEmptyRefills = 2
 
     private data class FeedSession(
         val items: List<VideoItem>,
@@ -85,7 +90,8 @@ class MainActivityV3 : AppCompatActivity() {
 
     /** 推荐算法一次产出的剩余候选，推荐流翻页从这里取，取完再重新生成。 */
     private val recommendQueue = ArrayList<VideoItem>()
-    private var recommendRefills = 0
+    /** 连续几次重新生成推荐都没拿到新内容。拿到就归零。 */
+    private var emptyRefills = 0
 
     private val authorLauncher = registerForActivityResult(ActivityResultContracts.StartActivityForResult()) { result ->
         resumeAfterInternalPage()
@@ -128,8 +134,14 @@ class MainActivityV3 : AppCompatActivity() {
     private var pendingLocalUri: String? = null
     private var pendingTitle = ""
 
+    /**
+     * 从搜索页 / 作者页 / 关注列表回来。那几页里搜了什么、点开了谁、关注了谁都已经记进画像，
+     * 顺手把还没展示的推荐候选按新画像重排一次——跨页面学到的兴趣当场就能在主页看见，
+     * 而不是等下一次重新生成候选。
+     */
     private fun resumeAfterInternalPage() {
         openingInternalPage = false
+        rerankQueue()
     }
 
     override fun onCreate(savedInstanceState: Bundle?) {
@@ -330,7 +342,7 @@ class MainActivityV3 : AppCompatActivity() {
     private fun loadFeed(reset: Boolean) {
         if (reset) {
             currentPage = 0
-            recommendRefills = 0
+            emptyRefills = 0
             invalidateRequests()
             loading.visibility = View.VISIBLE
             error.visibility = View.GONE
@@ -377,7 +389,8 @@ class MainActivityV3 : AppCompatActivity() {
         // 弱网上每个候选都是一次额外往返，窗口再收一点，先把首屏放出来。
         val candidateWindow = if (reset) NetworkProfile.coldStartCandidates(this) else recommendPageSize
         val callback: (Result<List<VideoItem>>) -> Unit = { result ->
-            result.onSuccess { raw ->
+            result.onSuccess { official ->
+                prepareOfficialCandidates(official) { raw ->
                 playableGate.filterPlayable(raw, prefs.defaultQuality, maxItems = pageSize, maxCandidates = candidateWindow, onFirstBatch = head) { playable ->
                     runOnUiThread {
                         if (requestId != requestSerial) return@runOnUiThread
@@ -390,6 +403,7 @@ class MainActivityV3 : AppCompatActivity() {
                             if (adapter.itemCount == 0) showError(emptyMessage)
                         }
                     }
+                }
                 }
             }.onFailure {
                 runOnUiThread {
@@ -405,6 +419,16 @@ class MainActivityV3 : AppCompatActivity() {
         }
 
         api.getVideos(if (mode == "recommend") "trending" else mode, currentPage, pageSize, callback)
+    }
+
+    /**
+     * 推荐流回退到官方榜单时，官方候选也要过一遍本地这一套：排除已看 → 本地评分 →
+     * 作者打散。原样贴一页 trending 上来，等于这一页完全没有个性化。
+     * 其它几个榜单页（最新 / 流行 / 人气）是用户自己选的排序，不动。
+     */
+    private fun prepareOfficialCandidates(raw: List<VideoItem>, next: (List<VideoItem>) -> Unit) {
+        if (mode != "recommend" || raw.size < 2) { next(raw); return }
+        recommender.rankOfficial(raw, prefs.skipSeen) { ranked -> next(ranked) }
     }
 
     /**
@@ -564,21 +588,28 @@ class MainActivityV3 : AppCompatActivity() {
         }
     }
 
+    /**
+     * 重新生成一批推荐候选。只有**连着 [maxEmptyRefills] 次都一条新内容都拿不到**
+     * 才退回官方榜单，而不是按生成次数封顶；退回之后官方候选同样会走本地这一套
+     * （排除已看 → 本地评分 → 作者打散），见 [prepareOfficialCandidates]。
+     */
     private fun refillRecommendQueue(requestId: Int) {
-        if (recommendRefills >= maxRecommendRefills) {
+        if (emptyRefills >= maxEmptyRefills) {
+            note("连续 $emptyRefills 次没有新候选，回退官方榜单（仍按本地画像重排）")
             loadMoreOfficialPage()
             return
         }
-        recommendRefills += 1
         recommender.load(prefs.skipSeen) { result ->
             runOnUiThread {
                 if (requestId != requestSerial) return@runOnUiThread
                 val known = adapter.items.mapTo(HashSet<String>()) { it.id }
                 val fresh = result.getOrNull().orEmpty().filter { known.add(it.id) }
                 if (fresh.isEmpty()) {
-                    loadMoreOfficialPage()
+                    emptyRefills += 1
+                    if (emptyRefills >= maxEmptyRefills) loadMoreOfficialPage() else refillRecommendQueue(requestId)
                     return@runOnUiThread
                 }
+                emptyRefills = 0
                 recommendQueue.addAll(fresh)
                 loadMoreRecommend(requestId)
             }

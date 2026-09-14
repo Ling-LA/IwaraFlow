@@ -23,8 +23,12 @@ import android.widget.Toast
 object DislikeSheet {
     enum class Kind { VIDEO, AUTHOR, TAG }
 
-    /** 作者 / 标签的负反馈强度；标签在画像里按 0.45 折算，所以给得更重。 */
-    const val VIDEO_WEIGHT = -0.4
+    /**
+     * 作者 / 标签的负反馈强度；标签在画像里按 0.45 折算，所以给得更重。
+     * 视频那一档只压这一条视频本身（不落到作者和标签上），所以可以给得很重：
+     * 用户已经明说不想看它了，就别再出现。
+     */
+    const val VIDEO_WEIGHT = -6.0
     const val AUTHOR_WEIGHT = -2.5
     const val TAG_WEIGHT = -4.0
     const val MAX_TAGS = 8
@@ -103,7 +107,11 @@ object DislikeSheet {
     internal fun apply(context: Context, item: VideoItem, history: HistoryStore, kind: Kind, tag: String, onApplied: ((VideoItem, Kind) -> Unit)?) {
         when (kind) {
             Kind.VIDEO -> {
-                history.recordInteraction(item, "dislike_video", VIDEO_WEIGHT)
+                // 只记视频 id：这一行不带作者也不带标签，画像也只按视频维度算它。
+                history.recordInteraction(
+                    VideoItem(item.id, item.title, "", emptyList(), 0),
+                    HistoryStore.ACTION_DISLIKE_VIDEO, VIDEO_WEIGHT
+                )
                 Toast.makeText(context, "已跳过这条视频", Toast.LENGTH_SHORT).show()
             }
             Kind.AUTHOR -> {

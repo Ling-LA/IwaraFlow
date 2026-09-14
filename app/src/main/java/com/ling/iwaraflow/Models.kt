@@ -97,13 +97,18 @@ data class LoginResult(
 data class PreferenceProfile(
     val authorWeights: Map<String, Double>,
     val tagWeights: Map<String, Double>,
-    val authorIdWeights: Map<String, Double> = emptyMap()
+    val authorIdWeights: Map<String, Double> = emptyMap(),
+    /**
+     * 视频级反馈。「不感兴趣：当前视频」只压这一条视频，不碰作者也不碰它的标签——
+     * 用户说的是“我不想看这一条”，不是“我不喜欢这个作者和这十个标签”。
+     */
+    val videoWeights: Map<String, Double> = emptyMap()
 ) {
     fun score(item: VideoItem): Double {
         val byId = item.authorId.takeIf { it.isNotBlank() }?.let { authorIdWeights[it] }
         val author = byId ?: authorWeights[item.author.lowercase()] ?: 0.0
         val tags = item.tags.sumOf { tagWeights[it.lowercase()] ?: 0.0 }
-        return author + tags
+        return author + tags + (videoWeights[item.id] ?: 0.0)
     }
 
     /** 权重最高的几个标签（至少 [minWeight]），给个性化召回用。 */

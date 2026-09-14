@@ -66,6 +66,13 @@ class RecommendationEngine(
     /** 这一轮的口味画像，抽候选和打分共用一份。 */
     @Volatile private var profile: PreferenceProfile = PreferenceProfile(emptyMap(), emptyMap())
 
+    /**
+     * 候选的完整信息，按视频 id 记着：来源分、命中的标签 / 作者、是不是关注 / 老片 / 探索位。
+     * 实时重排靠它在**原来的完整得分**上更新口味，而不是把第一次排序的信息全扔掉；
+     * 「为什么推荐给我」也读这里。
+     */
+    private val candidates = java.util.concurrent.ConcurrentHashMap<String, RecommendationCandidate>()
+
     fun load(skipSeen: Boolean, callback: (Result<List<VideoItem>>) -> Unit) {
         io.execute {
             refreshFollowingInBackground()
@@ -89,15 +96,50 @@ class RecommendationEngine(
         }.onFailure { callback(items) }
     }
 
-    /** 重排的纯函数部分：质量 + 新鲜度 + 画像，和 [rank] 同一套口径（来源权重已经用过了，不再算）。 */
-    internal fun rerankBlocking(items: List<VideoItem>, taste: PreferenceProfile, now: Long): List<VideoItem> {
-        val ranked = items.sortedByDescending { item ->
-            val ageDays = if (item.createdAt > 0L) ((now - item.createdAt).coerceAtLeast(0L) / 86_400_000.0) else 30.0
-            qualityScore(item.likes, item.views) + 1.6 / (1.0 + ageDays / 30.0) +
-                taste.score(item).coerceIn(-6.0, 8.0) * 0.38 +
-                ((item.id.hashCode().toLong() and 0xffff) / 65535.0) * 0.15
-        }
-        return spreadAuthors(ranked)
+    /**
+     * 重排的纯函数部分，和 [rank] 是同一套口径：**来源分照旧算进去**。
+     * 以前这里只算质量 + 新鲜度 + 画像，于是用户点一次赞，整条队列就换了一套评分体系；
+     * 现在来源分从候选表里取回来（见 [candidates]），只有口味那一项跟着新画像变。
+     */
+    internal fun rerankBlocking(items: List<VideoItem>, taste: PreferenceProfile, now: Long): List<VideoItem> =
+        spreadAuthors(items.sortedByDescending { scoreOf(it, taste, now) })
+
+    /** 一条候选此刻的得分：来源 + 质量 + 新鲜度 + 画像 + 稳定抖动。 */
+    private fun scoreOf(item: VideoItem, taste: PreferenceProfile, now: Long): Double {
+        val ageDays = if (item.createdAt > 0L) ((now - item.createdAt).coerceAtLeast(0L) / 86_400_000.0) else 30.0
+        val known = candidates[item.id]
+        val quality = known?.baseQuality ?: qualityScore(item.likes, item.views)
+        return (known?.sourceScore ?: 0.0) + quality + 1.6 / (1.0 + ageDays / 30.0) +
+            taste.score(item).coerceIn(-6.0, 8.0) * 0.38 +
+            ((item.id.hashCode().toLong() and 0xffff) / 65535.0) * 0.15
+    }
+
+    /** 「为什么推荐给我」：这条视频是怎么被选出来的。没记录就返回 null。 */
+    fun reasonFor(videoId: String): String? = candidates[videoId]?.reason()
+
+    /**
+     * 回退到官方榜单时，官方候选也要走本地这一套：排除已看 → 本地评分 → 作者打散。
+     * 原样把 trending 首页贴上来，就是“越刷越不懂你”的由来。
+     */
+    fun rankOfficial(items: List<VideoItem>, skipSeen: Boolean, callback: (List<VideoItem>) -> Unit) {
+        if (items.size < 2) { callback(items); return }
+        runCatching {
+            io.execute {
+                val taste = runCatching { history.preferenceProfile() }.getOrNull()
+                val kept = if (!skipSeen) items else {
+                    val unseen = items.filter { runCatching { !history.isSeen(it.id) }.getOrDefault(true) }
+                    // 全看过就别把这一页也扔了，不然只剩空页可翻。
+                    if (unseen.isNotEmpty()) unseen else items
+                }
+                kept.forEach { item ->
+                    candidates.getOrPut(item.id) { RecommendationCandidate(item) }.also {
+                        it.sources += RecommendationCandidate.Source.OFFICIAL
+                        if (it.baseQuality == 0.0) it.baseQuality = qualityScore(item.likes, item.views)
+                    }
+                }
+                callback(if (taste == null) spreadAuthors(kept) else rerankBlocking(kept, taste, System.currentTimeMillis()))
+            }
+        }.onFailure { callback(items) }
     }
 
     /** 候选按“没看过 / 看过但没点赞 / 已点赞收藏”分三档，前面不够时才用后面的。 */
@@ -115,7 +157,7 @@ class RecommendationEngine(
             // 测试里的 mock 可能给 null，兜一下。
             profile = runCatching { history.preferenceProfile() }.getOrNull() ?: PreferenceProfile(emptyMap(), emptyMap())
             val deadline = System.nanoTime() + TimeUnit.MILLISECONDS.toNanos(listBudgetMs)
-            val merged = LinkedHashMap<String, Pair<VideoItem, Double>>()
+            val merged = LinkedHashMap<String, RecommendationCandidate>()
             // 哪些视频来自关注作者的订阅流——最后按位置插进结果里要用。
             val subscribed = HashSet<String>()
             val likedFuture = if (skipSeen && api.isLoggedIn()) {
@@ -199,6 +241,7 @@ class RecommendationEngine(
         if (buried.isEmpty() || open.isEmpty()) return feed
         val slots = (open.size / EXPLORE_EVERY).coerceAtLeast(1).coerceAtMost(buried.size)
         val explore = ArrayDeque(buried.take(slots))
+        explore.forEach { candidates[it.id]?.exploration = true }
         val rest = ArrayDeque(open)
         val out = ArrayList<VideoItem>(feed.size)
         while (rest.isNotEmpty()) {
@@ -308,6 +351,13 @@ class RecommendationEngine(
         val taken = feed.map { it.id }.toHashSet()
         val pool = ArrayDeque(classics.filter { taken.add(it.id) })
         if (pool.isEmpty()) return feed
+        pool.forEach { item ->
+            candidates.getOrPut(item.id) { RecommendationCandidate(item) }.also {
+                it.classic = true
+                it.sources += RecommendationCandidate.Source.CLASSICS
+                if (it.baseQuality == 0.0) it.baseQuality = qualityScore(item.likes, item.views)
+            }
+        }
         val out = ArrayList<VideoItem>(feed.size + pool.size)
         val rest = ArrayDeque(feed)
         while (rest.isNotEmpty()) {
@@ -402,9 +452,20 @@ class RecommendationEngine(
         depthCeiling.merge(sort, lowered) { old, new -> minOf(old, new) }
     }
 
+    /** 这一路召回叫什么名字，用来回答「为什么推荐给我」。 */
+    private fun sourceLabel(request: PageRequest): String = when {
+        request.sort == SUBSCRIBED -> RecommendationCandidate.Source.SUBSCRIBED
+        request.month.isNotBlank() -> RecommendationCandidate.Source.MONTH_TOP
+        request.sort.startsWith(TAG_PREFIX) -> RecommendationCandidate.Source.TAG
+        request.sort.startsWith(AUTHOR_PREFIX) -> RecommendationCandidate.Source.AUTHOR
+        request.sort == "trending" -> RecommendationCandidate.Source.TRENDING
+        request.sort == "popularity" -> RecommendationCandidate.Source.POPULARITY
+        else -> RecommendationCandidate.Source.DATE
+    }
+
     private fun mergeRound(
         pool: ExecutorService,
-        merged: LinkedHashMap<String, Pair<VideoItem, Double>>,
+        merged: LinkedHashMap<String, RecommendationCandidate>,
         subscribed: MutableSet<String>,
         round: Int,
         deadline: Long
@@ -439,47 +500,50 @@ class RecommendationEngine(
             val videos = response.videos
             if (videos.isEmpty()) { if (request.month.isBlank()) noteEmptyPage(request.sort, request.page); return@forEach }
             if (request.sort == SUBSCRIBED) videos.forEach { subscribed += it.id }
+            val label = sourceLabel(request)
             videos.forEachIndexed { index, item ->
                 val rankBonus = (PAGE_SIZE - index).coerceAtLeast(0) / PAGE_SIZE.toDouble()
                 // 后面几轮补进来的稍微让一让，但不按页码衰减——存档深处的页不比首页差，
                 // 只是更老，老不老交给下面的新鲜度去评。
                 val roundDecay = 1.0 / (1.0 + round * 0.18)
-                val previous = merged[item.id]
                 val sourceBoost = (request.weight + rankBonus * 0.8) * roundDecay
+                val previous = merged[item.id]
+                val candidate = previous ?: RecommendationCandidate(item).also { merged[item.id] = it }
                 if (previous == null) {
-                    merged[item.id] = item to sourceBoost
+                    candidate.sourceScore = sourceBoost
                 } else {
-                    merged[item.id] = previous.first to (previous.second + sourceBoost * 0.55)
-                    if (item.likes > previous.first.likes) previous.first.likes = item.likes
-                    if (item.liked) previous.first.liked = true
+                    // 多路召回都命中：加一点，但不是简单相加，不然沾到几路就压过内容本身。
+                    candidate.sourceScore += sourceBoost * 0.55
+                    if (item.likes > candidate.item.likes) candidate.item.likes = item.likes
+                    if (item.liked) candidate.item.liked = true
+                }
+                candidate.sources += label
+                when {
+                    request.sort.startsWith(TAG_PREFIX) -> candidate.matchedTags += request.sort.removePrefix(TAG_PREFIX)
+                    request.sort.startsWith(AUTHOR_PREFIX) -> candidate.matchedAuthorId = request.sort.removePrefix(AUTHOR_PREFIX)
+                    request.sort == SUBSCRIBED -> candidate.subscribed = true
                 }
             }
         }
     }
 
-    private fun rank(merged: Map<String, Pair<VideoItem, Double>>): List<VideoItem> {
+    /**
+     * 打分排序。分数由来源、站方质量、新鲜度和本地画像合成，见 [scoreOf]；
+     * 每条候选连同来源分一起记进 [candidates]，之后的实时重排才接得上同一套口径。
+     * 关注的作者不在这里加分——加分会让他们整片霸榜，改成排完序之后按位置插入。
+     */
+    private fun rank(merged: Map<String, RecommendationCandidate>): List<VideoItem> {
         val taste = profile
         val now = System.currentTimeMillis()
+        if (candidates.size > MAX_TRACKED_CANDIDATES) candidates.clear()
+        merged.values.forEach { candidate ->
+            // 站方数据：平滑点赞率 + 热度，见 qualityScore。
+            candidate.baseQuality = qualityScore(candidate.item.likes, candidate.item.views)
+            candidates[candidate.item.id] = candidate
+        }
         return merged.values
-            .asSequence()
-            .map { (item, sourceScore) ->
-                // 站方数据：平滑点赞率 + 热度，见 qualityScore。
-                val quality = qualityScore(item.likes, item.views)
-                val ageDays = if (item.createdAt > 0L) {
-                    ((now - item.createdAt).coerceAtLeast(0L) / 86_400_000.0)
-                } else 30.0
-                // 新片加分，但不能是断崖：候选现在有一大半来自存档，
-                // 按原来的曲线，一个月前的视频就已经被压到几乎没有分了。
-                val freshness = 1.6 / (1.0 + ageDays / 30.0)
-                // 本地画像：可正可负（很快划走的作者 / 标签会被压下去）。
-                val affinity = taste.score(item).coerceIn(-6.0, 8.0) * 0.38
-                val stableJitter = ((item.id.hashCode().toLong() and 0xffff) / 65535.0) * 0.15
-                // 关注的作者不在这里加分——加分会让他们整片霸榜。改成排完序之后按位置插入。
-                item to (sourceScore + quality + freshness + affinity + stableJitter)
-            }
-            .sortedByDescending { it.second }
-            .map { it.first }
-            .toList()
+            .map { it.item }
+            .sortedByDescending { scoreOf(it, taste, now) }
     }
 
     /**
@@ -538,26 +602,35 @@ class RecommendationEngine(
         return buckets
     }
 
-    /** 关注列表只用来加分，慢一点没关系，别挡着首屏。 */
+    /**
+     * 关注列表只用来加分，慢一点没关系，别挡着首屏。
+     *
+     * **同步成功但一个都没有**（全部取关了）和**同步失败**必须分开：以前只有
+     * `ids.isNotEmpty()` 才写回缓存，于是取关之后旧的关注名单还留着，那些作者仍被
+     * 当成“已关注”。现在只要这一次同步真的跑通了，空名单也照样写回去。
+     */
     private fun refreshFollowingInBackground() {
         if (followingRunning || !api.isLoggedIn()) return
-        if (System.currentTimeMillis() - followingSyncedAt < FOLLOWING_TTL_MS && followingIds.isNotEmpty()) return
+        if (followingSyncedAt > 0L && System.currentTimeMillis() - followingSyncedAt < FOLLOWING_TTL_MS) return
         followingRunning = true
         runCatching {
             followingIo.execute {
                 try {
                     val me = runCatching { api.getCurrentUserBlocking() }.getOrNull()
                     val ids = LinkedHashSet<String>()
+                    var synced = false
                     if (me != null && me.id.isNotBlank()) {
+                        synced = true
                         var page = 0
                         while (page < MAX_FOLLOWING_PAGES) {
-                            val result = runCatching { api.getFollowingPageBlocking(me.id, page) }.getOrNull() ?: break
+                            val result = runCatching { api.getFollowingPageBlocking(me.id, page) }.getOrNull()
+                            if (result == null) { synced = false; break }
                             result.users.forEach { author -> if (author.id.isNotBlank()) ids += author.id }
                             if (!result.hasMore) break
                             page += 1
                         }
                     }
-                    if (ids.isNotEmpty()) {
+                    if (synced) {
                         followingIds = ids
                         followingSyncedAt = System.currentTimeMillis()
                     }
@@ -568,12 +641,44 @@ class RecommendationEngine(
         }.onFailure { followingRunning = false }
     }
 
+    /**
+     * 刚在作者页 / 视频流里点了关注 / 取关：立刻改名单，不用等最长 6 小时的缓存过期。
+     * 下一次装配推荐流时这位作者就按新状态处理。
+     */
+    fun noteFollowChanged(authorId: String, following: Boolean) {
+        if (authorId.isBlank()) return
+        val next = LinkedHashSet(followingIds)
+        if (following) next += authorId else next -= authorId
+        followingIds = next
+    }
+
+    private val followListener: (String, Boolean) -> Unit = ::noteFollowChanged
+
+    init {
+        followListeners += followListener
+    }
+
+    /** 测试用：当前认定的已关注作者。 */
+    internal fun followedAuthorIds(): Set<String> = followingIds
+
     fun close() {
+        followListeners.remove(followListener)
         io.shutdownNow()
         followingIo.shutdownNow()
     }
 
     companion object {
+        /**
+         * 关注状态变了就喊一声：作者页、视频流里的关注按钮、从作者页带回来的结果都走这里，
+         * 正在活着的推荐引擎立刻更新自己的关注名单（原来要等最长 6 小时的缓存过期）。
+         */
+        private val followListeners = java.util.concurrent.CopyOnWriteArrayList<(String, Boolean) -> Unit>()
+
+        fun notifyFollowChanged(authorId: String, following: Boolean) {
+            if (authorId.isBlank()) return
+            followListeners.forEach { runCatching { it(authorId, following) } }
+        }
+
         /** 首轮一定会取的榜单首页。 */
         private val RANKINGS = listOf(
             "trending" to 3.0,
@@ -639,6 +744,8 @@ class RecommendationEngine(
         const val MIN_FRESH_CANDIDATES = 12
         /** 最多再抽几轮找没看过的视频。 */
         const val MAX_EXTRA_ROUNDS = 3
+        /** 候选表最多记这么多条；超了整张清掉（只是少了推荐理由，不影响推荐本身）。 */
+        private const val MAX_TRACKED_CANDIDATES = 2000
         private const val MAX_FOLLOWING_PAGES = 40
         private const val FOLLOWING_TTL_MS = 6L * 60L * 60L * 1000L
         private const val DEFAULT_LIST_BUDGET_MS = 9_000L

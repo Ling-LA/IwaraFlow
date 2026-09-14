@@ -360,13 +360,14 @@ class HistoryStore(context: Context) : SQLiteOpenHelper(context, "iwaraflow.db",
         val author = HashMap<String, Double>()
         val authorIds = HashMap<String, Double>()
         val tags = HashMap<String, Double>()
+        val videos = HashMap<String, Double>()
         // 长期持续快速划走：同一作者 / 标签攒够 [LONG_TERM_SKIPS] 次划走，再额外压一层。
         val authorSkips = HashMap<String, Int>()
         val authorIdSkips = HashMap<String, Int>()
         val tagSkips = HashMap<String, Int>()
         readableDatabase.query(
             "interactions",
-            arrayOf("author", "tags", "weight", "created_at", "author_id", "action"),
+            arrayOf("author", "tags", "weight", "created_at", "author_id", "action", "video_id"),
             null, null, null, null, "created_at DESC", PROFILE_ROWS.toString()
         ).use { c ->
             while (c.moveToNext()) {
@@ -376,6 +377,12 @@ class HistoryStore(context: Context) : SQLiteOpenHelper(context, "iwaraflow.db",
                 val decay = 1.0 / (1.0 + ageDays / 30.0)
                 val session = if (now - at <= SESSION_WINDOW_MS && action != ACTION_CLOUD_LIKE) SESSION_BOOST else 1.0
                 val w = c.getDouble(2) * decay * session
+                // 「不感兴趣：当前视频」是视频级的：只压这一条，不落到作者和标签上。
+                if (action == ACTION_DISLIKE_VIDEO) {
+                    val videoId = c.getString(6).orEmpty()
+                    if (videoId.isNotBlank()) videos[videoId] = (videos[videoId] ?: 0.0) + w
+                    continue
+                }
                 val a = c.getString(0).lowercase()
                 val id = c.getString(4).orEmpty()
                 val itemTags = splitTags(c.getString(1)).map { it.lowercase() }
@@ -392,7 +399,7 @@ class HistoryStore(context: Context) : SQLiteOpenHelper(context, "iwaraflow.db",
         authorSkips.forEach { (key, n) -> if (n >= LONG_TERM_SKIPS) author[key] = (author[key] ?: 0.0) - LONG_TERM_AUTHOR_PENALTY }
         authorIdSkips.forEach { (key, n) -> if (n >= LONG_TERM_SKIPS) authorIds[key] = (authorIds[key] ?: 0.0) - LONG_TERM_AUTHOR_PENALTY }
         tagSkips.forEach { (key, n) -> if (n >= LONG_TERM_SKIPS) tags[key] = (tags[key] ?: 0.0) - LONG_TERM_TAG_PENALTY }
-        return PreferenceProfile(author, tags, authorIds)
+        return PreferenceProfile(author, tags, authorIds, videos)
     }
 
     /**
@@ -419,6 +426,8 @@ class HistoryStore(context: Context) : SQLiteOpenHelper(context, "iwaraflow.db",
         const val SESSION_BOOST = 2.5
         /** 快速划走的动作名；同一作者 / 标签在画像窗口里攒到这么多次就额外压一层。 */
         const val ACTION_SKIP = "skip"
+        /** 「不感兴趣：当前视频」。只作用于这条视频本身，见 [preferenceProfileAt]。 */
+        const val ACTION_DISLIKE_VIDEO = "dislike_video"
         const val LONG_TERM_SKIPS = 5
         const val LONG_TERM_AUTHOR_PENALTY = 1.5
         const val LONG_TERM_TAG_PENALTY = 0.8

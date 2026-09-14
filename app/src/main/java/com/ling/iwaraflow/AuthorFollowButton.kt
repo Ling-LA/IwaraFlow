@@ -125,6 +125,8 @@ class AuthorFollowButton @JvmOverloads constructor(
 
     private fun updateAuthorState(adapter: VideoAdapter, item: VideoItem, following: Boolean) {
         item.authorFollowing = following
+        // 推荐引擎立刻知道：关注的作者按位置插入，不用等关注名单缓存过期。
+        RecommendationEngine.notifyFollowChanged(item.authorId, following)
         val authorKey = item.authorId.ifBlank { item.authorUsername }
         adapter.items.forEach { candidate ->
             val candidateKey = candidate.authorId.ifBlank { candidate.authorUsername }

@@ -380,6 +380,8 @@ class AuthorActivity : AppCompatActivity() {
                 result.onSuccess {
                     a.following = desired
                     refreshRelationUi()
+                    // 推荐引擎立刻更新关注名单，不用等缓存过期。
+                    RecommendationEngine.notifyFollowChanged(a.id, desired)
                     // 关注是很强的兴趣信号（取关则反过来压一点）。
                     val card = VideoItem("author:${a.id}", a.name, a.name, emptyList(), 0, authorId = a.id)
                     history.recordInteraction(card, if (desired) "follow" else "unfollow", if (desired) 1.5 else -1.0)

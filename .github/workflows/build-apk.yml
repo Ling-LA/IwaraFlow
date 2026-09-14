@@ -22,6 +22,9 @@ jobs:
           distribution: temurin
           java-version: '21'
       - uses: android-actions/setup-android@v3
+        with:
+          # 新的 cmdline-tools 里已经没有 tools 这个包，action 的默认值会让整步失败。
+          packages: 'platform-tools'
       - uses: gradle/actions/setup-gradle@v4
         with:
           gradle-version: '8.13'
@@ -73,6 +76,8 @@ jobs:
 
       - name: Set up Android SDK
         uses: android-actions/setup-android@v3
+        with:
+          packages: 'platform-tools'
 
       - name: Install Android 36 SDK
         run: yes | sdkmanager "platforms;android-36" "build-tools;36.0.0"

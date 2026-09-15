@@ -7,7 +7,7 @@ package com.ling.iwaraflow
  * 而不是从头重新拉一遍——刷了二十条之后切去看一眼热门，回来又从第一条开始，
  * 是很容易让人恼火的那种“小事”。
  *
- * 从 [MainActivityV3] 里拆出来的一块（文档第 20 项）：只是一份内存里的现场记录，
+ * 从 [MainActivityV3] 里独立出来的一块：只是一份内存里的现场记录，
  * 不碰界面也不碰网络。
  */
 class FeedSessionStore {

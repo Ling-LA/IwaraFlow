@@ -814,7 +814,9 @@ class HistoryStore(context: Context) : SQLiteOpenHelper(context, "iwaraflow.db",
                 // 后面的推荐就该马上跟上。加成按 [SESSION_BOOST] − 1 补，和以前的总量一致。
                 val inSession = now - at <= SESSION_WINDOW_MS && action != ACTION_CLOUD_LIKE
                 val share = when {
-                    !countsTowardLongTerm(action) -> 1.0
+                    // 不进长期画像的那几类（搜索的短期意图、官方点赞种子、视频级反馈）
+                    // 完整算在窗口这边，当前兴趣加成照旧。
+                    !countsTowardLongTerm(action) -> if (inSession) SESSION_BOOST else 1.0
                     inSession -> SESSION_BOOST - 1.0
                     else -> 0.0
                 }

@@ -15,7 +15,7 @@ class WatchInterestTest {
         repeated: Boolean = false,
         rewound: Boolean = false,
         reacted: Boolean = false
-    ) = VideoAdapter.watchInterest(
+    ) = WatchInteractionTracker.watchInterest(
         playedMs = (seconds * 1000).toLong(),
         durationMs = (durationSeconds * 1000).toLong(),
         completed = completed, repeated = repeated, rewound = rewound, reacted = reacted
@@ -62,7 +62,7 @@ class WatchInterestTest {
 
     /** 接口没给时长时只按时间算，不该出错。 */
     @Test fun anUnknownDurationStillWorks() {
-        assertTrue(VideoAdapter.watchInterest(playedMs = 60_000L, durationMs = 0L) > 0)
-        assertTrue(VideoAdapter.watchInterest(playedMs = 0L, durationMs = 0L) < 0)
+        assertTrue(WatchInteractionTracker.watchInterest(playedMs = 60_000L, durationMs = 0L) > 0)
+        assertTrue(WatchInteractionTracker.watchInterest(playedMs = 0L, durationMs = 0L) < 0)
     }
 }

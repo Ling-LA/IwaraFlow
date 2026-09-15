@@ -361,6 +361,21 @@ class MainActivityV3 : AppCompatActivity() {
      * 要到第二次刷新才像认识你。这里只等第一页（最多 50 个点赞）种进画像，
      * 剩下的照旧交给后台同步。等太久也不行，所以给它一个上限，到点就照常刷新。
      */
+    /**
+     * 退出登录：账号级的东西一起放下——账号 id、关注名单缓存，以及
+     * [HistoryStore] 里那份“云端数据属于谁”的作用域。本机自己的浏览记录、
+     * 收藏、不感兴趣是设备级的，照旧留着。
+     */
+    private fun logOut() {
+        api.logout()
+        prefs.accountId = ""
+        prefs.likedSyncAt = 0L
+        history.accountId = ""
+        RecommendationEngine.notifyAccountChanged("")
+        Toast.makeText(this, "已退出登录", Toast.LENGTH_SHORT).show()
+        loadFeed(reset = true)
+    }
+
     private fun seedThenReload() {
         loading.visibility = View.VISIBLE
         val started = java.util.concurrent.atomic.AtomicBoolean(false)
@@ -850,7 +865,7 @@ class MainActivityV3 : AppCompatActivity() {
         val items = arrayOf(account, "浏览历史", "我的收藏", "已下载", "已关注用户", "设置", "检查更新", "重新加载当前流")
         val dialog = AlertDialog.Builder(this).setTitle("IwaraFlow").setItems(items) { _, which ->
             when (which) {
-                0 -> if (api.isLoggedIn()) { api.logout(); Toast.makeText(this, "已退出登录", Toast.LENGTH_SHORT).show(); loadFeed(reset = true) } else showLoginDialog()
+                0 -> if (api.isLoggedIn()) { logOut() } else showLoginDialog()
                 1 -> openSavedVideos(SavedVideosActivity.KIND_HISTORY)
                 2 -> openSavedVideos(SavedVideosActivity.KIND_FAVORITES)
                 3 -> openSavedVideos(SavedVideosActivity.KIND_DOWNLOADS)

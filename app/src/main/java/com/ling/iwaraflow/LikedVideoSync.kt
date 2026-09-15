@@ -54,8 +54,9 @@ class LikedVideoSync(
         runCatching {
             io.execute {
                 runCatching {
+                    val account = resolveAccount()
                     val first = api.getFavoritesPageBlocking(0)
-                    history.markSeen(first.videos.map { it.id })
+                    history.markSeen(first.videos.map { it.id }, account = account)
                     history.seedCloudLikes(first.videos)
                 }
                 if (!closed) onDone()
@@ -63,13 +64,32 @@ class LikedVideoSync(
         }.onFailure { onDone() }
     }
 
+    /**
+     * 认一下现在登录的是谁，把账号 id 写进偏好和 [HistoryStore.accountId]。
+     *
+     * 官方点赞和关注名单是**账号级**的：换个账号登录，上一个账号的点赞不该
+     * 继续当口味用，它点过的视频对新账号也不该算“已看”。账号变了就把关注缓存
+     * 也清掉，不然 6 小时内新账号看到的还是上一个账号关注的人。
+     */
+    private fun resolveAccount(): String {
+        val id = runCatching { api.getCurrentUserBlocking().id }.getOrNull()?.takeIf { it.isNotBlank() }
+            ?: return prefs.accountId
+        if (id != prefs.accountId) {
+            prefs.accountId = id
+            RecommendationEngine.notifyAccountChanged(id)
+        }
+        history.accountId = id
+        return id
+    }
+
     /** 返回这次标记的点赞条数。中途失败不写时间戳，下次启动会重来。 */
     fun syncBlocking(): Int {
         var page = 0
         var marked = 0
+        val account = resolveAccount()
         while (!closed && page < MAX_PAGES) {
             val result = runCatching { api.getFavoritesPageBlocking(page) }.getOrNull() ?: return marked
-            history.markSeen(result.videos.map { it.id })
+            history.markSeen(result.videos.map { it.id }, account = account)
             // 最近的几百个点赞同时作为口味画像的种子（作者、标签），新装的用户马上有偏好可推。
             if (page < SEED_PAGES) history.seedCloudLikes(result.videos)
             marked += result.videos.size

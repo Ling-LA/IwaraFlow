@@ -3,7 +3,7 @@ package com.ling.iwaraflow
 import android.content.Context
 
 class AppPrefs(context: Context) {
-    private val prefs = context.getSharedPreferences("iwara_flow_prefs", Context.MODE_PRIVATE)
+    private val prefs = context.getSharedPreferences(FILE, Context.MODE_PRIVATE)
 
     /**
      * 密钥类的东西（翻译 / AI 的 API Key、百度 APP ID、自定义 Authorization 头）
@@ -43,6 +43,17 @@ class AppPrefs(context: Context) {
     var likedSyncAt: Long
         get() = prefs.getLong("liked_sync_at", 0L)
         set(value) = prefs.edit().putLong("liked_sync_at", value).apply()
+
+    /**
+     * 当前登录的 Iwara 账号 id（公开 id，不是密钥，所以放普通偏好）。
+     *
+     * 从云端导进来的东西（官方点赞、关注名单）是**账号级**的，不是这台设备的：
+     * 换个账号登录，上一个账号的点赞不该继续当作口味，也不该把视频算成已看。
+     * 本机自己产生的行为（看了多久、本地收藏、不感兴趣）照旧是设备级的。
+     */
+    var accountId: String
+        get() = prefs.getString(KEY_ACCOUNT_ID, "").orEmpty()
+        set(value) = prefs.edit().putString(KEY_ACCOUNT_ID, value).apply()
 
     /**
      * 点一下画面是不是暂停播放。关掉之后点一下只在「信息栏 / 操作栏」和
@@ -120,6 +131,10 @@ class AppPrefs(context: Context) {
         const val DEFAULT_SKIP_SECONDS = 15
         /** 密钥已经搬进加密存储的标记。 */
         private const val SECRETS_MIGRATED = "secrets_migrated_v1"
+        /** 普通偏好的文件名。[HistoryStore] 也要读其中的账号 id，所以放出来。 */
+        const val FILE = "iwara_flow_prefs"
+        /** 当前登录账号 id 的键，见 [accountId]。 */
+        const val KEY_ACCOUNT_ID = "account_id"
     }
 
     /** 手动代理。类型是 [NetworkProxy.TYPE_NONE] / TYPE_HTTP / TYPE_SOCKS。 */
@@ -138,4 +153,5 @@ class AppPrefs(context: Context) {
     var autoPip: Boolean
         get() = prefs.getBoolean("auto_pip", true)
         set(value) = prefs.edit().putBoolean("auto_pip", value).apply()
+
 }

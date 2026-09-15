@@ -35,6 +35,13 @@ class RecommendationEngine(
     @Volatile private var followingIds: Set<String> = emptySet()
     @Volatile private var followingSyncedAt = 0L
     @Volatile private var followingRunning = false
+    /**
+     * 这份关注名单是**哪个 Iwara 账号**的。
+     *
+     * 名单以前没挂账号：登录 A、同步完 A 的关注，退出再登录 B，缓存没到 6 小时，
+     * B 看到的“你关注的作者更新了”其实全是 A 关注的人。账号对不上就作废重来。
+     */
+    @Volatile private var followingAccountId: String = ""
     /** 每个榜单实际能翻到第几页：优先由服务端回报的总条数算出，见 noteTotal。 */
     private val depthCeiling = java.util.concurrent.ConcurrentHashMap<String, Int>()
 
@@ -164,7 +171,8 @@ class RecommendationEngine(
                 val remaining = deadline - System.nanoTime()
                 val liked = if (remaining <= 0L) null
                 else runCatching { f.get(remaining, TimeUnit.NANOSECONDS) }.getOrNull()
-                liked?.forEach { item -> history.markSeen(item.id) }
+                // 官方点赞是账号级的：这批已看只对当前账号算数，换账号不该跟着走。
+                liked?.let { runCatching { history.markSeen(it.map { v -> v.id }, account = history.accountId) } }
             }
 
             if (!skipSeen) {
@@ -468,6 +476,11 @@ class RecommendationEngine(
                     val ids = LinkedHashSet<String>()
                     var synced = false
                     if (me != null && me.id.isNotBlank()) {
+                        // 换账号了：上一个账号的名单先作废，别在这一轮里混着用。
+                        if (me.id != followingAccountId) {
+                            followingAccountId = me.id
+                            followingIds = emptySet()
+                        }
                         synced = true
                         var page = 0
                         while (page < MAX_FOLLOWING_PAGES) {
@@ -500,10 +513,23 @@ class RecommendationEngine(
         followingIds = next
     }
 
+    /**
+     * 换了登录账号：关注名单是账号级的，立刻丢掉，下一次刷新重新同步。
+     * 不能等 6 小时的缓存过期——那段时间里新账号看到的是上一个账号关注的人。
+     */
+    fun noteAccountChanged(accountId: String) {
+        if (accountId == followingAccountId) return
+        followingAccountId = accountId
+        followingIds = emptySet()
+        followingSyncedAt = 0L
+    }
+
     private val followListener: (String, Boolean) -> Unit = ::noteFollowChanged
+    private val accountListener: (String) -> Unit = ::noteAccountChanged
 
     init {
         followListeners += followListener
+        accountListeners += accountListener
     }
 
     /** 测试用：当前认定的已关注作者。 */
@@ -511,6 +537,7 @@ class RecommendationEngine(
 
     fun close() {
         followListeners.remove(followListener)
+        accountListeners.remove(accountListener)
         io.shutdownNow()
         followingIo.shutdownNow()
     }
@@ -525,6 +552,13 @@ class RecommendationEngine(
         fun notifyFollowChanged(authorId: String, following: Boolean) {
             if (authorId.isBlank()) return
             followListeners.forEach { runCatching { it(authorId, following) } }
+        }
+
+        /** 登录 / 退出 / 换账号时喊一声：关注名单是账号级的，活着的引擎立刻作废自己那份。 */
+        private val accountListeners = java.util.concurrent.CopyOnWriteArrayList<(String) -> Unit>()
+
+        fun notifyAccountChanged(accountId: String) {
+            accountListeners.forEach { runCatching { it(accountId) } }
         }
 
         /** 首轮一定会取的榜单首页。 */

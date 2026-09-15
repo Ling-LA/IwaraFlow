@@ -76,8 +76,10 @@ class NavigationDeviceTest {
         main {
             val video = VideoItem("author-navigation", "Author fixture", "Fixture author", emptyList(), 0,
                 sources = listOf(VideoSource("fixture", "https://127.0.0.1:1/fixture", 1)))
+            // 作者页现在只留一份作品列表，"能播的" 是从它里面筛出来的（playbackIssue 为空），
+            // 所以夹具直接进 works 就行。
             @Suppress("UNCHECKED_CAST")
-            (field(author, "playableWorks") as MutableList<VideoItem>).add(video)
+            (field(author, "works") as MutableList<VideoItem>).add(video)
             invoke(author, "openWork", video)
         }
         instrumentation.waitForIdleSync()

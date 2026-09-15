@@ -16,7 +16,7 @@ data class MutedEntities(
     val tags: Set<String> = emptySet()
 )
 
-class HistoryStore(context: Context) : SQLiteOpenHelper(context, "iwaraflow.db", null, 7) {
+class HistoryStore(context: Context) : SQLiteOpenHelper(context, "iwaraflow.db", null, 8) {
     /**
      * **UI 线程不写库**。划一条视频要写好几笔（观看记录、行为、已看标记），
      * 而这些方法都是 `@Synchronized` 的——和后台算画像抢同一把锁，用久了就是划走那一下的微卡顿。
@@ -26,6 +26,19 @@ class HistoryStore(context: Context) : SQLiteOpenHelper(context, "iwaraflow.db",
         Thread(r, "IwaraFlow-history-write").apply { isDaemon = true }
     }
     @Volatile private var closed = false
+
+    /**
+     * 当前登录的 Iwara 账号 id，页面在启动和登录时写进来（见 [AppPrefs.accountId]）。
+     *
+     * 只影响**从云端导进来的**那部分数据：官方点赞种子、同步进来的已看标记。
+     * 本机自己的行为（看了多久、本地收藏、不感兴趣）永远是设备级的，不带账号。
+     * 空串表示没登录 / 还不知道是谁——那就只认设备级的数据。
+     * 构造时直接从偏好里读一份，这样每个页面各自 new 出来的库都已经知道现在是谁。
+     */
+    @Volatile var accountId: String = runCatching {
+        context.getSharedPreferences(AppPrefs.FILE, Context.MODE_PRIVATE)
+            .getString(AppPrefs.KEY_ACCOUNT_ID, "").orEmpty()
+    }.getOrDefault("")
 
     /** 把一次写库交给写线程。页面已经销毁（写队列关掉了）就丢掉，不抛异常。 */
     fun post(block: () -> Unit) {
@@ -97,14 +110,16 @@ class HistoryStore(context: Context) : SQLiteOpenHelper(context, "iwaraflow.db",
                 tags TEXT NOT NULL,
                 weight REAL NOT NULL,
                 created_at INTEGER NOT NULL,
-                author_id TEXT NOT NULL DEFAULT ''
+                author_id TEXT NOT NULL DEFAULT '',
+                account_id TEXT NOT NULL DEFAULT ''
             )""".trimIndent()
         )
         db.execSQL(
             """CREATE TABLE seen_videos(
                 video_id TEXT PRIMARY KEY,
                 first_seen_at INTEGER NOT NULL,
-                last_seen_at INTEGER NOT NULL
+                last_seen_at INTEGER NOT NULL,
+                account_id TEXT NOT NULL DEFAULT ''
             )""".trimIndent()
         )
         db.execSQL(DOWNLOADS_TABLE)
@@ -153,6 +168,17 @@ class HistoryStore(context: Context) : SQLiteOpenHelper(context, "iwaraflow.db",
             // 拉黑是**显式**的意思表示，只有兴趣管理里的“恢复”能解除，不该被时间冲掉。
             db.execSQL(MUTED_TABLE)
             backfillMutes(db)
+        }
+        if (oldVersion < 8) {
+            // 7 → 8：从云端导进来的数据挂到账号上。
+            // 以前官方点赞和同步进来的已看标记都是设备级的，换个账号登录，
+            // 上一个账号的点赞还在当口味用，它点过的视频对新账号也算“已看”。
+            for (table in listOf("interactions", "seen_videos")) {
+                try { db.execSQL("ALTER TABLE $table ADD COLUMN account_id TEXT NOT NULL DEFAULT ''") } catch (_: Throwable) { }
+            }
+            // 已经存在的官方点赞种子不知道属于谁，留着就等于继续串。直接删掉，
+            // 下次同步会在正确的账号下重新种一遍（页面会把 likedSyncAt 清零）。
+            try { db.execSQL("DELETE FROM interactions WHERE action='$ACTION_CLOUD_LIKE'") } catch (_: Throwable) { }
         }
     }
 
@@ -358,35 +384,39 @@ class HistoryStore(context: Context) : SQLiteOpenHelper(context, "iwaraflow.db",
     @Synchronized
     fun markSeen(videoId: String, timestamp: Long = System.currentTimeMillis()) {
         if (videoId.isBlank()) return
-        val db = writableDatabase
+        insertSeen(writableDatabase, videoId, timestamp, "")
+    }
+
+    /**
+     * 写一条已看。[account] 为空表示**这台设备上真的看过**（本机行为，永远算数）；
+     * 非空表示这是从某个账号的云端数据同步进来的，只对那个账号算数。
+     */
+    private fun insertSeen(db: SQLiteDatabase, videoId: String, timestamp: Long, account: String) {
         val initial = ContentValues().apply {
             put("video_id", videoId)
             put("first_seen_at", timestamp)
             put("last_seen_at", timestamp)
+            put("account_id", account)
         }
         db.insertWithOnConflict("seen_videos", null, initial, SQLiteDatabase.CONFLICT_IGNORE)
         val update = ContentValues().apply { put("last_seen_at", timestamp) }
+        // 只更新时间：本机看过的那一行不该被后来的同步改成账号级，反过来也一样。
         db.update("seen_videos", update, "video_id=?", arrayOf(videoId))
     }
 
     /** 一次写入一批已看 ID：同步几百条官方点赞时按单条写会很慢。 */
     @Synchronized
-    fun markSeen(videoIds: Collection<String>, timestamp: Long = System.currentTimeMillis()) {
+    fun markSeen(
+        videoIds: Collection<String>,
+        timestamp: Long = System.currentTimeMillis(),
+        account: String = ""
+    ) {
         val ids = videoIds.filter { it.isNotBlank() }
         if (ids.isEmpty()) return
         val db = writableDatabase
         db.beginTransaction()
         try {
-            ids.forEach { id ->
-                val initial = ContentValues().apply {
-                    put("video_id", id)
-                    put("first_seen_at", timestamp)
-                    put("last_seen_at", timestamp)
-                }
-                db.insertWithOnConflict("seen_videos", null, initial, SQLiteDatabase.CONFLICT_IGNORE)
-                db.update("seen_videos", ContentValues().apply { put("last_seen_at", timestamp) },
-                    "video_id=?", arrayOf(id))
-            }
+            ids.forEach { id -> insertSeen(db, id, timestamp, account) }
             db.setTransactionSuccessful()
         } finally {
             db.endTransaction()
@@ -396,8 +426,8 @@ class HistoryStore(context: Context) : SQLiteOpenHelper(context, "iwaraflow.db",
     @Synchronized
     fun isSeen(videoId: String): Boolean {
         readableDatabase.query(
-            "seen_videos", arrayOf("video_id"), "video_id=?", arrayOf(videoId),
-            null, null, null, "1"
+            "seen_videos", arrayOf("video_id"), "video_id=? AND $ACCOUNT_SCOPE",
+            arrayOf(videoId, accountId), null, null, null, "1"
         ).use { if (it.moveToFirst()) return true }
 
         readableDatabase.query(
@@ -441,11 +471,14 @@ class HistoryStore(context: Context) : SQLiteOpenHelper(context, "iwaraflow.db",
         ids.chunked(STATUS_BATCH).forEach { batch ->
             val placeholders = batch.joinToString(",") { "?" }
             val args = batch.toTypedArray()
-            fun collect(table: String, into: MutableSet<String>) {
-                db.query(table, arrayOf("video_id"), "video_id IN ($placeholders)", args, null, null, null)
+            fun collect(table: String, into: MutableSet<String>, scoped: Boolean = false) {
+                val where = if (scoped) "video_id IN ($placeholders) AND $ACCOUNT_SCOPE" else "video_id IN ($placeholders)"
+                val params = if (scoped) args + accountId else args
+                db.query(table, arrayOf("video_id"), where, params, null, null, null)
                     .use { c -> while (c.moveToNext()) into += c.getString(0) }
             }
-            collect("seen_videos", seen)
+            // 别的账号同步进来的“已看”不算数，本机真的看过的（account_id 为空）永远算数。
+            collect("seen_videos", seen, scoped = true)
             // 老版本只写了 history，没有 seen_videos 的那批也算看过。
             collect("history", seen)
             collect("favorites", favorites)
@@ -506,11 +539,13 @@ class HistoryStore(context: Context) : SQLiteOpenHelper(context, "iwaraflow.db",
             items.forEach { item ->
                 if (item.id.isBlank()) return@forEach
                 val exists = db.query(
-                    "interactions", arrayOf("id"), "video_id=? AND action=?", arrayOf(item.id, ACTION_CLOUD_LIKE),
+                    "interactions", arrayOf("id"), "video_id=? AND action=? AND account_id=?",
+                    arrayOf(item.id, ACTION_CLOUD_LIKE, accountId),
                     null, null, null, "1"
                 ).use { it.moveToFirst() }
                 if (exists) return@forEach
-                db.insert("interactions", null, interactionValues(item, ACTION_CLOUD_LIKE, CLOUD_LIKE_WEIGHT, now))
+                db.insert("interactions", null,
+                    interactionValues(item, ACTION_CLOUD_LIKE, CLOUD_LIKE_WEIGHT, now, accountId))
                 added++
             }
             db.setTransactionSuccessful()
@@ -521,7 +556,10 @@ class HistoryStore(context: Context) : SQLiteOpenHelper(context, "iwaraflow.db",
         return added
     }
 
-    private fun interactionValues(item: VideoItem, action: String, weight: Double, now: Long): ContentValues {
+    /** [account] 只有云端导进来的行为才填（见 [accountId]），本机行为一律留空。 */
+    private fun interactionValues(
+        item: VideoItem, action: String, weight: Double, now: Long, account: String = ""
+    ): ContentValues {
         val values = ContentValues().apply {
             put("video_id", item.id)
             put("action", action)
@@ -530,6 +568,7 @@ class HistoryStore(context: Context) : SQLiteOpenHelper(context, "iwaraflow.db",
             put("tags", item.tags.joinToString("\u001F"))
             put("weight", weight)
             put("created_at", now)
+            put("account_id", account)
         }
         return values
     }
@@ -600,7 +639,8 @@ class HistoryStore(context: Context) : SQLiteOpenHelper(context, "iwaraflow.db",
         readableDatabase.query(
             "interactions",
             arrayOf("author", "tags", "weight", "created_at", "author_id", "action", "video_id"),
-            null, null, null, null, "created_at DESC", PROFILE_ROWS.toString()
+            // 别的账号导进来的点赞不算这个账号的口味；本机行为（account_id 为空）永远算数。
+            ACCOUNT_SCOPE, arrayOf(accountId), null, null, "created_at DESC", PROFILE_ROWS.toString()
         ).use { c ->
             while (c.moveToNext()) {
                 val at = c.getLong(3)
@@ -744,6 +784,8 @@ class HistoryStore(context: Context) : SQLiteOpenHelper(context, "iwaraflow.db",
         const val MAX_INTERACTIONS = 3000
         /** 算画像时读多少条最近的行为。 */
         const val PROFILE_ROWS = 2000
+        /** 账号作用域：本机行为（空账号）永远算数，云端导进来的只对导它进来的账号算数。 */
+        private const val ACCOUNT_SCOPE = "(account_id='' OR account_id=?)"
         /** 修剪行为表的摊销参数：攒够这么多条才检查一次，超出上限这么多才真的删，见 [trimInteractions]。 */
         const val TRIM_EVERY = 100
         const val TRIM_SLACK = 200

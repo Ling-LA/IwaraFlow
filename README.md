@@ -451,6 +451,10 @@ build-apk.bat assembleRelease
 
 ## 更新日志
 
+### v0.13.10
+
+- 给拆出来的 `WatchInteractionTracker` 和 `FeedSessionStore` 补上各自的用例
+
 ### v0.13.9
 
 - **继续按文档逐步拆类**：设置弹窗那三百行（六段选项的界面、校验、存偏好）搬进 `SettingsDialogController`，顶部四个流各自的现场（列表、看到第几条、翻到第几页）搬进 `FeedSessionStore`。两个都不碰播放和网络，可以单独测

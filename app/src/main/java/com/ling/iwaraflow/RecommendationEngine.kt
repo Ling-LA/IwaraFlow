@@ -71,6 +71,14 @@ class RecommendationEngine(
     /** 服务端支不支持按月过滤：第一次拿到明显是全站量的总数就关掉，不再白请求。 */
     @Volatile private var monthFilterSupported = true
 
+    /**
+     * 本地学到的来源权重（见 [HistoryStore.learnedSourceWeights]）。每轮刷新开始时读一次，
+     * 这一轮里所有请求共用；数据还不够时是空表，照旧用写死的权重。
+     */
+    @Volatile private var learnedWeights: Map<String, Double> = emptyMap()
+
+    private fun learnedWeight(label: String): Double = learnedWeights[label] ?: 1.0
+
     /** 排序那一半：打分、多样性、探索位、老片穿插、关注插入，见 [RecommendationRanker]。 */
     private val ranker = RecommendationRanker(random)
 
@@ -109,6 +117,12 @@ class RecommendationEngine(
     /** 「为什么推荐给我」：这条视频是怎么被选出来的。没记录就返回 null。 */
     fun reasonFor(videoId: String): String? = ranker.reasonFor(videoId)
 
+    /** 推荐调试信息：这条视频的分是怎么算出来的，见 [RecommendationRanker.explain]。 */
+    fun explain(videoId: String): String? = ranker.explain(videoId)
+
+    /** 这条视频的候选信息（来源、分数、推荐理由），记曝光时要用。 */
+    fun candidateFor(videoId: String): RecommendationCandidate? = ranker.candidateFor(videoId)
+
     /**
      * 回退到官方榜单时，官方候选也要走本地这一套：排除已看 → 本地评分 → 作者打散。
      * 原样把 trending 首页贴上来，就是“越刷越不懂你”的由来。
@@ -142,6 +156,7 @@ class RecommendationEngine(
     private fun loadBlocking(skipSeen: Boolean): List<VideoItem> {
         // 新的一轮：这一轮记下的候选不再沿用上一轮的来源分和标记，见 RecommendationCandidate.generation。
         ranker.startGeneration()
+        learnedWeights = runCatching { history.learnedSourceWeights() }.getOrDefault(emptyMap())
         // 一轮最多同时发这么多请求：卡住的那个不能把后面排队的也拖住。
         val pool = Executors.newFixedThreadPool(MAX_PARALLEL_REQUESTS)
         try {
@@ -313,6 +328,11 @@ class RecommendationEngine(
             if (tags.isNotEmpty() || authors.isNotEmpty()) {
                 recallNote = "标签 ${tags.joinToString(",")} 作者 ${authors.size} 位"
             }
+            if (learnedWeights.isNotEmpty()) {
+                val learned = learnedWeights.entries.sortedByDescending { it.value }
+                    .joinToString("，") { "${it.key}×%.2f".format(it.value) }
+                recallNote = (recallNote + " · 自学习来源权重 " + learned).trim()
+            }
         } else if (loggedIn) {
             // 关注的作者不是只有最新那一页作品，往前翻同样是没看过的更新。
             // 放在补抽轮里，免得给冷启动再加一次请求。
@@ -416,18 +436,16 @@ class RecommendationEngine(
                 // 后面几轮补进来的稍微让一让，但不按页码衰减——存档深处的页不比首页差，
                 // 只是更老，老不老交给下面的新鲜度去评。
                 val roundDecay = 1.0 / (1.0 + round * 0.18)
-                val sourceBoost = (request.weight + rankBonus * 0.8) * roundDecay
+                // 来源权重乘上本地学到的系数：这个用户实际上更吃哪一路召回，见 learnedWeights。
+                val sourceBoost = (request.weight * learnedWeight(label) + rankBonus * 0.8) * roundDecay
                 val previous = merged[item.id]
                 val candidate = previous ?: RecommendationCandidate(item).also { merged[item.id] = it }
-                if (previous == null) {
-                    candidate.sourceScore = sourceBoost
-                } else {
-                    // 多路召回都命中：加一点，但不是简单相加，不然沾到几路就压过内容本身。
-                    candidate.sourceScore += sourceBoost * 0.55
+                if (previous != null) {
                     if (item.likes > candidate.item.likes) candidate.item.likes = item.likes
                     if (item.liked) candidate.item.liked = true
                 }
-                candidate.sources += label
+                // 同一分组里只留最高分，不叠加，见 RecommendationCandidate.noteSource。
+                candidate.noteSource(label, sourceBoost)
                 when {
                     request.sort.startsWith(TAG_PREFIX) -> candidate.matchedTags += request.sort.removePrefix(TAG_PREFIX)
                     request.sort.startsWith(AUTHOR_PREFIX) -> candidate.matchedAuthorId = request.sort.removePrefix(AUTHOR_PREFIX)

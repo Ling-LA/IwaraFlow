@@ -215,7 +215,14 @@ class MainActivityV3 : AppCompatActivity() {
             onCommentPosted = { item -> history.recordInteraction(item, "comment", 1.5); rerankQueue() },
             onOpenTag = ::openTagSearch,
             // 简介里写清楚这条是怎么被推荐出来的；别的流（最新 / 流行 / 人气）没有理由可写。
-            reasonFor = { videoId -> if (mode == "recommend") recommender.reasonFor(videoId) else null }
+            reasonFor = { videoId ->
+                if (mode != "recommend") null
+                else recommender.reasonFor(videoId)?.let { reason ->
+                    // 调试模式：理由下面再附上这条视频的分是怎么算出来的。
+                    if (!prefs.recommendDebug) reason
+                    else reason + (recommender.explain(videoId)?.let { "\n$it" }.orEmpty())
+                }
+            }
         )
         onBackPressedDispatcher.addCallback(this, closeCommentsOnBack)
         onBackPressedDispatcher.addCallback(this, exitFullscreenOnBack)
@@ -1076,6 +1083,14 @@ class MainActivityV3 : AppCompatActivity() {
             text = "老片指点赞很高、发布超过一年的作品，随机插在每一组里的任意位置。避免短时间刷太多把新片刷没、后面越刷越旧，也避免一直碰不到历史上的高质量作品。"
             textSize = 12f; setTextColor(0xFF607D93.toInt()); setPadding(dp(4), dp(4), 0, dp(8))
         })
+        val recommendDebug = CheckBox(this).apply {
+            text = "显示推荐调试信息"; isChecked = prefs.recommendDebug
+        }
+        panel.addView(recommendDebug)
+        panel.addView(TextView(this).apply {
+            text = "打开后简介面板里会在「推荐理由」下面写清这条视频的分是怎么来的：来源 / 质量 / 新鲜度 / 画像 / 扰动各占多少、命中了哪些标签、来自哪一路召回。只用于调推荐算法，平时可以关着。"
+            textSize = 12f; setTextColor(0xFF607D93.toInt()); setPadding(dp(4), dp(4), 0, dp(8))
+        })
         panel.addView(sectionTitle("播放"))
         val autoNext = CheckBox(this).apply { text = "播放完毕自动进入下一条"; isChecked = prefs.autoNext }
         val autoPip = CheckBox(this).apply { text = "切到后台时自动进入画中画"; isChecked = prefs.autoPip }
@@ -1246,6 +1261,7 @@ class MainActivityV3 : AppCompatActivity() {
             prefs.classicsEvery = newClassics; recommender.classicsEvery = newClassics
             prefs.skipSeen = skipSeen.isChecked; prefs.autoNext = autoNext.isChecked; prefs.autoPip = autoPip.isChecked
             prefs.skipSeenEverywhere = skipSeenEverywhere.isChecked
+            prefs.recommendDebug = recommendDebug.isChecked
             prefs.showPauseIndicator = pauseIcon.isChecked
             prefs.tapToPause = tapPause.isChecked
             prefs.skipSeconds = skipValues[skip.selectedItemPosition]

@@ -94,13 +94,68 @@ class RecommendationRanker(private val random: Random = Random()) {
         diversify(spreadAuthors(hardMuteFilter(items, taste).sortedByDescending { scoreOf(it, taste, now) }))
 
     /** 一条候选此刻的得分：来源 + 质量 + 新鲜度 + 画像 + 稳定抖动。 */
-    fun scoreOf(item: VideoItem, taste: PreferenceProfile, now: Long): Double {
+    fun scoreOf(item: VideoItem, taste: PreferenceProfile, now: Long): Double =
+        scoreParts(item, taste, now).total
+
+    /**
+     * 得分的五个组成部分。[scoreOf] 就是把它们加起来——调试信息读的也是这里，
+     * 两边永远不会对不上。
+     */
+    class ScoreParts(
+        val source: Double,
+        val quality: Double,
+        val freshness: Double,
+        val taste: Double,
+        val jitter: Double
+    ) {
+        val total: Double get() = source + quality + freshness + taste + jitter
+    }
+
+    internal fun scoreParts(item: VideoItem, taste: PreferenceProfile, now: Long): ScoreParts {
         val ageDays = if (item.createdAt > 0L) ((now - item.createdAt).coerceAtLeast(0L) / 86_400_000.0) else 30.0
         val known = candidates[item.id]
-        val quality = known?.baseQuality ?: qualityScore(item.likes, item.views)
-        return (known?.sourceScore ?: 0.0) + quality + 1.6 / (1.0 + ageDays / 30.0) +
-            taste.score(item).coerceIn(-6.0, 8.0) * 0.38 +
-            ((item.id.hashCode().toLong() and 0xffff) / 65535.0) * 0.15
+        return ScoreParts(
+            source = known?.sourceScore ?: 0.0,
+            quality = known?.baseQuality ?: qualityScore(item.likes, item.views),
+            freshness = 1.6 / (1.0 + ageDays / 30.0),
+            taste = taste.score(item).coerceIn(-6.0, 8.0) * TASTE_WEIGHT,
+            jitter = ((item.id.hashCode().toLong() and 0xffff) / 65535.0) * JITTER_WEIGHT
+        )
+    }
+
+    /**
+     * 「推荐调试信息」：这条视频的分是怎么来的。设置里打开之后附在推荐理由下面。
+     * 调推荐算法时不用再靠猜——哪一项在起作用一眼就看得到。
+     */
+    fun explain(videoId: String, now: Long = System.currentTimeMillis()): String? {
+        val candidate = candidates[videoId] ?: return null
+        val item = candidate.item
+        val taste = profile
+        val parts = scoreParts(item, taste, now)
+        fun signed(value: Double) = (if (value >= 0) "+" else "−") + "%.2f".format(kotlin.math.abs(value))
+        return buildString {
+            append("总分 %.2f".format(parts.total))
+            append("\n来源 ${signed(parts.source)} · 质量 ${signed(parts.quality)}")
+            append(" · 新鲜度 ${signed(parts.freshness)}")
+            append("\n画像 ${signed(parts.taste)} · 扰动 ${signed(parts.jitter)}")
+            val hitTags = item.tags.mapNotNull { tag ->
+                taste.tagWeights[tag.lowercase()]?.let { tag to it }
+            }.sortedByDescending { kotlin.math.abs(it.second) }.take(PreferenceProfile.TOP_TAGS)
+            if (hitTags.isNotEmpty()) {
+                append("\n命中标签：" + hitTags.joinToString("，") { "#${it.first} ${signed(it.second)}" })
+            }
+            val authorWeight = item.authorId.takeIf { it.isNotBlank() }?.let { taste.authorIdWeights[it] }
+                ?: taste.authorWeights[item.author.lowercase()]
+            if (authorWeight != null) append("\n作者画像 ${signed(authorWeight)}")
+            if (candidate.sources.isNotEmpty()) append("\n来源：" + candidate.sources.joinToString("、"))
+            if (candidate.matchedTags.isNotEmpty()) append("\n召回标签：" + candidate.matchedTags.joinToString("、"))
+            if (candidate.matchedAuthorId.isNotBlank()) append("\n召回作者：" + candidate.matchedAuthorId)
+            append("\n年龄：" + ageBucket(item, now))
+            if (candidate.exploration) append(" · 探索位")
+            if (candidate.classic) append(" · 老片穿插")
+            if (candidate.subscribed) append(" · 关注更新")
+            append("\n第 ${candidate.generation} 轮推荐")
+        }
     }
 
     /**
@@ -365,6 +420,9 @@ class RecommendationRanker(private val random: Random = Random()) {
         const val MIN_RECENT_FEED = 24
         /** 一次最多产出多少条推荐。 */
         const val MAX_RESULTS = 80
+        /** 画像分在总分里占的比重，以及稳定扰动的幅度。 */
+        const val TASTE_WEIGHT = 0.38
+        const val JITTER_WEIGHT = 0.15
         /** 候选表最多记这么多条，按最近用到的顺序淘汰最老的那条。 */
         const val MAX_TRACKED_CANDIDATES = 2000
     }

@@ -22,6 +22,12 @@ data class RecommendationCandidate(
     var matchedAuthorId: String = "",
     /** 站方数据算出来的质量分，见 RecommendationEngine.qualityScore。 */
     var baseQuality: Double = 0.0,
+    /**
+     * 每个**来源分组**上拿到的最高来源分，以及这一组里命中了几路，见 [sourceGroup]。
+     * 来源分由它们算出来（[recomputeSourceScore]），而不是每命中一路就往上加。
+     */
+    val groupScores: MutableMap<String, Double> = LinkedHashMap(),
+    val groupHits: MutableMap<String, Int> = LinkedHashMap(),
     /** 来自关注作者的更新。 */
     var subscribed: Boolean = false,
     /** 老片穿插位。 */
@@ -52,6 +58,31 @@ data class RecommendationCandidate(
         else -> "综合推荐"
     }
 
+    /**
+     * 记一路召回命中：同一分组里只留最高分，不叠加。
+     *
+     * 热门、流行、月高赞本来就高度相关（都是“很多人点赞”的不同说法），而点赞数和
+     * 播放量又已经算进了质量分。以前每多命中一路就 `+0.55 ×`，同时上三个榜的作品
+     * 等于把“热门”这一件事奖励了三次还多。现在同组取最高，多命中只给一点小加成。
+     */
+    fun noteSource(label: String, boost: Double) {
+        sources += label
+        val group = sourceGroup(label)
+        groupScores[group] = maxOf(groupScores[group] ?: 0.0, boost)
+        groupHits[group] = (groupHits[group] ?: 0) + 1
+        recomputeSourceScore()
+    }
+
+    private fun recomputeSourceScore() {
+        if (groupScores.isEmpty()) return
+        val sorted = groupScores.values.sortedDescending()
+        // 跨分组是真正不同的证据（“很多人喜欢” vs “你喜欢的标签” vs “你关注的人”），
+        // 照旧按折扣叠加；同组内多命中只给一点小加成。
+        val base = sorted.first() + sorted.drop(1).sumOf { it * CROSS_GROUP_SHARE }
+        val extraHits = groupHits.values.sumOf { (it - 1).coerceAtLeast(0) }.coerceAtMost(MULTI_HIT_CAP)
+        sourceScore = base + extraHits * MULTI_HIT_BONUS
+    }
+
     object Source {
         const val SUBSCRIBED = "subscribed"
         const val TRENDING = "trending"
@@ -62,5 +93,33 @@ data class RecommendationCandidate(
         const val AUTHOR = "author"
         const val CLASSICS = "classics"
         const val OFFICIAL = "official"
+    }
+
+    /** 来源分组：同一组里的几路来源说的其实是同一件事。 */
+    object Group {
+        /** 站方热度：热门 / 流行 / 月高赞 / 老片。 */
+        const val QUALITY = "quality"
+        /** 个性化召回：按你的标签、你的作者拉的页。 */
+        const val PERSONAL = "personal"
+        /** 社交：你关注的作者的更新。 */
+        const val SOCIAL = "social"
+        /** 新鲜：最新投稿。 */
+        const val FRESH = "fresh"
+    }
+
+    companion object {
+        /** 跨分组叠加时后面几组打的折。 */
+        const val CROSS_GROUP_SHARE = 0.55
+        /** 同一分组里多命中一路给的小加成，以及最多给几次。 */
+        const val MULTI_HIT_BONUS = 0.2
+        const val MULTI_HIT_CAP = 3
+
+        fun sourceGroup(label: String): String = when (label) {
+            Source.TAG, Source.AUTHOR -> Group.PERSONAL
+            Source.SUBSCRIBED -> Group.SOCIAL
+            Source.DATE -> Group.FRESH
+            // 热门 / 流行 / 月高赞 / 老片 / 官方回退：说的都是“很多人喜欢”。
+            else -> Group.QUALITY
+        }
     }
 }

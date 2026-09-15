@@ -26,6 +26,15 @@ class AppPrefs(context: Context) {
         get() = prefs.getBoolean("skip_seen_everywhere", false)
         set(value) = prefs.edit().putBoolean("skip_seen_everywhere", value).apply()
 
+    /**
+     * 推荐调试信息：简介面板里在“推荐理由”下面写清这条视频的分是怎么来的
+     * （来源 / 质量 / 新鲜度 / 画像 / 扰动各占多少、命中了哪些标签、第几轮召回）。
+     * 默认关，调算法时才用得上。
+     */
+    var recommendDebug: Boolean
+        get() = prefs.getBoolean("recommend_debug", false)
+        set(value) = prefs.edit().putBoolean("recommend_debug", value).apply()
+
     /** 推荐里每多少条穿插一条老片，0 = 关闭。 */
     var classicsEvery: Int
         get() = prefs.getInt("classics_every", RecommendationEngine.DEFAULT_CLASSICS_EVERY)

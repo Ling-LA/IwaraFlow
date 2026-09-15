@@ -831,7 +831,7 @@ class HistoryStore(context: Context) : SQLiteOpenHelper(context, "iwaraflow.db",
                 val itemTags = splitTags(c.getString(1)).map { it.lowercase() }
                 if (a.isNotBlank()) author[a] = (author[a] ?: 0.0) + w
                 if (id.isNotBlank()) authorIds[id] = (authorIds[id] ?: 0.0) + w
-                itemTags.forEach { key -> tags[key] = (tags[key] ?: 0.0) + w * 0.45 }
+                itemTags.forEach { key -> tags[key] = (tags[key] ?: 0.0) + w * TAG_SHARE }
                 if (action == ACTION_SKIP) {
                     if (a.isNotBlank()) authorSkips[a] = (authorSkips[a] ?: 0) + 1
                     if (id.isNotBlank()) authorIdSkips[id] = (authorIdSkips[id] ?: 0) + 1
@@ -937,6 +937,32 @@ class HistoryStore(context: Context) : SQLiteOpenHelper(context, "iwaraflow.db",
                (SELECT rowid FROM recommendation_impressions ORDER BY shown_at DESC LIMIT $MAX_IMPRESSIONS)"""
                 .trimIndent()
         )
+    }
+
+    /**
+     * **本地自学习的来源权重**：这个用户实际上更吃哪一路召回。
+     *
+     * 来源权重一直是写死的常量（热门 3.0、流行 2.6、最新 2.4……），那是“我们认为
+     * 这几路应该有多重要”，不是“这个用户实际更喜欢哪一路”。有了曝光数据之后可以直接量：
+     * 某个人标签召回的长看率 72%、热门榜只有 21%，那就该多给标签召回一点比重。
+     *
+     * 不需要模型也不需要服务器：按“1 − 划走率”相对全局平均取比值，样本少的时候
+     * 往 1.0 收缩（三五条不足以把一路抬上天或者打入冷宫），最后限幅。
+     * 样本还不够就返回空表，照旧用写死的权重。
+     */
+    @Synchronized
+    fun learnedSourceWeights(limit: Int = METRICS_ROWS, surface: String = SURFACE_RECOMMEND): Map<String, Double> {
+        val stats = impressionSourceStats(limit, surface)
+        val total = stats.sumOf { it.samples }
+        if (total < SOURCE_LEARNING_MIN_SAMPLES) return emptyMap()
+        val mean = stats.sumOf { (1.0 - it.skipRate) * it.samples } / total
+        if (mean <= 0.0) return emptyMap()
+        return stats.associate { stat ->
+            val confidence = stat.samples.toDouble() / (stat.samples + SOURCE_LEARNING_PRIOR)
+            val ratio = (1.0 - stat.skipRate) / mean
+            stat.source to (1.0 + (ratio - 1.0) * confidence)
+                .coerceIn(SOURCE_WEIGHT_MIN, SOURCE_WEIGHT_MAX)
+        }
     }
 
     /**
@@ -1155,6 +1181,11 @@ class HistoryStore(context: Context) : SQLiteOpenHelper(context, "iwaraflow.db",
         const val MAX_IMPRESSIONS = 2000
         /** 曝光记在哪个流下。推荐流是 "recommend"，榜单页就是榜单名。 */
         const val SURFACE_RECOMMEND = "recommend"
+        /** 自学习来源权重：总样本不够这么多就不学，样本少的来源往 1.0 收缩，最后限幅。 */
+        const val SOURCE_LEARNING_MIN_SAMPLES = 40
+        const val SOURCE_LEARNING_PRIOR = 20
+        const val SOURCE_WEIGHT_MIN = 0.6
+        const val SOURCE_WEIGHT_MAX = 1.6
         /** 最近这么久里的行为算“当前兴趣”，权重再乘 [SESSION_BOOST]。 */
         const val SESSION_WINDOW_MS = 45L * 60L * 1000L
         const val SESSION_BOOST = 2.5

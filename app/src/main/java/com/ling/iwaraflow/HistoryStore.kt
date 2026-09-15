@@ -16,7 +16,7 @@ data class MutedEntities(
     val tags: Set<String> = emptySet()
 )
 
-class HistoryStore(context: Context) : SQLiteOpenHelper(context, "iwaraflow.db", null, 8) {
+class HistoryStore(context: Context) : SQLiteOpenHelper(context, "iwaraflow.db", null, 10) {
     /**
      * **UI 线程不写库**。划一条视频要写好几笔（观看记录、行为、已看标记），
      * 而这些方法都是 `@Synchronized` 的——和后台算画像抢同一把锁，用久了就是划走那一下的微卡顿。
@@ -124,6 +124,9 @@ class HistoryStore(context: Context) : SQLiteOpenHelper(context, "iwaraflow.db",
         )
         db.execSQL(DOWNLOADS_TABLE)
         db.execSQL(MUTED_TABLE)
+        db.execSQL(IMPRESSIONS_TABLE)
+        db.execSQL(IMPRESSIONS_INDEX)
+        db.execSQL(PREFERENCE_TABLE)
         db.execSQL("CREATE INDEX idx_history_time ON history(watched_at DESC)")
         db.execSQL("CREATE INDEX idx_interactions_time ON interactions(created_at DESC)")
         db.execSQL("CREATE INDEX idx_seen_last_time ON seen_videos(last_seen_at DESC)")
@@ -179,6 +182,49 @@ class HistoryStore(context: Context) : SQLiteOpenHelper(context, "iwaraflow.db",
             // 已经存在的官方点赞种子不知道属于谁，留着就等于继续串。直接删掉，
             // 下次同步会在正确的账号下重新种一遍（页面会把 likedSyncAt 清零）。
             try { db.execSQL("DELETE FROM interactions WHERE action='$ACTION_CLOUD_LIKE'") } catch (_: Throwable) { }
+        }
+        if (oldVersion < 9) {
+            // 8 → 9：推荐曝光表。诊断指标以前是从全局行为表算的，而播放器是所有页面共用的——
+            // 在作者页看一小时同一个作者，那些观看也会算进“推荐质量”。现在按曝光记，
+            // 带上来源、名次、推荐理由和**真实播放时长**，指标只看推荐流那一部分。
+            db.execSQL(IMPRESSIONS_TABLE)
+            db.execSQL(IMPRESSIONS_INDEX)
+        }
+        if (oldVersion < 10) {
+            // 9 → 10：长期口味单独存一张聚合表。
+            // 以前画像只看最近 2000 条行为，一个重度用户做完 2000 次别的操作之后，
+            // 多年的老兴趣不是自然衰减到 0，而是**直接滚出查询窗口**，一夜之间消失。
+            // 现在每发生一次行为就往聚合表里累加（旧分先按时间衰减），老兴趣只会慢慢淡掉。
+            db.execSQL(PREFERENCE_TABLE)
+            backfillPreferences(db)
+        }
+    }
+
+    /** 把现有窗口里的行为折算进聚合画像，升级上来的用户不至于从零开始。 */
+    private fun backfillPreferences(db: SQLiteDatabase) {
+        val now = System.currentTimeMillis()
+        runCatching {
+            db.query(
+                "interactions", arrayOf("author", "tags", "weight", "created_at", "author_id", "action"),
+                null, null, null, null, "created_at DESC", PROFILE_ROWS.toString()
+            ).use { c ->
+                db.beginTransaction()
+                try {
+                    while (c.moveToNext()) {
+                        val action = c.getString(5)
+                        if (!countsTowardLongTerm(action)) continue
+                        val at = c.getLong(3)
+                        val weight = c.getDouble(2) * decayFactor(now - at)
+                        applyPreferenceDeltas(
+                            db, c.getString(0).orEmpty(), c.getString(4).orEmpty(),
+                            splitTags(c.getString(1)), weight, now
+                        )
+                    }
+                    db.setTransactionSuccessful()
+                } finally {
+                    db.endTransaction()
+                }
+            }
         }
     }
 
@@ -253,6 +299,23 @@ class HistoryStore(context: Context) : SQLiteOpenHelper(context, "iwaraflow.db",
         val now = System.currentTimeMillis()
         if (label.isNotBlank()) insertMute(db, MUTE_AUTHOR, label, now, id)
         if (id.isNotBlank()) insertMute(db, MUTE_AUTHOR_ID, id, now, label)
+    }
+
+    /** 一个作者在 [MUTED_TABLE] 里的那一两行（名字 / id），传名字或 id 都查得到。 */
+    @Synchronized
+    fun authorMuteKeys(value: String): List<Pair<String, String>> {
+        val key = value.trim()
+        if (key.isBlank()) return emptyList()
+        val out = ArrayList<Pair<String, String>>()
+        runCatching {
+            readableDatabase.query(
+                "muted_entities", arrayOf("type", "entity_key"),
+                "type IN (?, ?) AND (entity_key=? OR entity_key=? OR alias=? OR alias=?)",
+                arrayOf(MUTE_AUTHOR, MUTE_AUTHOR_ID, key, key.lowercase(), key, key.lowercase()),
+                null, null, null
+            ).use { c -> while (c.moveToNext()) out += c.getString(0) to c.getString(1) }
+        }
+        return out
     }
 
     /** 解除一个作者的静音，名字和 id 传哪个都行：互为别名的两行一起删。 */
@@ -496,8 +559,99 @@ class HistoryStore(context: Context) : SQLiteOpenHelper(context, "iwaraflow.db",
 
     @Synchronized
     fun recordInteraction(item: VideoItem, action: String, weight: Double) {
-        writableDatabase.insert("interactions", null, interactionValues(item, action, weight, System.currentTimeMillis()))
+        val now = System.currentTimeMillis()
+        val db = writableDatabase
+        db.insert("interactions", null, interactionValues(item, action, weight, now))
+        // 同一笔行为还要累加进长期画像，见 [PREFERENCE_TABLE]。
+        if (countsTowardLongTerm(action)) {
+            applyPreferenceDeltas(db, item.author, item.authorId, item.tags, weight, now)
+        }
         trimInteractions()
+    }
+
+    // ------------------------------------------------------------------ 长期口味聚合
+    //
+    // 画像以前只读最近 [PROFILE_ROWS] 条行为。重度用户做完两千次别的操作之后，
+    // 常年喜欢的那个作者不是“慢慢淡掉”，而是**整个滚出查询窗口**，一夜之间从画像里消失。
+    // 现在每发生一次行为就往聚合表里累加：旧分先按时间衰减，再加上这次的增量。
+    // 长期口味来自聚合表，最近 45 分钟的“当前兴趣”仍然从行为窗口里取，两者相加。
+
+    /** 这类行为算不算长期口味。搜索只是短期意图；官方点赞是账号级的种子；视频级反馈只压那一条。 */
+    private fun countsTowardLongTerm(action: String?): Boolean =
+        action != null && action != ACTION_SEARCH && action != ACTION_CLOUD_LIKE && action != ACTION_DISLIKE_VIDEO
+
+    /** 一个月折半。和窗口那边的衰减同一个尺度，只是写成可以逐次叠加的指数形式。 */
+    private fun decayFactor(elapsedMs: Long): Double {
+        val days = elapsedMs.coerceAtLeast(0L) / 86_400_000.0
+        return Math.pow(0.5, days / PREFERENCE_HALF_LIFE_DAYS)
+    }
+
+    private fun applyPreferenceDeltas(
+        db: SQLiteDatabase,
+        author: String,
+        authorId: String,
+        tags: List<String>,
+        weight: Double,
+        now: Long
+    ) {
+        author.lowercase().takeIf { it.isNotBlank() }?.let { bumpPreference(db, PREF_AUTHOR, it, weight, now) }
+        authorId.takeIf { it.isNotBlank() }?.let { bumpPreference(db, PREF_AUTHOR_ID, it, weight, now) }
+        tags.map { it.lowercase() }.filter { it.isNotBlank() }.distinct().forEach { tag ->
+            bumpPreference(db, PREF_TAG, tag, weight * TAG_SHARE, now)
+        }
+    }
+
+    /** 旧分按时间衰减之后加上增量。绝对值小到没意义就把这一行删掉，别让表无限长。 */
+    private fun bumpPreference(db: SQLiteDatabase, type: String, key: String, delta: Double, now: Long) {
+        var score = delta
+        db.query(
+            "preference_entities", arrayOf("score", "updated_at"),
+            "type=? AND entity_key=?", arrayOf(type, key), null, null, null, "1"
+        ).use { c ->
+            if (c.moveToFirst()) score += c.getDouble(0) * decayFactor(now - c.getLong(1))
+        }
+        if (kotlin.math.abs(score) < PREFERENCE_FLOOR) {
+            db.delete("preference_entities", "type=? AND entity_key=?", arrayOf(type, key))
+            return
+        }
+        val values = ContentValues().apply {
+            put("type", type)
+            put("entity_key", key)
+            put("score", score)
+            put("updated_at", now)
+        }
+        db.insertWithOnConflict("preference_entities", null, values, SQLiteDatabase.CONFLICT_REPLACE)
+    }
+
+    /** 读聚合画像，读的时候再按时间衰减一次（上次写入之后又过去了一段时间）。 */
+    private fun longTermPreferences(now: Long): Map<String, MutableMap<String, Double>> {
+        val out = mapOf(
+            PREF_AUTHOR to HashMap<String, Double>(),
+            PREF_AUTHOR_ID to HashMap<String, Double>(),
+            PREF_TAG to HashMap<String, Double>()
+        )
+        runCatching {
+            readableDatabase.query(
+                "preference_entities", arrayOf("type", "entity_key", "score", "updated_at"),
+                null, null, null, null, null
+            ).use { c ->
+                while (c.moveToNext()) {
+                    val bucket = out[c.getString(0)] ?: continue
+                    val key = c.getString(1).orEmpty()
+                    if (key.isBlank()) continue
+                    bucket[key] = c.getDouble(2) * decayFactor(now - c.getLong(3))
+                }
+            }
+        }
+        return out.mapValues { (_, v) -> v as MutableMap<String, Double> }
+    }
+
+    /** 兴趣管理里“恢复”一个作者 / 标签时，长期画像里那一条也要清掉。 */
+    @Synchronized
+    fun forgetPreference(type: String, key: String): Int {
+        val value = key.trim().let { if (type == PREF_AUTHOR_ID) it else it.lowercase() }
+        if (value.isBlank()) return 0
+        return writableDatabase.delete("preference_entities", "type=? AND entity_key=?", arrayOf(type, value))
     }
 
     /**
@@ -625,9 +779,11 @@ class HistoryStore(context: Context) : SQLiteOpenHelper(context, "iwaraflow.db",
 
     @Synchronized
     internal fun preferenceProfileAt(now: Long): PreferenceProfile {
-        val author = HashMap<String, Double>()
-        val authorIds = HashMap<String, Double>()
-        val tags = HashMap<String, Double>()
+        // 长期口味来自聚合表（不会因为滚出窗口而突然消失），当前兴趣仍然来自行为窗口。
+        val longTerm = longTermPreferences(now)
+        val author = HashMap(longTerm.getValue(PREF_AUTHOR))
+        val authorIds = HashMap(longTerm.getValue(PREF_AUTHOR_ID))
+        val tags = HashMap(longTerm.getValue(PREF_TAG))
         val videos = HashMap<String, Double>()
         // 长期持续快速划走：同一作者 / 标签攒够 [LONG_TERM_SKIPS] 次划走，再额外压一层。
         val authorSkips = HashMap<String, Int>()
@@ -652,8 +808,18 @@ class HistoryStore(context: Context) : SQLiteOpenHelper(context, "iwaraflow.db",
                     val ageHours = ((now - at).coerceAtLeast(0) / 3_600_000.0)
                     1.0 / (1.0 + ageHours / SEARCH_HALF_LIFE_HOURS)
                 } else 1.0 / (1.0 + ageDays / 30.0)
-                val session = if (now - at <= SESSION_WINDOW_MS && action != ACTION_CLOUD_LIKE) SESSION_BOOST else 1.0
-                val w = c.getDouble(2) * decay * session
+                // 长期那一份已经在聚合表里了，窗口这边只补两样：
+                // 一是不进长期画像的行为（搜索的短期意图、官方点赞种子、视频级反馈），
+                // 二是最近 [SESSION_WINDOW_MS] 里的“当前兴趣”加成——连着看了几条同一主题，
+                // 后面的推荐就该马上跟上。加成按 [SESSION_BOOST] − 1 补，和以前的总量一致。
+                val inSession = now - at <= SESSION_WINDOW_MS && action != ACTION_CLOUD_LIKE
+                val share = when {
+                    !countsTowardLongTerm(action) -> 1.0
+                    inSession -> SESSION_BOOST - 1.0
+                    else -> 0.0
+                }
+                if (share == 0.0 && action != ACTION_SKIP) continue
+                val w = c.getDouble(2) * decay * share
                 // 「不感兴趣：当前视频」是视频级的：只压这一条，不落到作者和标签上。
                 if (action == ACTION_DISLIKE_VIDEO) {
                     val videoId = c.getString(6).orEmpty()
@@ -680,14 +846,201 @@ class HistoryStore(context: Context) : SQLiteOpenHelper(context, "iwaraflow.db",
     }
 
     /**
-     * 推荐质量的本地诊断指标。
-     *
-     * 单元测试回答的是「算法有没有按我写的规则跑」，回答不了「这套规则有没有让推荐变好」。
-     * 这里从本地的行为表和观看记录算几个能直接看出好坏的数：快速划走率、平均有效播放、
-     * 播放完成率、点赞收藏率、作者 / 标签重复率。全部只算本机数据，不上传。
+     * 记一次曝光：这条视频被放进了某个流的第几位，以及它是怎么被选出来的。
+     * 同一轮（[session]）里同一条视频只记一次，重复调用不覆盖已经记下的结果。
      */
     @Synchronized
-    fun recommendationMetrics(limit: Int = METRICS_ROWS): RecommendationMetrics {
+    fun recordImpression(
+        session: String,
+        item: VideoItem,
+        surface: String,
+        position: Int,
+        sources: String = "",
+        score: Double = 0.0,
+        reason: String = "",
+        exploration: Boolean = false,
+        classic: Boolean = false
+    ) {
+        if (session.isBlank() || item.id.isBlank() || surface.isBlank()) return
+        val values = ContentValues().apply {
+            put("session_id", session)
+            put("video_id", item.id)
+            put("surface", surface)
+            put("position", position)
+            put("sources", sources)
+            put("score", score)
+            put("reason", reason)
+            put("shown_at", System.currentTimeMillis())
+            put("author", item.author.lowercase())
+            put("tags", item.tags.joinToString("") { it.lowercase() })
+            put("exploration", if (exploration) 1 else 0)
+            put("classic", if (classic) 1 else 0)
+        }
+        writableDatabase.insertWithOnConflict(
+            "recommendation_impressions", null, values, SQLiteDatabase.CONFLICT_IGNORE
+        )
+        trimImpressions()
+    }
+
+    /**
+     * 这条曝光的结果：**真实播放毫秒数**（不是 `history.last_position`——拖到 8 分钟
+     * 看十秒，那个字段会显示看了八分钟）、时长、有没有播完、是不是被划走。
+     */
+    @Synchronized
+    fun noteImpressionOutcome(
+        session: String,
+        videoId: String,
+        playedMs: Long,
+        durationMs: Long,
+        completed: Boolean,
+        skipped: Boolean
+    ) {
+        if (session.isBlank() || videoId.isBlank()) return
+        val values = ContentValues().apply {
+            put("played_ms", playedMs.coerceAtLeast(0L))
+            put("duration_ms", durationMs.coerceAtLeast(0L))
+            put("completed", if (completed) 1 else 0)
+            put("skipped", if (skipped) 1 else 0)
+        }
+        writableDatabase.update(
+            "recommendation_impressions", values, "session_id=? AND video_id=?", arrayOf(session, videoId)
+        )
+    }
+
+    /** 这条曝光被点赞 / 收藏了。 */
+    @Synchronized
+    fun noteImpressionReaction(session: String, videoId: String, liked: Boolean = false, favorited: Boolean = false) {
+        if (session.isBlank() || videoId.isBlank() || (!liked && !favorited)) return
+        val values = ContentValues().apply {
+            if (liked) put("liked", 1)
+            if (favorited) put("favorited", 1)
+        }
+        writableDatabase.update(
+            "recommendation_impressions", values, "session_id=? AND video_id=?", arrayOf(session, videoId)
+        )
+    }
+
+    private var impressionsSinceTrim = 0
+
+    /** 曝光表和行为表一样是滚动窗口，同样摊销着修剪。 */
+    private fun trimImpressions() {
+        impressionsSinceTrim += 1
+        if (impressionsSinceTrim < TRIM_EVERY) return
+        impressionsSinceTrim = 0
+        val db = writableDatabase
+        val count = runCatching {
+            android.database.DatabaseUtils.queryNumEntries(db, "recommendation_impressions")
+        }.getOrDefault(0L)
+        if (count <= MAX_IMPRESSIONS + TRIM_SLACK) return
+        db.execSQL(
+            """DELETE FROM recommendation_impressions WHERE rowid NOT IN
+               (SELECT rowid FROM recommendation_impressions ORDER BY shown_at DESC LIMIT $MAX_IMPRESSIONS)"""
+                .trimIndent()
+        )
+    }
+
+    /**
+     * 推荐质量的本地诊断指标，**只看指定流的曝光**。
+     *
+     * 播放器是所有页面共用的：在作者页连看一小时同一个作者，那些观看以前也会算进
+     * “推荐质量”。现在按曝光算，surface 对不上的一概不计；平均播放读的是曝光里记下的
+     * 真实播放时长。曝光表还是空的（刚升级上来）就退回老口径，至少有个数可看。
+     */
+    @Synchronized
+    fun recommendationMetrics(limit: Int = METRICS_ROWS, surface: String = SURFACE_RECOMMEND): RecommendationMetrics =
+        impressionMetrics(limit, surface) ?: legacyMetrics(limit)
+
+    /** 曝光口径的指标；这个流还没有可统计的曝光就返回 null。 */
+    private fun impressionMetrics(limit: Int, surface: String): RecommendationMetrics? {
+        var consumed = 0
+        var skips = 0
+        var reactions = 0
+        var completedCount = 0
+        var played = 0L
+        val authors = ArrayList<String>()
+        val tags = ArrayList<String>()
+        runCatching {
+            readableDatabase.query(
+                "recommendation_impressions",
+                arrayOf("played_ms", "completed", "skipped", "liked", "favorited", "author", "tags"),
+                "surface=?", arrayOf(surface), null, null, "shown_at DESC", limit.toString()
+            ).use { c ->
+                while (c.moveToNext()) {
+                    val playedMs = c.getLong(0)
+                    val completed = c.getInt(1) == 1
+                    val skipped = c.getInt(2) == 1
+                    val liked = c.getInt(3) == 1
+                    val favorited = c.getInt(4) == 1
+                    // 还没轮到播的曝光不计入：它既不算好也不算坏。
+                    if (playedMs <= 0L && !completed && !skipped && !liked && !favorited) continue
+                    consumed += 1
+                    played += playedMs
+                    if (completed) completedCount += 1
+                    if (skipped) skips += 1
+                    if (liked || favorited) reactions += 1
+                    c.getString(5).orEmpty().takeIf { it.isNotBlank() }?.let { authors += it }
+                    tags += splitTags(c.getString(6))
+                }
+            }
+        }
+        if (consumed == 0) return null
+        val distinctAuthors = authors.toSet().size
+        return RecommendationMetrics(
+            samples = consumed,
+            quickSkipRate = skips.toDouble() / consumed,
+            averageWatchMs = played / consumed,
+            completionRate = completedCount.toDouble() / consumed,
+            reactionRate = reactions.toDouble() / consumed,
+            authorRepeatRate = if (authors.isEmpty()) 0.0 else 1.0 - distinctAuthors.toDouble() / authors.size,
+            tagRepeatRate = if (tags.isEmpty()) 0.0 else 1.0 - tags.toSet().size.toDouble() / tags.size
+        )
+    }
+
+    /**
+     * 按**来源**拆开看：标签召回的作品用户到底看不看得下去、月榜来的表现如何、
+     * 探索位的成功率是多少。每个来源一行，只算有结果的曝光。
+     */
+    @Synchronized
+    fun impressionSourceStats(limit: Int = METRICS_ROWS, surface: String = SURFACE_RECOMMEND): List<SourceStat> {
+        val shown = HashMap<String, Int>()
+        val skipped = HashMap<String, Int>()
+        val played = HashMap<String, Long>()
+        runCatching {
+            readableDatabase.query(
+                "recommendation_impressions",
+                arrayOf("sources", "played_ms", "completed", "skipped", "liked", "favorited", "exploration", "classic"),
+                "surface=?", arrayOf(surface), null, null, "shown_at DESC", limit.toString()
+            ).use { c ->
+                while (c.moveToNext()) {
+                    val playedMs = c.getLong(1)
+                    val done = c.getInt(2) == 1
+                    val skip = c.getInt(3) == 1
+                    val reacted = c.getInt(4) == 1 || c.getInt(5) == 1
+                    if (playedMs <= 0L && !done && !skip && !reacted) continue
+                    val keys = splitTags(c.getString(0)).toMutableList()
+                    if (c.getInt(6) == 1) keys += "exploration"
+                    if (c.getInt(7) == 1) keys += "classic"
+                    if (keys.isEmpty()) keys += "other"
+                    keys.forEach { key ->
+                        shown[key] = (shown[key] ?: 0) + 1
+                        if (skip) skipped[key] = (skipped[key] ?: 0) + 1
+                        played[key] = (played[key] ?: 0L) + playedMs
+                    }
+                }
+            }
+        }
+        return shown.entries.sortedByDescending { it.value }.map { (key, count) ->
+            SourceStat(
+                source = key,
+                samples = count,
+                skipRate = (skipped[key] ?: 0).toDouble() / count,
+                averageWatchMs = (played[key] ?: 0L) / count
+            )
+        }
+    }
+
+    @Synchronized
+    private fun legacyMetrics(limit: Int): RecommendationMetrics {
         var watches = 0
         var skips = 0
         var likes = 0
@@ -746,12 +1099,15 @@ class HistoryStore(context: Context) : SQLiteOpenHelper(context, "iwaraflow.db",
         val db = writableDatabase
         return when (kind) {
             // 兴趣管理里列的是作者名，老记录里也可能只有作者 id，两种键都能解除。
-            DislikeSheet.Kind.AUTHOR -> unmuteAuthor(value) + db.delete(
+            // 长期画像里那一条也要清掉，否则“恢复”之后分数还压着，等于没恢复。
+            DislikeSheet.Kind.AUTHOR -> authorMuteKeys(value)
+                .sumOf { (type, key) -> forgetPreference(type, key) } +
+                unmuteAuthor(value) + db.delete(
                 "interactions",
                 "action=? AND (LOWER(author)=? OR author_id=?)",
                 arrayOf(ACTION_DISLIKE_AUTHOR, value.lowercase(), value)
             )
-            DislikeSheet.Kind.TAG -> unmute(MUTE_TAG, value) + db.delete(
+            DislikeSheet.Kind.TAG -> forgetPreference(PREF_TAG, value) + unmute(MUTE_TAG, value) + db.delete(
                 "interactions",
                 "action=? AND (LOWER(tags)=? OR LOWER(tags) LIKE ? OR LOWER(tags) LIKE ? OR LOWER(tags) LIKE ?)",
                 arrayOf(
@@ -795,6 +1151,10 @@ class HistoryStore(context: Context) : SQLiteOpenHelper(context, "iwaraflow.db",
         const val STATUS_BATCH = 400
         /** 算推荐诊断指标时看最近多少条记录。 */
         const val METRICS_ROWS = 200
+        /** 曝光表最多留多少条。 */
+        const val MAX_IMPRESSIONS = 2000
+        /** 曝光记在哪个流下。推荐流是 "recommend"，榜单页就是榜单名。 */
+        const val SURFACE_RECOMMEND = "recommend"
         /** 最近这么久里的行为算“当前兴趣”，权重再乘 [SESSION_BOOST]。 */
         const val SESSION_WINDOW_MS = 45L * 60L * 1000L
         const val SESSION_BOOST = 2.5
@@ -811,6 +1171,17 @@ class HistoryStore(context: Context) : SQLiteOpenHelper(context, "iwaraflow.db",
         const val MUTE_AUTHOR_ID = "author_id"
         const val MUTE_TAG = "tag"
 
+        /** 长期画像聚合表里的三种键，和上面同名（同一套实体，两张表各记一面）。 */
+        const val PREF_AUTHOR = MUTE_AUTHOR
+        const val PREF_AUTHOR_ID = MUTE_AUTHOR_ID
+        const val PREF_TAG = MUTE_TAG
+        /** 长期画像一个月折半。 */
+        const val PREFERENCE_HALF_LIFE_DAYS = 30.0
+        /** 标签按作者权重的这个比例累计。 */
+        const val TAG_SHARE = 0.45
+        /** 绝对值小到这个程度就当没有，把行删掉，别让聚合表无限长。 */
+        const val PREFERENCE_FLOOR = 0.02
+
         /**
          * 搜索关键词只当**短期意图**：权重小、几个小时就淡掉。
          * 一次好奇的搜索不该把长期画像带偏；真正点开搜索结果才是兴趣。
@@ -823,6 +1194,51 @@ class HistoryStore(context: Context) : SQLiteOpenHelper(context, "iwaraflow.db",
         const val LONG_TERM_SKIPS = 5
         const val LONG_TERM_AUTHOR_PENALTY = 1.5
         const val LONG_TERM_TAG_PENALTY = 0.8
+
+        /**
+         * 推荐曝光。一条 = 一次“这条视频被放进了某个流的第几位”，连同它是怎么被选出来的
+         * （来源、分数、推荐理由、是不是探索位 / 老片），以及用户后来对它做了什么
+         * （**真实播放毫秒数**、有没有播完、有没有划走、点赞收藏）。
+         *
+         * 全部只存本机，一个字节都不上传。有了它才能回答“标签召回效果怎么样”
+         * “探索位成功率多少”“排第 1 和第 20 差多少”这类问题，
+         * 而不是只能看一个混了所有页面的总平均。
+         */
+        private val IMPRESSIONS_TABLE = """CREATE TABLE IF NOT EXISTS recommendation_impressions(
+                session_id TEXT NOT NULL,
+                video_id TEXT NOT NULL,
+                surface TEXT NOT NULL,
+                position INTEGER NOT NULL,
+                sources TEXT NOT NULL DEFAULT '',
+                score REAL NOT NULL DEFAULT 0,
+                reason TEXT NOT NULL DEFAULT '',
+                shown_at INTEGER NOT NULL,
+                author TEXT NOT NULL DEFAULT '',
+                tags TEXT NOT NULL DEFAULT '',
+                played_ms INTEGER NOT NULL DEFAULT 0,
+                duration_ms INTEGER NOT NULL DEFAULT 0,
+                completed INTEGER NOT NULL DEFAULT 0,
+                skipped INTEGER NOT NULL DEFAULT 0,
+                liked INTEGER NOT NULL DEFAULT 0,
+                favorited INTEGER NOT NULL DEFAULT 0,
+                exploration INTEGER NOT NULL DEFAULT 0,
+                classic INTEGER NOT NULL DEFAULT 0,
+                PRIMARY KEY(session_id, video_id)
+            )""".trimIndent()
+        /**
+         * 长期口味聚合。每发生一次行为就“旧分按时间衰减 + 新增量”写回来，
+         * 于是老兴趣只会慢慢淡掉，而不是因为滚出最近 [PROFILE_ROWS] 条行为而突然消失。
+         */
+        private val PREFERENCE_TABLE = """CREATE TABLE IF NOT EXISTS preference_entities(
+                type TEXT NOT NULL,
+                entity_key TEXT NOT NULL,
+                score REAL NOT NULL,
+                updated_at INTEGER NOT NULL,
+                PRIMARY KEY(type, entity_key)
+            )""".trimIndent()
+
+        private const val IMPRESSIONS_INDEX =
+            "CREATE INDEX IF NOT EXISTS idx_impressions_time ON recommendation_impressions(shown_at DESC)"
 
         /** 同一个视频的不同清晰度各算一条，所以主键是视频加清晰度。 */
         private val DOWNLOADS_TABLE = """CREATE TABLE IF NOT EXISTS downloads(

@@ -39,6 +39,21 @@ data class VideoListPage(
  * 推荐质量的本地诊断指标，见 [HistoryStore.recommendationMetrics]。
  * 只算本机数据，不上传；设置里的「诊断信息」会把它打印出来。
  */
+/**
+ * 一个召回来源在最近的曝光里表现如何：出现过几次、被划走的比例、平均看了多久。
+ * 只算本机数据，用来回答“标签召回到底有没有用”“探索位成功率多少”。
+ */
+data class SourceStat(
+    val source: String,
+    val samples: Int,
+    val skipRate: Double,
+    val averageWatchMs: Long
+) {
+    /** 诊断页里的一行。 */
+    fun line(): String =
+        "$source：$samples 条 · 划走 ${"%.0f%%".format(skipRate * 100)} · 平均 ${averageWatchMs / 1000} 秒"
+}
+
 data class RecommendationMetrics(
     /** 最近统计了多少条观看行为（看过的 + 划走的）。 */
     val samples: Int,

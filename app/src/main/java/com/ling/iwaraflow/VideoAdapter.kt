@@ -59,6 +59,12 @@ class VideoAdapter(
     // Selecting/binding a card is independent from granting a visible page playback.
     @Volatile private var playbackEnabled = false
 
+    /**
+     * 这批卡片属于哪一轮曝光会话，页面写进来（见 [HistoryStore.recordImpression]）。
+     * 留空表示这个页面不记曝光——作者页、搜索页、收藏和历史都不该算进推荐质量。
+     */
+    var impressionSession: String = ""
+
     fun replace(newItems: List<VideoItem>) {
         if (released) return
         cancelIdlePreload()
@@ -483,17 +489,34 @@ class VideoAdapter(
                 rewound = rewound,
                 reacted = item.liked || item.localFavorite
             )
+            val skipped = interest <= -WATCH_SIGNAL_FLOOR && swipedAway
             when {
                 interest >= WATCH_SIGNAL_FLOOR -> {
                     history.recordInteractionAsync(item, "watch", interest)
                     lastSkipped = null
                 }
                 // 划走才算负反馈：切后台、开别的页面不是态度。
-                interest <= -WATCH_SIGNAL_FLOOR && swipedAway -> {
+                skipped -> {
                     history.recordInteractionAsync(item, HistoryStore.ACTION_SKIP, interest)
                     noteSkipStreak(item)
                 }
             }
+            // 曝光结果：记的是**真实播放毫秒数**，不是 history.last_position
+            // （拖到 8 分钟看十秒，那个字段会显示看了八分钟）。
+            val session = impressionSession
+            if (session.isNotBlank()) {
+                val played = playedMs
+                history.post {
+                    history.noteImpressionOutcome(session, item.id, played, duration, endedOnce, skipped)
+                }
+            }
+        }
+
+        /** 点赞 / 收藏也记进这条曝光：来源好不好用，强正反馈是最直接的证据。 */
+        private fun noteReaction(item: VideoItem, liked: Boolean = false, favorited: Boolean = false) {
+            val session = impressionSession
+            if (session.isBlank()) return
+            history.post { history.noteImpressionReaction(session, item.id, liked, favorited) }
         }
 
         /** 用户把这张卡片划走了（翻页），在停播之前先记下行为。 */
@@ -544,6 +567,7 @@ class VideoAdapter(
                 history.setLocalFavoriteAsync(item, desired)
                 if (desired) {
                     history.recordInteractionAsync(item, "favorite", 1.4)
+                    noteReaction(item, favorited = true)
                     onSignal?.invoke(item, "favorite")
                     reactionBurst.playOn(favorite, ReactionBurstView.Kind.FAVORITE)
                 } else {
@@ -1012,6 +1036,7 @@ class VideoAdapter(
                         if (desired) {
                             history.recordInteractionAsync(item, "like", 2.0)
                             history.markSeenAsync(item.id)
+                            noteReaction(item, liked = true)
                             onSignal?.invoke(item, "like")
                         } else {
                             // 取消点赞：比“没点过”还差一点。

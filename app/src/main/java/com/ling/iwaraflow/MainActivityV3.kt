@@ -102,6 +102,12 @@ class MainActivityV3 : AppCompatActivity() {
      * 连着抽到同一批坏视频的话，[emptyRefills] 还会被它们一次次重置，永远降不了级。
      */
     private val consumedCandidates = HashSet<String>()
+
+    /**
+     * 这一轮推荐 / 这一次列表的会话号，曝光记录按它归组，见 [HistoryStore.recordImpression]。
+     * 每次整列表重新加载换一个。
+     */
+    private var feedSession = ""
     /** 连续几次重新生成推荐都没拿到**能播的**新内容。拿到就归零。 */
     private var emptyRefills = 0
 
@@ -394,6 +400,8 @@ class MainActivityV3 : AppCompatActivity() {
             currentPage = 0
             emptyRefills = 0
             consumedCandidates.clear()
+            feedSession = java.util.UUID.randomUUID().toString()
+            adapter.impressionSession = feedSession
             invalidateRequests()
             loading.visibility = View.VISIBLE
             error.visibility = View.GONE
@@ -506,7 +514,9 @@ class MainActivityV3 : AppCompatActivity() {
         awaitingFullFeed = true
         loading.visibility = View.GONE
         error.visibility = View.GONE
-        adapter.replace(decorate(batch))
+        val head = decorate(batch)
+        adapter.replace(head)
+        noteImpressions(head, 0)
         pager.setCurrentItem(0, false)
         adapter.setActive(0)
         window.decorView.postDelayed({ runLaunchUpdateCheck() }, 1500L)
@@ -552,6 +562,7 @@ class MainActivityV3 : AppCompatActivity() {
         } else {
             error.visibility = View.GONE
             adapter.replace(list)
+            noteImpressions(list, 0)
             pager.setCurrentItem(0, false)
             adapter.setActive(0)
         }
@@ -560,6 +571,7 @@ class MainActivityV3 : AppCompatActivity() {
     private fun appendFeed(list: List<VideoItem>) {
         val before = adapter.itemCount
         adapter.append(list)
+        noteImpressions(list, before)
         if (adapter.itemCount == 0) return
         if (before == 0) {
             pendingAdvanceAfterLoad = false
@@ -730,6 +742,50 @@ class MainActivityV3 : AppCompatActivity() {
     }
 
     /** 一次问清这一批的本地收藏状态，不是一条视频查一次库。 */
+    /**
+     * 记一批曝光：这几条视频进了流的第几位、当时是怎么被选出来的。
+     *
+     * 推荐诊断以前是从全局行为表算的，而播放器是所有页面共用的——在作者页连看一小时
+     * 同一个作者，那些观看也会被算进“推荐质量”。改成按曝光记之后，指标只看本流，
+     * 平均播放也是真实播放时长而不是 `history.last_position`。只存本机，不上传。
+     */
+    private fun noteImpressions(list: List<VideoItem>, startPosition: Int) {
+        if (list.isEmpty() || feedSession.isBlank()) return
+        val session = feedSession
+        val surface = mode
+        val rows = list.mapIndexed { index, item ->
+            val candidate = if (surface == HistoryStore.SURFACE_RECOMMEND) recommender.candidateFor(item.id) else null
+            ImpressionRow(
+                item = item,
+                position = startPosition + index,
+                sources = candidate?.sources?.joinToString("\u001F").orEmpty(),
+                score = candidate?.let { it.sourceScore + it.baseQuality } ?: 0.0,
+                reason = candidate?.reason().orEmpty(),
+                exploration = candidate?.exploration == true,
+                classic = candidate?.classic == true
+            )
+        }
+        history.post {
+            rows.forEach { row ->
+                history.recordImpression(
+                    session, row.item, surface, row.position,
+                    row.sources, row.score, row.reason, row.exploration, row.classic
+                )
+            }
+        }
+    }
+
+    /** [noteImpressions] 里一条待写入的曝光；取好数据再交给写线程，别在后台线程读界面状态。 */
+    private class ImpressionRow(
+        val item: VideoItem,
+        val position: Int,
+        val sources: String,
+        val score: Double,
+        val reason: String,
+        val exploration: Boolean,
+        val classic: Boolean
+    )
+
     private fun decorate(raw: List<VideoItem>): List<VideoItem> {
         if (raw.isEmpty()) return raw
         val favorites = runCatching { history.loadStatuses(raw.map { it.id }).favorites }.getOrNull()

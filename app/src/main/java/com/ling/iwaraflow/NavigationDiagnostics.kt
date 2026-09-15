@@ -140,11 +140,22 @@ object NavigationDiagnostics {
     internal fun recommendationSummary(context: Context): String = runCatching {
         val store = HistoryStore(context.applicationContext)
         try {
-            store.recommendationMetrics().summary()
+            buildString {
+                append(store.recommendationMetrics().summary())
+                // 按来源拆开：标签召回的作品到底看不看得下去、探索位成功率多少。
+                val bySource = store.impressionSourceStats()
+                if (bySource.isNotEmpty()) {
+                    append("\n按来源：")
+                    bySource.take(MAX_SOURCE_LINES).forEach { append("\n  · ${it.line()}") }
+                }
+            }
         } finally {
             runCatching { store.close() }
         }
     }.getOrDefault("推荐指标读取失败")
+
+    /** 诊断里最多列几行来源明细。 */
+    private const val MAX_SOURCE_LINES = 8
 
     private fun version(context: Context): String = runCatching {
         @Suppress("DEPRECATION")

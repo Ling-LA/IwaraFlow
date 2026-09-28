@@ -231,7 +231,9 @@ class MainActivityV3 : AppCompatActivity() {
         })
 
         setupTopBar()
-        if (intent.getBooleanExtra("return_recommend", false)) returnToRecommend() else loadFeed(reset = true)
+        if (!intent.hasExtra(IwaraSharedLink.EXTRA_URL)) {
+            if (intent.getBooleanExtra("return_recommend", false)) returnToRecommend() else loadFeed(reset = true)
+        }
         // 官方点赞的完整同步放在首屏之后，避免和冷启动抢网络。
         window.decorView.postDelayed({ if (!isFinishing && !isDestroyed) likedSync.syncIfStale() }, 2500L)
         // 兜底：即使首屏加载失败，也仍然会检查更新。正常情况下首屏出来后会更早触发。
@@ -350,13 +352,17 @@ class MainActivityV3 : AppCompatActivity() {
         mode = "recommend"
         pagingEnabled = true
         currentPage = 0
+        styleRecommendTab()
+        loadFeed(reset = true)
+    }
+
+    private fun styleRecommendTab() {
         val selected = findViewById<TextView>(R.id.tabRecommend)
         listOf(R.id.tabRecommend, R.id.tabTrending, R.id.tabPopular, R.id.tabLatest).forEach { id ->
             val tab = findViewById<TextView>(id)
             tab.setTextColor(if (tab === selected) 0xFFFFFFFF.toInt() else 0x99FFFFFF.toInt())
             tab.setTypeface(null, if (tab === selected) android.graphics.Typeface.BOLD else android.graphics.Typeface.NORMAL)
         }
-        loadFeed(reset = true)
     }
 
     /**
@@ -1005,10 +1011,72 @@ class MainActivityV3 : AppCompatActivity() {
     /** 本地视频补拉详情的序号：连着点两个下载视频时，只认最后一次的结果。 */
     private var localDetailSerial = 0
 
+    /** Consume each internal link intent once. Clipboard deduplication survives process restarts. */
+    private fun consumeSharedLink(): Boolean {
+        val text = intent.getStringExtra(IwaraSharedLink.EXTRA_URL) ?: return false
+        intent.removeExtra(IwaraSharedLink.EXTRA_URL)
+        val link = IwaraSharedLink.parse(text) ?: run {
+            if (adapter.items.isEmpty()) returnToRecommend()
+            return false
+        }
+        PipRegistry.dismiss(this)
+        openingInternalPage = false
+        sharingToApp = false
+        pendingVideoId = null
+        pendingLocalUri = null
+        localDetailSerial++
+        comments.close()
+        setFullscreen(false)
+        invalidateRequests()
+        if (link.kind == IwaraSharedLink.Kind.AUTHOR) {
+            if (adapter.items.isEmpty()) loadFeed(reset = true)
+            openAuthor("", link.key, link.key)
+        } else openSharedVideo(link.key)
+        return true
+    }
+
+    private fun openSharedVideo(videoId: String) {
+        val serial = requestSerial
+        loadingMore = true // Prevent the old feed from starting a continuation during this request.
+        loading.visibility = View.VISIBLE
+        error.visibility = View.GONE
+        api.getVideo(videoId) { result -> runOnUiThread {
+            if (isFinishing || isDestroyed || serial != requestSerial) return@runOnUiThread
+            loading.visibility = View.GONE
+            loadingMore = false
+            result.onSuccess { item ->
+                saveCurrentHomeSession()
+                mode = "recommend"
+                pagingEnabled = true
+                currentPage = 0
+                emptyRefills = 0
+                pendingAdvanceAfterLoad = false
+                recommendQueue.clear()
+                consumedCandidates.clear()
+                consumedCandidates.add(item.id)
+                feedSession = java.util.UUID.randomUUID().toString()
+                adapter.impressionSession = feedSession
+                item.localFavorite = history.isLocalFavorite(item.id)
+                styleRecommendTab()
+                adapter.replace(listOf(item))
+                pager.setCurrentItem(0, false)
+                adapter.setActive(0)
+                // Keep the requested video first; the normal recommendation pipeline appends the rest.
+                loadMore()
+            }.onFailure {
+                Toast.makeText(this, "分享视频加载失败：${it.message ?: "请稍后重试"}", Toast.LENGTH_LONG).show()
+                if (adapter.items.isEmpty()) returnToRecommend()
+            }
+            if (!openingInternalPage && lifecycle.currentState.isAtLeast(Lifecycle.State.RESUMED)) adapter.resumeActive()
+        } }
+    }
+
     private fun openSingleVideo(videoId: String) {
+        invalidateRequests()
+        val serial = requestSerial
         loading.visibility = View.VISIBLE
         api.getVideo(videoId) { result -> runOnUiThread {
-            if (isFinishing || isDestroyed) return@runOnUiThread
+            if (isFinishing || isDestroyed || serial != requestSerial) return@runOnUiThread
             loading.visibility = View.GONE
             result.onSuccess { item ->
                 saveCurrentHomeSession()
@@ -1150,6 +1218,10 @@ class MainActivityV3 : AppCompatActivity() {
     override fun onResume() {
         super.onResume()
         hideStatusBar()
+        if (consumeSharedLink()) {
+            if (!openingInternalPage) adapter.resumeActive()
+            return
+        }
         // 作者页 / 搜索页的小窗还在别的任务里放着。这个判断要放在 openingInternalPage 之前：
         // 子页面进小窗时主页正是“正在打开内部页面”的状态，被动顶上来的主页不能就这么黑着。
         val fromIcon = launchedFromIcon

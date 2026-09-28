@@ -6,6 +6,7 @@ class IwaraFlowApplication : Application() {
     override fun onCreate() {
         super.onCreate()
         NavigationDiagnostics.install(this)
+        registerActivityLifecycleCallbacks(ClipboardLinkHandler())
         // 代理要在第一个网络请求之前就位，所以放在这里而不是等到首页。
         val prefs = AppPrefs(this)
         NetworkProxy.apply(prefs)

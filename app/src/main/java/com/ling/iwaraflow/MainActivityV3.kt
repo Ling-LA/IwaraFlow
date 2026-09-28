@@ -597,42 +597,13 @@ class MainActivityV3 : AppCompatActivity() {
     }
 
     /**
-     * 兴趣管理：把点过「不感兴趣：作者 / 标签」的都列出来，可以随时恢复。
+     * 兴趣管理：主动调整标签偏好，并保留已屏蔽作者 / 标签的恢复入口。
      *
      * 明确的负反馈本来连探索位都不给，恢复入口就是它唯一的出路——
      * 口味变了、或者手滑点错了，不该永远出不来。
      */
     private fun showInterestManager() {
-        val profile = runCatching { history.preferenceProfile() }.getOrNull()
-        val authors = profile?.mutedAuthors.orEmpty().sorted()
-        val tags = profile?.mutedTags.orEmpty().sorted()
-        val entries = authors.map { DislikeSheet.Kind.AUTHOR to it } + tags.map { DislikeSheet.Kind.TAG to it }
-        if (entries.isEmpty()) {
-            AlertDialog.Builder(this)
-                .setTitle("兴趣管理")
-                .setMessage("还没有点过「不感兴趣：作者 / 标签」。\n\n点过之后这类内容就不再进入推荐，也不会随时间自己恢复；只有在这里点“恢复”才会回来。")
-                .setPositiveButton("知道了", null)
-                .show()
-            return
-        }
-        val labels = entries.map { (kind, key) ->
-            if (kind == DislikeSheet.Kind.AUTHOR) "作者 @$key" else "标签 #$key"
-        }.toTypedArray()
-        AlertDialog.Builder(this)
-            .setTitle("兴趣管理 · 点一项恢复")
-            .setItems(labels) { _, which ->
-                val (kind, key) = entries[which]
-                val removed = runCatching { history.forgetDislike(kind, key) }.getOrDefault(0)
-                val what = if (kind == DislikeSheet.Kind.AUTHOR) "@$key" else "#$key"
-                Toast.makeText(
-                    this,
-                    if (removed > 0) "已恢复 $what，之后还会推荐" else "没有找到 $what 的记录",
-                    Toast.LENGTH_SHORT
-                ).show()
-                if (removed > 0) rerankQueue()
-            }
-            .setNegativeButton("关闭", null)
-            .show()
+        InterestManager.show(this, history, ::rerankQueue)
     }
 
     /** 上次重排剩余候选之后翻了几页。 */

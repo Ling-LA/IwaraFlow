@@ -329,6 +329,15 @@
             android:padding="6dp"
             android:src="@drawable/ic_pip" />
 
+        <ImageView
+            android:id="@+id/pauseDownload"
+            android:layout_width="34dp"
+            android:layout_height="34dp"
+            android:contentDescription="下载视频"
+            android:padding="6dp"
+            android:src="@drawable/ic_download"
+            android:visibility="gone" />
+
         <TextView
             android:id="@+id/pauseRemaining"
             android:layout_width="wrap_content"

@@ -310,6 +310,7 @@ class VideoAdapter(
         private val download = view.findViewById<TextView>(R.id.download)
         private val fullscreen = view.findViewById<TextView>(R.id.fullscreen)
         private val pausePip = view.findViewById<View>(R.id.pausePip)
+        private val pauseDownload = view.findViewById<View>(R.id.pauseDownload)
         private val pauseFullscreenExit = view.findViewById<View>(R.id.pauseFullscreenExit)
         private val seekPreview = view.findViewById<TextView>(R.id.seekPreview)
         private val share = view.findViewById<TextView>(R.id.share)
@@ -542,6 +543,7 @@ class VideoAdapter(
             }
             quality.setOnClickListener { showQualityChooser(item, false) }
             download.setOnClickListener { showQualityChooser(item, true) }
+            pauseDownload.setOnClickListener { showQualityChooser(item, true) }
             // 操作栏是全屏；小窗和退出全屏挪到了暂停时才出现的那一行里。
             fullscreen.visibility = if (onFullscreen == null) View.GONE else View.VISIBLE
             fullscreen.setOnClickListener { onFullscreen?.invoke(item, !fullscreenMode) }

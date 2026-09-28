@@ -10,8 +10,12 @@ object VideoShare {
 
     fun shareText(item: VideoItem): String {
         val link = linkFor(item)
-        val title = item.title.trim()
-        return if (title.isBlank()) link else "$title\n$link"
+        val title = item.title.trim().ifBlank { "未命名视频" }
+        val author = item.author.trim().ifBlank { item.authorUsername.trim().ifBlank { "未知作者" } }
+        val time = if (item.createdAt > 0L) java.time.Instant.ofEpochMilli(item.createdAt)
+            .atZone(java.time.ZoneId.systemDefault())
+            .format(java.time.format.DateTimeFormatter.ofPattern("yyyy-MM-dd HH:mm:ss XXX")) else "未知"
+        return "标题：$title\n作者：$author\n发布时间：$time\n链接：$link"
     }
 
     /**

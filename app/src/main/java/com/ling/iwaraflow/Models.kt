@@ -158,12 +158,22 @@ data class PreferenceProfile(
     val mutedAuthors: Set<String> = emptySet(),
     val mutedAuthorIds: Set<String> = emptySet(),
     /** 用户明确点过「不感兴趣：标签」的标签。 */
-    val mutedTags: Set<String> = emptySet()
+    val mutedTags: Set<String> = emptySet(),
+    val manualTagPreferences: Map<String, Int> = emptyMap()
 ) {
     fun score(item: VideoItem): Double {
         val byId = item.authorId.takeIf { it.isNotBlank() }?.let { authorIdWeights[it] }
         val author = byId ?: authorWeights[item.author.lowercase()] ?: 0.0
         return author + matchedTagScore(item) + (videoWeights[item.id] ?: 0.0)
+    }
+
+    fun manualTagScore(item: VideoItem): Double = item.tags.map(SearchQuery::canonicalTag).distinct()
+        .mapNotNull { manualTagPreferences[it] }.sum().coerceIn(-TOP_TAGS, TOP_TAGS) * MANUAL_TAG_WEIGHT
+
+    /** Keep explicit choices effective even when years of learned signals saturate the cap. */
+    fun rankingScore(item: VideoItem): Double {
+        val manual = manualTagScore(item)
+        return (score(item) - manual).coerceIn(-6.0, 8.0) + manual
     }
 
     /**
@@ -172,10 +182,12 @@ data class PreferenceProfile(
      * 按绝对值取前 [TOP_TAGS] 个，强负反馈的标签同样算得进来。
      */
     private fun matchedTagScore(item: VideoItem): Double =
-        item.tags.mapNotNull { tagWeights[it.lowercase()] }
+        item.tags.distinctBy(SearchQuery::canonicalTag)
+            .filter { SearchQuery.canonicalTag(it) !in manualTagPreferences }
+            .mapNotNull { tagWeights[it.lowercase()] }
             .sortedByDescending { kotlin.math.abs(it) }
             .take(TOP_TAGS)
-            .sum()
+            .sum() + manualTagScore(item)
 
     /** 用户明确说过不想看这个作者 / 标签。这类内容连探索位都不该给。 */
     fun isMuted(item: VideoItem): Boolean =
@@ -188,9 +200,15 @@ data class PreferenceProfile(
      * **拉黑的直接排除**：一个标签既被点过「不感兴趣」、又因为看过几条同类视频攒了正权重，
      * 是完全可能的；不排掉的话召回还会专门去抓它，抓回来再被硬过滤掉，白跑一趟请求。
      */
-    fun topTags(count: Int, minWeight: Double): List<String> =
-        tagWeights.entries.filter { it.value >= minWeight && it.key !in mutedTags }
-            .sortedByDescending { it.value }.take(count).map { it.key }
+    fun topTags(count: Int, minWeight: Double): List<String> {
+        val muted = mutedTags.map(SearchQuery::canonicalTag).toSet()
+        val explicit = manualTagPreferences.filter { it.value > 0 && it.key !in muted }.keys.sorted()
+        val learned = tagWeights.entries.filter {
+            it.value >= minWeight && SearchQuery.canonicalTag(it.key) !in muted &&
+                (manualTagPreferences[SearchQuery.canonicalTag(it.key)] ?: 0) >= 0
+        }.sortedByDescending { it.value }.map { it.key }
+        return (explicit + learned).distinctBy(SearchQuery::canonicalTag).take(count)
+    }
 
     fun topAuthorIds(count: Int, minWeight: Double): List<String> =
         authorIdWeights.entries.filter { it.value >= minWeight && it.key !in mutedAuthorIds }
@@ -199,5 +217,6 @@ data class PreferenceProfile(
     companion object {
         /** 一条视频最多按几个标签算分。 */
         const val TOP_TAGS = 4
+        const val MANUAL_TAG_WEIGHT = 8.0
     }
 }

@@ -32,7 +32,8 @@ object QueryTranslator {
     /** 太长的输入（整句话）不做互译：那不是搜索词，翻出来也搜不到东西。 */
     const val MAX_QUERY_LENGTH = 40
 
-    const val AI_PROMPT = "你是搜索词转换器。用户会给一个搜索词（多半是人名、角色名、作品名或标签）。" +
+    const val AI_PROMPT = "你是 Iwara 视频标签搜索词转换器。用户会给一个搜索词（多半是人名、角色名、作品名或标签）。" +
+        "必须保持领域含义和关键词数量，不要扩大概念或按字面拆译俚语；无法确定的词保留原文。" +
         "给出它在简体中文、英文、日文、韩文里最常用的写法：专有名词用各语言的通行译名，" +
         "不要音译成四不像，也不要解释。严格按这四行输出，每行一个语言代码加冒号：\n" +
         "zh: …\nen: …\nja: …\nko: …"
@@ -51,6 +52,7 @@ object QueryTranslator {
      */
     fun expand(query: String, callback: (List<String>) -> Unit) {
         val original = query.trim()
+        SearchQuery.knownAliases(original)?.let { callback(it); return }
         if (!worthTranslating(original)) { callback(listOf(original).filter { it.isNotBlank() }); return }
         cached(original)?.let { callback(it); return }
         io.execute {

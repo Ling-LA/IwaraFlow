@@ -28,7 +28,7 @@ class VideoShareTest {
                 createdAt = java.time.Instant.parse("2026-09-28T00:00:00Z").toEpochMilli())
             val text = VideoShare.shareText(video)
             assertTrue(text.contains("作者：alice"))
-            assertTrue(text.contains("发布时间：2026-09-28 08:00:00 +08:00"))
+            assertEquals("发布时间：2026-09-28", text.lines()[2])
         } finally { java.util.TimeZone.setDefault(original) }
     }
 
@@ -37,14 +37,14 @@ class VideoShareTest {
 
     @Test fun authorCardCarriesNameProfileAndLink() {
         assertEquals(
-            "Fixture 作者（@fixture）\n每周更新 MMD\nhttps://www.iwara.tv/profile/fixture",
+            "作者：Fixture 作者\n链接：https://www.iwara.tv/profile/fixture",
             VideoShare.authorShareText(author("每周更新 MMD"))
         )
     }
 
     @Test fun anAuthorWithoutAProfileTextStillSharesTheLink() {
         assertEquals(
-            "Fixture 作者（@fixture）\nhttps://www.iwara.tv/profile/fixture",
+            "作者：Fixture 作者\n链接：https://www.iwara.tv/profile/fixture",
             VideoShare.authorShareText(author("   "))
         )
     }

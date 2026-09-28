@@ -100,7 +100,11 @@ object SharePanel {
 
         view.findViewById<View>(R.id.shareCopy).setOnClickListener {
             (activity.getSystemService(Context.CLIPBOARD_SERVICE) as? ClipboardManager)
-                ?.setPrimaryClip(ClipData.newPlainText(subject, text))
+                ?.setPrimaryClip(ClipData.newPlainText(subject, text).apply {
+                    description.extras = android.os.PersistableBundle().apply {
+                        putBoolean(ClipboardLinkHandler.OWN_COPY, true)
+                    }
+                })
             Toast.makeText(activity, "链接已复制", Toast.LENGTH_SHORT).show()
             dialog.dismiss()
         }

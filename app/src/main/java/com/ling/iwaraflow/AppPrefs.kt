@@ -12,6 +12,14 @@ class AppPrefs(context: Context) {
      */
     private val secrets by lazy { SecureSessionStore(context) }
 
+    var autoOpenClipboardLinks: Boolean
+        get() = prefs.getBoolean("auto_open_clipboard_links", true)
+        set(value) = prefs.edit().putBoolean("auto_open_clipboard_links", value).apply()
+
+    internal var handledClipboardLink: String
+        get() = prefs.getString("handled_clipboard_link", "").orEmpty()
+        set(value) = prefs.edit().putString("handled_clipboard_link", value).apply()
+
     var skipSeen: Boolean
         get() = prefs.getBoolean("skip_seen", true)
         set(value) = prefs.edit().putBoolean("skip_seen", value).apply()

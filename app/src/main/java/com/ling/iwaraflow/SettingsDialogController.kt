@@ -96,6 +96,16 @@ class SettingsDialogController(
             text = "暂停时左下角的两个按钮一次跳多少秒。"
             textSize = 12f; setTextColor(0xFF607D93.toInt()); setPadding(dp(4), dp(4), 0, dp(8))
         })
+        panel.addView(sectionTitle("分享链接"))
+        val clipboardLinks = CheckBox(activity).apply {
+            text = "打开应用时自动识别剪贴板中的 Iwara 链接"
+            isChecked = prefs.autoOpenClipboardLinks
+        }
+        panel.addView(clipboardLinks)
+        panel.addView(TextView(activity).apply {
+            text = "复制视频或作者主页链接后打开应用即可跳转。同一次复制只打开一次；分享视频上划后继续推荐。"
+            textSize = 12f; setTextColor(0xFF607D93.toInt()); setPadding(dp(4), dp(4), 0, dp(8))
+        })
         panel.addView(sectionTitle("默认清晰度"))
         val qualityValues = arrayOf("highest", "Source", "1080", "720", "540", "360")
         val qualityNames = arrayOf("最高可用 / 原画", "Source", "1080p", "720p", "540p", "360p")
@@ -243,6 +253,7 @@ class SettingsDialogController(
             prefs.skipSeen = skipSeen.isChecked; prefs.autoNext = autoNext.isChecked; prefs.autoPip = autoPip.isChecked
             prefs.skipSeenEverywhere = skipSeenEverywhere.isChecked
             prefs.recommendDebug = recommendDebug.isChecked
+            prefs.autoOpenClipboardLinks = clipboardLinks.isChecked
             prefs.showPauseIndicator = pauseIcon.isChecked
             prefs.tapToPause = tapPause.isChecked
             prefs.skipSeconds = skipValues[skip.selectedItemPosition]

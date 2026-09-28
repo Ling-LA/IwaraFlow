@@ -14,7 +14,7 @@ object VideoShare {
         val author = item.author.trim().ifBlank { item.authorUsername.trim().ifBlank { "未知作者" } }
         val time = if (item.createdAt > 0L) java.time.Instant.ofEpochMilli(item.createdAt)
             .atZone(java.time.ZoneId.systemDefault())
-            .format(java.time.format.DateTimeFormatter.ofPattern("yyyy-MM-dd HH:mm:ss XXX")) else "未知"
+            .format(java.time.format.DateTimeFormatter.ISO_LOCAL_DATE) else "未知"
         return "标题：$title\n作者：$author\n发布时间：$time\n链接：$link"
     }
 
@@ -50,15 +50,12 @@ object VideoShare {
     fun authorLinkFor(author: IwaraAuthor): String =
         "https://www.iwara.tv/profile/${UriEncoder.encodePathSegment(author.username)}"
 
-    /** 作者名片：名字、用户名、简介和主页链接。 */
+    /** 作者名片明确标明分享的是作者主页。 */
     fun authorShareText(author: IwaraAuthor): String {
         val name = author.name.trim().ifBlank { author.username }
-        val header = if (author.username.isBlank()) name else "$name（@${author.username}）"
-        val description = author.description.trim()
         return buildString {
-            append(header)
-            if (description.isNotBlank()) append("\n").append(description)
-            if (author.username.isNotBlank()) append("\n").append(authorLinkFor(author))
+            append("作者：").append(name.ifBlank { "未知作者" })
+            if (author.username.isNotBlank()) append("\n链接：").append(authorLinkFor(author))
         }
     }
 

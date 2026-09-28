@@ -198,7 +198,7 @@ class SettingsDialogController(
 
         panel.addView(sectionTitle("维护"))
         panel.addView(actionRow("同步点赞记录", "把在网页端点过的赞补进“已看”，刷新推荐后生效。") { onSyncLikes() })
-        panel.addView(actionRow("兴趣管理", "点过「不感兴趣」的作者和标签列在这里，它们不再进入推荐，可以随时恢复。") { onInterestManager() })
+        panel.addView(actionRow("兴趣管理", "主动添加感兴趣或不感兴趣的标签，调整推荐机会；也可恢复已屏蔽内容。不影响主动搜索。") { onInterestManager() })
         panel.addView(actionRow("诊断信息", "最近的异常、退出原因和加载线索、推荐质量指标，只存在本机，不会上传。") {
             onDiagnostics()
         })

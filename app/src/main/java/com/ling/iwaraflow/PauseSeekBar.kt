@@ -91,6 +91,8 @@ class PauseSeekBar @JvmOverloads constructor(
         remaining(root)?.text = "-${formatTime((duration - position).coerceAtLeast(0L))}"
         root.findViewById<View>(R.id.pauseFullscreenExit)?.visibility =
             if (mode(root) == MODE_FULLSCREEN) View.VISIBLE else View.GONE
+        root.findViewById<View>(R.id.pauseDownload)?.visibility =
+            if (mode(root) == MODE_FULLSCREEN) View.VISIBLE else View.GONE
         if (row.visibility != View.VISIBLE) row.visibility = View.VISIBLE
         var rowHeight = row.height
         if (rowHeight <= 0) {

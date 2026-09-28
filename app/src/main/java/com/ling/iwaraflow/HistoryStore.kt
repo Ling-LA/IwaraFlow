@@ -16,7 +16,7 @@ data class MutedEntities(
     val tags: Set<String> = emptySet()
 )
 
-class HistoryStore(context: Context) : SQLiteOpenHelper(context, "iwaraflow.db", null, 10) {
+class HistoryStore(context: Context) : SQLiteOpenHelper(context, "iwaraflow.db", null, 11) {
     /**
      * **UI 线程不写库**。划一条视频要写好几笔（观看记录、行为、已看标记），
      * 而这些方法都是 `@Synchronized` 的——和后台算画像抢同一把锁，用久了就是划走那一下的微卡顿。
@@ -127,12 +127,14 @@ class HistoryStore(context: Context) : SQLiteOpenHelper(context, "iwaraflow.db",
         db.execSQL(IMPRESSIONS_TABLE)
         db.execSQL(IMPRESSIONS_INDEX)
         db.execSQL(PREFERENCE_TABLE)
+        db.execSQL(MANUAL_TAG_TABLE)
         db.execSQL("CREATE INDEX idx_history_time ON history(watched_at DESC)")
         db.execSQL("CREATE INDEX idx_interactions_time ON interactions(created_at DESC)")
         db.execSQL("CREATE INDEX idx_seen_last_time ON seen_videos(last_seen_at DESC)")
     }
 
     override fun onUpgrade(db: SQLiteDatabase, oldVersion: Int, newVersion: Int) {
+        if (oldVersion < 11) db.execSQL(MANUAL_TAG_TABLE)
         if (oldVersion < 2) {
             try {
                 db.execSQL("ALTER TABLE history ADD COLUMN completed INTEGER NOT NULL DEFAULT 0")
@@ -844,7 +846,41 @@ class HistoryStore(context: Context) : SQLiteOpenHelper(context, "iwaraflow.db",
         authorSkips.forEach { (key, n) -> if (n >= LONG_TERM_SKIPS) author[key] = (author[key] ?: 0.0) - LONG_TERM_AUTHOR_PENALTY }
         authorIdSkips.forEach { (key, n) -> if (n >= LONG_TERM_SKIPS) authorIds[key] = (authorIds[key] ?: 0.0) - LONG_TERM_AUTHOR_PENALTY }
         tagSkips.forEach { (key, n) -> if (n >= LONG_TERM_SKIPS) tags[key] = (tags[key] ?: 0.0) - LONG_TERM_TAG_PENALTY }
-        return PreferenceProfile(author, tags, authorIds, videos, muted.authors, muted.authorIds, muted.tags)
+        return PreferenceProfile(author, tags, authorIds, videos, muted.authors, muted.authorIds, muted.tags, manualTagPreferences())
+    }
+
+    /** Device-local, explicit preferences do not decay and are never used by search. */
+    @Synchronized
+    fun manualTagPreferences(): Map<String, Int> {
+        val result = linkedMapOf<String, Int>()
+        readableDatabase.query("manual_tag_preferences", arrayOf("tag", "preference"),
+            null, null, null, null, "tag ASC").use { cursor ->
+            while (cursor.moveToNext()) result[cursor.getString(0)] = cursor.getInt(1)
+        }
+        return result
+    }
+
+    /** 1 = more, -1 = less, 0 = remove explicit preference. */
+    @Synchronized
+    fun setManualTagPreference(raw: String, preference: Int) {
+        require(preference in -1..1)
+        val tag = SearchQuery.canonicalTag(raw)
+        require(tag.isNotBlank() && tag.length <= 100 && tag.none { it.isISOControl() || it in ",，、;；" })
+        val db = writableDatabase
+        db.beginTransaction()
+        try {
+            if (preference == 0) {
+                db.delete("manual_tag_preferences", "tag=?", arrayOf(tag))
+            } else {
+                // An explicit new choice supersedes older hard mutes for the same tag.
+                val oldMutes = mutedEntities().tags.filter { SearchQuery.canonicalTag(it) == tag }
+                oldMutes.forEach { forgetDislike(DislikeSheet.Kind.TAG, it) }
+                db.insertWithOnConflict("manual_tag_preferences", null, ContentValues().apply {
+                    put("tag", tag); put("preference", preference)
+                }, SQLiteDatabase.CONFLICT_REPLACE)
+            }
+            db.setTransactionSuccessful()
+        } finally { db.endTransaction() }
     }
 
     /**
@@ -1161,6 +1197,8 @@ class HistoryStore(context: Context) : SQLiteOpenHelper(context, "iwaraflow.db",
         raw?.split("\u001F")?.filter { it.isNotBlank() } ?: emptyList()
 
     companion object {
+        private const val MANUAL_TAG_TABLE = "CREATE TABLE IF NOT EXISTS manual_tag_preferences(" +
+            "tag TEXT PRIMARY KEY, preference INTEGER NOT NULL CHECK(preference IN (-1, 1)))"
         /** 官方历史点赞种进画像时用的动作名和权重（低于本地点赞的 2.0）。 */
         const val ACTION_CLOUD_LIKE = "cloud_like"
         const val CLOUD_LIKE_WEIGHT = 1.2

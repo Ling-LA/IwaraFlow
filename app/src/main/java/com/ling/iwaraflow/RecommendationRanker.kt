@@ -118,7 +118,7 @@ class RecommendationRanker(private val random: Random = Random()) {
             source = known?.sourceScore ?: 0.0,
             quality = known?.baseQuality ?: qualityScore(item.likes, item.views),
             freshness = 1.6 / (1.0 + ageDays / 30.0),
-            taste = taste.score(item).coerceIn(-6.0, 8.0) * TASTE_WEIGHT,
+            taste = taste.rankingScore(item) * TASTE_WEIGHT,
             jitter = ((item.id.hashCode().toLong() and 0xffff) / 65535.0) * JITTER_WEIGHT
         )
     }
@@ -190,7 +190,7 @@ class RecommendationRanker(private val random: Random = Random()) {
         if (items.size <= 1) return items
         val taste = profile
         return diversify(hardMuteFilter(items, taste).sortedByDescending { item ->
-            qualityScore(item.likes, item.views) + taste.score(item).coerceIn(-6.0, 8.0) * CLASSIC_TASTE_WEIGHT
+            qualityScore(item.likes, item.views) + taste.rankingScore(item) * CLASSIC_TASTE_WEIGHT
         })
     }
 

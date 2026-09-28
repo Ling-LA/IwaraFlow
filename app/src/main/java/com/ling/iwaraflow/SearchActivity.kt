@@ -34,8 +34,6 @@ class SearchActivity : AppCompatActivity() {
      */
     private class Variant(val query: String) {
         var page = 0
-        /** 标签页当前用的是这个词的第几种标签写法（逗号 / 下划线 / 连写）。 */
-        var attempt = 0
         var loading = false
         var noMore = false
     }
@@ -64,12 +62,6 @@ class SearchActivity : AppCompatActivity() {
                 }
             }
             return null
-        }
-
-        /** 翻译回来后补上新写法：已经拿到的结果不动，新写法从第一页开始翻。 */
-        fun addQueries(queries: List<String>) {
-            val known = variants.map { it.query }.toSet()
-            queries.filter { it !in known }.forEach { variants += Variant(it) }
         }
 
         open fun reset(queries: List<String>) {
@@ -132,7 +124,10 @@ class SearchActivity : AppCompatActivity() {
     private var query = ""
     /** 这次搜索实际在用的几种写法：原词 + 中英日韩里另外三种的译法。 */
     private var queries = listOf<String>()
+    private var searchPlan = SearchQuery(emptyList())
+    private var authorPlan = SearchQuery(emptyList())
     private var querySerial = 0
+    private var expansionSerial = 0
     private var currentTab = Tab.VIDEOS
     private var sortKey = SearchSort.DEFAULT_KEY
     private var sortDescending = SearchSort.DEFAULT_DESCENDING
@@ -162,6 +157,10 @@ class SearchActivity : AppCompatActivity() {
         resultList = findViewById(R.id.searchResults)
         pager = findViewById(R.id.searchPager)
         statusView = findViewById(R.id.searchStatus)
+        statusView.setOnClickListener {
+            videoTab.chain = 0; tagTab.chain = 0; authorTab.chain = 0
+            loadNextPage(currentTab)
+        }
         input = findViewById(R.id.searchInput)
         tabViews = mapOf(
             Tab.VIDEOS to findViewById<TextView>(R.id.tabVideos),
@@ -257,7 +256,7 @@ class SearchActivity : AppCompatActivity() {
 
     private fun runSearch(raw: String) {
         val trimmed = raw.trim()
-        if (trimmed.isBlank()) {
+        if (SearchQuery.terms(trimmed).isEmpty()) {
             Toast.makeText(this, "请输入搜索关键词", Toast.LENGTH_SHORT).show()
             return
         }
@@ -270,9 +269,11 @@ class SearchActivity : AppCompatActivity() {
         if (terms.isNotEmpty()) history.recordInteraction(VideoItem("search:$trimmed", trimmed, "", terms, 0), HistoryStore.ACTION_SEARCH, HistoryStore.SEARCH_WEIGHT)
         // 已经翻过的词直接用四种写法开搜；没翻过的先按原词搜着，译文回来再补进去。
         // 作者名只按输入的原词搜：作者的用户名就是他自己起的那一个，翻成别的语言反而搜偏。
-        val start = QueryTranslator.cached(trimmed) ?: listOf(trimmed)
+        searchPlan = SearchQuery.local(trimmed)
+        authorPlan = SearchQuery.literal(trimmed)
+        val start = searchPlan.seeds
         queries = start
-        videoTab.reset(start); tagTab.reset(start); authorTab.reset(listOf(trimmed))
+        videoTab.reset(start); tagTab.reset(start); authorTab.reset(authorPlan.seeds)
         videoAdapter.notifyDataSetChanged()
         tagAdapter.notifyDataSetChanged()
         authorAdapter.notifyDataSetChanged()
@@ -283,19 +284,32 @@ class SearchActivity : AppCompatActivity() {
         expandQuery(trimmed)
     }
 
-    /** 把搜索词补成中英日韩四种写法；回来得晚也不要紧，直接加到正在搜的几栏里。 */
+    /** Expand each AND term independently, then restart validation with the complete plan. */
     private fun expandQuery(raw: String) {
-        if (QueryTranslator.cached(raw) != null) return
-        QueryTranslator.expand(raw) { expanded ->
-            // 认的是搜索词本身：中途换了排序（会重置翻页）也不该把译好的写法丢掉。
-            if (exiting || isFinishing || isDestroyed) return@expand
-            if (query != raw || expanded.size <= 1) return@expand
-            queries = expanded
-            // 只有视频名和标签用几种写法搜，作者名一栏不动。
-            videoTab.addQueries(expanded); tagTab.addQueries(expanded)
-            // 原词可能已经翻到底了：新写法进来后这一栏又有得搜。
-            if (currentTab != Tab.AUTHORS) loadNextPage(currentTab)
-            updateStatus()
+        val serial = ++expansionSerial
+        val terms = SearchQuery.terms(raw)
+        val groups = searchPlan.groups.toMutableList()
+        var remaining = terms.size
+        terms.forEachIndexed { index, term ->
+            QueryTranslator.expand(term) { expanded ->
+                if (exiting || isFinishing || isDestroyed || query != raw || serial != expansionSerial) return@expand
+                groups[index] = expanded.ifEmpty { listOf(term) }
+                remaining--
+                if (remaining != 0) return@expand
+                val updated = SearchQuery(groups.toList())
+                if (updated == searchPlan) return@expand
+                // Re-fetch: earlier pages may contain matches that were rejected before
+                // the other terms' aliases were available. Invalidate their old callbacks.
+                searchPlan = updated
+                queries = updated.seeds
+                querySerial++
+                videoTab.reset(queries); tagTab.reset(queries)
+                // Also release author requests invalidated by the shared serial.
+                authorTab.variants.forEach { it.loading = false }
+                videoAdapter.notifyDataSetChanged(); tagAdapter.notifyDataSetChanged()
+                if (!inFeed) loadNextPage(currentTab)
+                updateStatus()
+            }
         }
     }
 
@@ -356,6 +370,7 @@ class SearchActivity : AppCompatActivity() {
         if (query.isBlank()) { updateStatus(); return }
         querySerial++
         // 几种写法（中英日韩）保持不变，只是各自从第一页按新排序重新翻。
+        authorTab.variants.forEach { it.loading = false }
         val words = queries.ifEmpty { listOf(query) }
         videoTab.reset(words); tagTab.reset(words)
         videoAdapter.notifyDataSetChanged()
@@ -405,24 +420,10 @@ class SearchActivity : AppCompatActivity() {
         if (tab == Tab.AUTHORS) loadAuthorPage() else loadVideoPage(tab)
     }
 
-    /** 标签页各种写法当前真正在用的标签。 */
-    private fun activeTags(): String = tagTab.variants
-        .mapNotNull { TagQuery.candidates(it.query).getOrNull(it.attempt)?.let(TagQuery::display) }
-        .joinToString("  ")
-
     private fun loadVideoPage(tab: Tab) {
         val state = videoState(tab) ?: return
         val variant = state.nextVariant() ?: return
-        val candidates = TagQuery.candidates(variant.query)
-        // 只输了分隔符时没有标签可搜，这种写法直接收尾而不是拿空列表去取下标。
-        if (tab == Tab.TAGS && candidates.getOrNull(variant.attempt) == null) {
-            state.started = true
-            variant.noMore = true
-            updateStatus()
-            // 换下一种写法接着搜。
-            loadVideoPage(tab)
-            return
-        }
+        val tagQuery = SearchQuery.tagKey(variant.query)
         variant.loading = true
         state.started = true
         state.failure = null
@@ -433,17 +434,15 @@ class SearchActivity : AppCompatActivity() {
                     runOnUiThread {
                         if (isStale(serial)) return@runOnUiThread
                         variant.loading = false
-                        // 标签写法没命中就换下一种，全部试完这个词才算没有结果。
-                        if (tab == Tab.TAGS && variant.page == 0 && variant.attempt + 1 < candidates.size) {
-                            variant.attempt += 1
-                        } else {
-                            variant.noMore = true
-                        }
+                        variant.noMore = true
                         updateStatus()
                         loadVideoPage(tab)
                     }
                 } else {
-                    gate.inspectAll(raw, prefs.defaultQuality) { checked ->
+                    val matched = raw.filter {
+                        if (tab == Tab.TAGS) searchPlan.matchesTags(it.tags) else searchPlan.matchesTitle(it.title)
+                    }
+                    gate.inspectAll(matched, prefs.defaultQuality) { checked ->
                         if (isStale(serial)) return@inspectAll
                         runOnUiThread {
                             if (isStale(serial)) return@runOnUiThread
@@ -477,7 +476,7 @@ class SearchActivity : AppCompatActivity() {
             }
         }
         updateStatus()
-        if (tab == Tab.TAGS) api.getVideosByTag(candidates[variant.attempt], variant.page, pageSize, sortKey.api, handler)
+        if (tab == Tab.TAGS) api.getVideosByTag(tagQuery, variant.page, pageSize, sortKey.api, handler)
         else api.searchVideos(variant.query, variant.page, pageSize, sortKey.api, handler)
     }
 
@@ -495,7 +494,7 @@ class SearchActivity : AppCompatActivity() {
                 if (isStale(serial)) return@runOnUiThread
                 variant.loading = false
                 result.onSuccess { users ->
-                    val fresh = users.filter { state.seenIds.add(it.id.ifBlank { it.username }) }
+                    val fresh = users.filter { authorPlan.matchesAuthor(it) && state.seenIds.add(it.id.ifBlank { it.username }) }
                     state.loaded += fresh
                     // 作者名固定按关注数多的优先：每来一页都把整份结果重排。
                     state.items.clear()
@@ -542,9 +541,10 @@ class SearchActivity : AppCompatActivity() {
         val count = currentCount()
         // 几种写法一起搜：把实际在搜的词都写出来，看得见中英日韩都覆盖到了。
         // 作者名只搜原词，就只写原词。
-        val words = if (currentTab == Tab.AUTHORS) listOf(query) else queries.ifEmpty { listOf(query) }
-        val subject = if (currentTab == Tab.TAGS) activeTags().ifBlank { query }
-        else words.joinToString(" / ") { "“$it”" }
+        val plan = if (currentTab == Tab.AUTHORS) authorPlan else searchPlan
+        val subject = plan.groups.joinToString(" AND ") { aliases ->
+            aliases.joinToString(" / ", prefix = "(", postfix = ")") { "“$it”" }
+        }
         val sortHint = if (currentTab == Tab.AUTHORS) "关注数优先" else SearchSort.label(sortKey, sortDescending)
         statusView.text = buildString {
             append("$subject · $label · $sortHint")
@@ -553,7 +553,7 @@ class SearchActivity : AppCompatActivity() {
                 failure != null -> append("  ·  $count 条 · 后续加载失败：$failure")
                 loading && count == 0 -> append("  ·  正在搜索…")
                 count == 0 && noMore -> append(if (currentTab == Tab.TAGS) "  ·  没有找到带这个标签的视频" else "  ·  没有找到结果")
-                count == 0 -> append("  ·  正在搜索…")
+                count == 0 -> append("  ·  暂无匹配，点击继续搜索")
                 else -> {
                     append("  ·  $count 条")
                     if (currentTab != Tab.AUTHORS) {
@@ -563,7 +563,7 @@ class SearchActivity : AppCompatActivity() {
                         }
                         if (unavailable > 0) append("  ·  $unavailable 条当前不可播放")
                     }
-                    if (loading) append("  ·  正在加载更多…") else if (!noMore) append("  ·  下滑继续加载")
+                    if (loading) append("  ·  正在加载更多…") else if (!noMore) append("  ·  下滑或点击继续加载")
                 }
             }
         }
@@ -576,6 +576,8 @@ class SearchActivity : AppCompatActivity() {
         // 从搜索结果里点开的：比刷到的更能说明兴趣。
         history.recordInteraction(item, "search_open", HistoryStore.SEARCH_OPEN_WEIGHT)
         if (index < 0) return
+        // Keep this result set stable while the user is watching it.
+        expansionSerial++
         inFeed = true
         feedTab = tab
         listPage.visibility = View.GONE

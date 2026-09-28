@@ -91,7 +91,8 @@ class RecommendationRanker(private val random: Random = Random()) {
      * 以前重排只算质量 + 新鲜度 + 画像，于是用户点一次赞，整条队列就换了一套评分体系。
      */
     fun rerank(items: List<VideoItem>, taste: PreferenceProfile, now: Long): List<VideoItem> =
-        diversify(spreadAuthors(hardMuteFilter(items, taste).sortedByDescending { scoreOf(it, taste, now) }))
+        balanceManualInterests(
+            diversify(spreadAuthors(hardMuteFilter(items, taste).sortedByDescending { scoreOf(it, taste, now) })), taste)
 
     /** 一条候选此刻的得分：来源 + 质量 + 新鲜度 + 画像 + 稳定抖动。 */
     fun scoreOf(item: VideoItem, taste: PreferenceProfile, now: Long): Double =
@@ -176,10 +177,45 @@ class RecommendationRanker(private val random: Random = Random()) {
         val feed = if (recent.size >= MIN_RECENT_FEED) recent else recent + aged.take(MIN_RECENT_FEED - recent.size)
         // 老片池也按“质量 × 口味”排一遍：穿插进来的应该是“你可能喜欢的经典”，不是全站经典。
         val pool = if (classicsEvery > 0) rankClassics(classics + aged) else emptyList()
-        return weaveClassics(
+        return balanceManualInterests(weaveClassics(
             interleave(exploreDisliked(diversify(spreadAuthors(feed))), subscribed, followed),
             pool
-        ).take(MAX_RESULTS)
+        )).take(MAX_RESULTS)
+    }
+
+    /**
+     * Positive manual tags raise relevance without taking every slot. Unlike the local MMR
+     * lookahead, this can reach neutral candidates anywhere in the pool, before the 80-item
+     * cutoff. Apply after assembly and after live reranking so the mix is not sorted away.
+     * Only move other content forward when needed; never force a disliked or muted item into
+     * a discovery slot, and keep the feed intact if there is no suitable alternative.
+     */
+    internal fun balanceManualInterests(
+        items: List<VideoItem>, taste: PreferenceProfile = profile
+    ): List<VideoItem> {
+        if (taste.manualTagPreferences.values.none { it > 0 }) return items
+        val preferred = items.filter { taste.matchesManualInterest(it) }.mapTo(HashSet()) { it.id }
+        val alternatives = ArrayDeque(items.filter {
+            it.id !in preferred && !taste.matchesManualDisinterest(it) && !taste.isMuted(it) &&
+                taste.score(it) >= EXPLORE_NEGATIVE_THRESHOLD
+        })
+        if (preferred.isEmpty() || alternatives.isEmpty()) return items
+        val pending = ArrayDeque(items)
+        val selected = HashSet<String>()
+        val result = ArrayList<VideoItem>(items.size)
+        var consecutive = 0
+        while (pending.isNotEmpty()) {
+            while (pending.isNotEmpty() && pending.first().id in selected) pending.removeFirst()
+            if (pending.isEmpty()) break
+            while (alternatives.isNotEmpty() && alternatives.first().id in selected) alternatives.removeFirst()
+            val next = if (consecutive >= MANUAL_INTEREST_RUN && pending.first().id in preferred && alternatives.isNotEmpty()) {
+                alternatives.removeFirst().also { candidates[it.id]?.exploration = true }
+            } else pending.removeFirst()
+            selected += next.id
+            result += next
+            consecutive = if (next.id in preferred) consecutive + 1 else 0
+        }
+        return result
     }
 
     /**
@@ -420,6 +456,8 @@ class RecommendationRanker(private val random: Random = Random()) {
         const val MIN_RECENT_FEED = 24
         /** 一次最多产出多少条推荐。 */
         const val MAX_RESULTS = 80
+        /** When alternatives exist, allow at most this many manual-interest matches in a row. */
+        const val MANUAL_INTEREST_RUN = 3
         /** 画像分在总分里占的比重，以及稳定扰动的幅度。 */
         const val TASTE_WEIGHT = 0.38
         const val JITTER_WEIGHT = 0.15

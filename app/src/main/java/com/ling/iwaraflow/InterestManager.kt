@@ -26,7 +26,7 @@ object InterestManager {
             panel.addView(this)
         }
         label("主动调整兴趣", true)
-        label("感兴趣的标签会获得更多推荐机会；不感兴趣的标签会减少推荐。仅影响推荐，不影响主动搜索。空格连接一个标签内的单词，多个标签请分次添加。")
+        label("感兴趣的标签会获得更多推荐机会，同时保留其他题材；不感兴趣的标签会减少推荐。仅影响推荐，不影响主动搜索。空格连接一个标签内的单词，多个标签请分次添加。")
         val input = EditText(context).apply {
             hint = "输入标签，例如 mmd / hatsune_miku"
             setSingleLine(true)

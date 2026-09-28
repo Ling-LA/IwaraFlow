@@ -167,8 +167,21 @@ data class PreferenceProfile(
         return author + matchedTagScore(item) + (videoWeights[item.id] ?: 0.0)
     }
 
-    fun manualTagScore(item: VideoItem): Double = item.tags.map(SearchQuery::canonicalTag).distinct()
-        .mapNotNull { manualTagPreferences[it] }.sum().coerceIn(-TOP_TAGS, TOP_TAGS) * MANUAL_TAG_WEIGHT
+    private fun manualChoices(item: VideoItem): List<Int> = item.tags.map(SearchQuery::canonicalTag).distinct()
+        .mapNotNull { manualTagPreferences[it] }
+
+    fun matchesManualInterest(item: VideoItem): Boolean = manualChoices(item).any { it > 0 }
+
+    fun matchesManualDisinterest(item: VideoItem): Boolean = manualChoices(item).any { it < 0 }
+
+    fun manualTagScore(item: VideoItem): Double {
+        val choices = manualChoices(item)
+        // A manual interest is a modest boost, not a filter. Matching more chosen tags must
+        // not multiply it beyond the entire learned-profile budget or reward tag stuffing.
+        val positive = if (choices.any { it > 0 }) MANUAL_POSITIVE_BOOST else 0.0
+        val negative = choices.count { it < 0 }.coerceAtMost(TOP_TAGS) * MANUAL_NEGATIVE_WEIGHT
+        return positive - negative
+    }
 
     /** Keep explicit choices effective even when years of learned signals saturate the cap. */
     fun rankingScore(item: VideoItem): Double {
@@ -183,8 +196,15 @@ data class PreferenceProfile(
      */
     private fun matchedTagScore(item: VideoItem): Double =
         item.tags.distinctBy(SearchQuery::canonicalTag)
-            .filter { SearchQuery.canonicalTag(it) !in manualTagPreferences }
-            .mapNotNull { tagWeights[it.lowercase()] }
+            .mapNotNull { tag ->
+                val choice = manualTagPreferences[SearchQuery.canonicalTag(tag)] ?: 0
+                val learned = tagWeights[tag.lowercase()] ?: return@mapNotNull null
+                when {
+                    choice < 0 -> null // Explicit negative overrides learned positive for this tag.
+                    choice > 0 -> learned.coerceAtLeast(0.0)
+                    else -> learned
+                }
+            }
             .sortedByDescending { kotlin.math.abs(it) }
             .take(TOP_TAGS)
             .sum() + manualTagScore(item)
@@ -217,6 +237,7 @@ data class PreferenceProfile(
     companion object {
         /** 一条视频最多按几个标签算分。 */
         const val TOP_TAGS = 4
-        const val MANUAL_TAG_WEIGHT = 8.0
+        const val MANUAL_POSITIVE_BOOST = 3.0
+        const val MANUAL_NEGATIVE_WEIGHT = 8.0
     }
 }

@@ -67,6 +67,41 @@ class RecommendationMixTest {
         assertTrue("关注作者一条都没有也不对，实际 $share%", share > 0)
     }
 
+    @Test fun manualInterestDoesNotTurnRepeatedRecommendationLoadsIntoATagOnlyFeed() {
+        val api = api()
+        `when`(api.isLoggedIn()).thenReturn(false)
+        val taste = PreferenceProfile(emptyMap(), emptyMap(), manualTagPreferences = mapOf("dance" to 1))
+        val history = history()
+        `when`(history.preferenceProfile()).thenReturn(taste)
+        `when`(api.getVideoListPageBlocking(anyString(), anyInt(), anyInt())).thenAnswer { call ->
+            val source = call.getArgument<String>(0)
+            val page = call.getArgument<Int>(1)
+            VideoListPage((0 until 60).map {
+                video("$source-$page-$it").copy(tags = listOf(if (source == "date") "other" else "dance"))
+            }, -1)
+        }
+        `when`(api.getVideosByTagBlocking(anyString(), anyInt(), anyInt(), anyString())).thenReturn(
+            (0 until 36).map { video("tag-$it").copy(tags = listOf("dance")) })
+        val engine = RecommendationEngine(api, history, random = Random(4))
+        try {
+            repeat(3) {
+                val delivered = CountDownLatch(1)
+                val result = AtomicReference<Result<List<VideoItem>>>()
+                engine.load(false) { value -> result.set(value); delivered.countDown() }
+                assertTrue(delivered.await(15, TimeUnit.SECONDS))
+                val feed = result.get().getOrThrow()
+                assertEquals(80, feed.size)
+                assertTrue(feed.count(taste::matchesManualInterest) > 0)
+                assertTrue(feed.count { !taste.matchesManualInterest(it) } >= 20)
+                var consecutive = 0
+                feed.forEach { item ->
+                    consecutive = if (taste.matchesManualInterest(item)) consecutive + 1 else 0
+                    assertTrue("Manual tag took over generation $it", consecutive <= 3)
+                }
+            }
+        } finally { engine.close() }
+    }
+
     /** 一组 = DISCOVERY_RUN 条没关注的 + 插进去的那一条。 */
     private val blockSize get() = RecommendationEngine.DISCOVERY_RUN + 1
 

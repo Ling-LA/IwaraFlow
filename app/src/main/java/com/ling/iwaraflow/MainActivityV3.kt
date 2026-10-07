@@ -193,6 +193,9 @@ class MainActivityV3 : AppCompatActivity() {
             onFullscreen = { _, enabled -> setFullscreen(enabled) }
         )
         pager.adapter = adapter
+        topBar.addOnLayoutChangeListener { _, _, _, _, bottom, _, _, _, _ ->
+            adapter.setOverlayTopInset(bottom + dp(8))
+        }
         pager.offscreenPageLimit = 1
         comments = CommentsHost(
             pager = pager,
@@ -231,6 +234,7 @@ class MainActivityV3 : AppCompatActivity() {
         })
 
         setupTopBar()
+        window.decorView.post { if (!isFinishing && !isDestroyed) OverlayPermissionPrompt.showOnce(this) }
         if (!intent.hasExtra(IwaraSharedLink.EXTRA_URL)) {
             if (intent.getBooleanExtra("return_recommend", false)) returnToRecommend() else loadFeed(reset = true)
         }

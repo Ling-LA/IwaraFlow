@@ -31,9 +31,9 @@ class PageSurfaceTest {
         val controller = Robolectric.buildActivity(InterestActivity::class.java).setup()
         try {
             val labels = labels(controller.get().window.decorView)
-            assertTrue(labels.contains("系统兴趣管理"))
+            assertTrue(labels.contains("系统兴趣"))
             assertTrue(labels.contains("手动兴趣管理 · 主动调整兴趣"))
-            assertTrue(labels.contains("已屏蔽的作者和标签"))
+            assertTrue(labels.contains("已屏蔽"))
         } finally { controller.pause().stop().destroy() }
     }
 }

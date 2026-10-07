@@ -55,6 +55,11 @@ class VideoAdapter(
     private var activePosition = RecyclerView.NO_POSITION
     private var pipMode = false
     private var fullscreenMode = false
+    private var overlayTopInset = 0
+    fun setOverlayTopInset(height: Int) {
+        overlayTopInset = height.coerceAtLeast(0)
+        holders.toList().forEach { it.applyVideoInsets() }
+    }
     @Volatile private var released = false
     // Selecting/binding a card is independent from granting a visible page playback.
     @Volatile private var playbackEnabled = false
@@ -724,6 +729,7 @@ class VideoAdapter(
             item.selectedQuality = next.name; item.streamUrl = next.url
             prepareChosenSource(item, sources, preservePosition = true)
             networkHint.visibility = View.GONE
+            applyVideoInsets()
             bufferingSince = 0L
         }
 
@@ -734,6 +740,7 @@ class VideoAdapter(
             networkHint.text = "网络不佳 · 点击切换至 ${lower.name}"
             networkHint.visibility = View.VISIBLE
             networkHint.setOnClickListener { lowerQuality() }
+            networkHint.post { applyVideoInsets() }
         }
 
         private fun start(item: VideoItem) {
@@ -944,7 +951,12 @@ class VideoAdapter(
             // 七成屏，所以不能按“一半”硬砍——砍了画面会被居中回面板底下，反而被遮住。
             val cappedTop = top.coerceAtMost(height / 4)
             val cappedBottom = bottom.coerceAtMost((height - cappedTop - height / 6).coerceAtLeast(0))
-            danmaku.setPadding(0, cappedTop, 0, cappedBottom)
+            // Page controls live above the card, independently of PlayerView padding.
+            val chromeBottom = if (pipMode || fullscreenMode) 0 else
+                overlayTopInset.takeIf { it > 0 } ?: (72 * itemView.resources.displayMetrics.density).toInt()
+            val hintBottom = if (networkHint.visibility == View.VISIBLE) networkHint.bottom +
+                (8 * itemView.resources.displayMetrics.density).toInt() else 0
+            danmaku.setPadding(0, maxOf(cappedTop, chromeBottom, hintBottom).coerceAtMost(height), 0, cappedBottom)
             if (playerView.paddingBottom != cappedBottom || playerView.paddingTop != cappedTop) {
                 playerView.setPadding(0, cappedTop, 0, cappedBottom)
             }
@@ -999,6 +1011,7 @@ class VideoAdapter(
                     offerLowerQuality()
                 } else if (stableSince > 0 && android.os.SystemClock.elapsedRealtime() - stableSince > 12000) {
                     networkHint.visibility = View.GONE
+                    applyVideoInsets()
                 }
                 val shouldAdvance = p.playWhenReady && p.playbackState == Player.STATE_READY
                 if (shouldAdvance && lastWatchdogPosition >= 0 && position <= lastWatchdogPosition + 120L) stalledChecks++
@@ -1219,6 +1232,7 @@ class VideoAdapter(
             likeHold.cancel(); favoriteHold.cancel()
             danmaku.clear(); danmakuLoaded = false; danmakuAttemptAt = -15000L
             networkHint.visibility = View.GONE
+            applyVideoInsets()
             releasePlayerOnly()
         }
 

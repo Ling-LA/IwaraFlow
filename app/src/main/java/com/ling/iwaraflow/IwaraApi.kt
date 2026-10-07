@@ -46,6 +46,12 @@ class IwaraApi(context: Context, private val apiRoot: String = DEFAULT_API_ROOT)
     fun isLoggedIn(): Boolean = !session.refreshToken.isNullOrBlank()
     fun logout() = session.clear()
 
+    internal fun uploadAccessToken(): String {
+        if (closed || !isLoggedIn()) throw IOException("请先登录 Iwara")
+        return ensureAccessTokenBlocking() ?: throw IOException("登录已过期，请重新登录 Iwara")
+    }
+    internal fun uploadAuthExpired() { session.accessToken = null }
+
     private fun baseRequest(url: String, authenticated: Boolean = false): Request.Builder {
         val builder = Request.Builder()
             .url(url)
@@ -410,6 +416,10 @@ class IwaraApi(context: Context, private val apiRoot: String = DEFAULT_API_ROOT)
         } }
     }
 
+    fun getUploadRules(callback: (Result<JSONObject>) -> Unit) {
+        enqueue(callback) { runCatching { getJsonObject("$apiRoot/rules") } }
+    }
+
     fun getCurrentUser(callback: (Result<IwaraAuthor>) -> Unit) {
         enqueue(callback) { runCatching { getCurrentUserBlocking() } }
     }
@@ -590,7 +600,7 @@ class IwaraApi(context: Context, private val apiRoot: String = DEFAULT_API_ROOT)
         id = user.optString("id"),
         name = user.optString("name").ifBlank { user.optString("username") },
         username = user.optString("username"),
-        description = body,
+        description = body.takeUnless { it.trim().equals("null", ignoreCase = true) }.orEmpty(),
         avatarUrl = buildAvatarUrl(user),
         following = user.optBoolean("following", false),
         friend = user.optBoolean("friend", false),

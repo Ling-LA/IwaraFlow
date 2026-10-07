@@ -166,6 +166,7 @@ class NavigationDeviceTest {
             }
         }
         val app = instrumentation.targetContext.applicationContext as Application
+        app.getSharedPreferences(AppPrefs.FILE, 0).edit().putBoolean(OverlayPermissionPrompt.KEY_SHOWN, true).commit()
         val session = SecureSessionStore(app)
         val originalRefresh = session.refreshToken
         val originalAccess = session.accessToken

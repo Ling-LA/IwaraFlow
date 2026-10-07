@@ -6,7 +6,7 @@ import android.graphics.Paint
 import android.view.View
 import androidx.media3.common.Player
 
-/** Comments move left to right in non-overlapping lanes; clock follows playback, not wall time. */
+/** Comments move right to left in non-overlapping lanes; clock follows playback, not wall time. */
 class DanmakuView(context: Context) : View(context) {
     private val prefs = AppPrefs(context)
     private val paint = Paint(Paint.ANTI_ALIAS_FLAG).apply { color = -1; setShadowLayer(2f, 1f, 1f, 0xFF000000.toInt()) }
@@ -28,7 +28,7 @@ class DanmakuView(context: Context) : View(context) {
             val line = paint.textSize * 1.5f
             val available = (height - paddingTop - paddingBottom).coerceAtLeast(0)
             val area = if (prefs.danmakuRegion == 2) available else available / 2
-            val lanes = (area / line).toInt().coerceIn(1, 6)
+            val lanes = (area / line).toInt().coerceIn(0, 6)
             val top = paddingTop + if (prefs.danmakuRegion == 1) available / 2 else 0
             val duration = prefs.danmakuDuration * 1000L
             val clock = (p.currentPosition - baseline).coerceAtLeast(0L)
@@ -40,7 +40,7 @@ class DanmakuView(context: Context) : View(context) {
                     val text = comments[((cycle * lanes + lane) % comments.size).toInt()]
                     val w = paint.measureText(text)
                     val fraction = shifted % duration / duration.toFloat()
-                    canvas.drawText(text, -w + fraction * (width + w), top + line * (lane + 1), paint)
+                    canvas.drawText(text, horizontalPosition(width.toFloat(), w, fraction), top + line * (lane + 1), paint)
                 }
             }
             canvas.restore()
@@ -48,4 +48,8 @@ class DanmakuView(context: Context) : View(context) {
         if (isAttachedToWindow) postInvalidateDelayed(if (p.isPlaying) 33L else 250L)
     }
     fun clear() { comments = emptyList(); player = null; invalidate() }
+    companion object {
+        internal fun horizontalPosition(width: Float, textWidth: Float, fraction: Float) =
+            width - fraction.coerceIn(0f, 1f) * (width + textWidth)
+    }
 }

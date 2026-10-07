@@ -95,6 +95,48 @@ class ProfileUiDeviceTest {
             }
         } finally { main { upload.finish() } }
     }
+    @Test fun normalPlaybackGuideExcludesVisibleControls() {
+        val context = instrumentation.targetContext
+        val activity = instrumentation.startActivitySync(Intent(context, AuthorActivity::class.java).putExtra(AuthorActivity.EXTRA_ID, "fixture").addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)) as AuthorActivity
+        lateinit var item: View
+        try {
+            main {
+                (field(activity, "api").get(activity) as IwaraApi).close()
+                val page = activity.layoutInflater.inflate(R.layout.activity_main, null) as android.widget.FrameLayout
+                page.removeView(page.findViewById(R.id.pager))
+                page.findViewById<View>(R.id.loading).visibility = View.GONE
+                item = activity.layoutInflater.inflate(R.layout.item_video, page, false)
+                page.addView(item, 0)
+                item.setTag(R.id.chrome_mode, PauseSeekBar.MODE_NORMAL)
+                item.findViewById<TextView>(R.id.author).text = "示例作者"
+                item.findViewById<TextView>(R.id.title).text = "音乐与动画 · 示例作品"
+                item.findViewById<TextView>(R.id.tags).text = "#animation  #music"
+                item.findViewById<TextView>(R.id.likeCount).text = "128"
+                activity.setContentView(page)
+            }
+            instrumentation.waitForIdleSync()
+            main { PlaybackGuide.show(activity, false) }
+            screenshot("normal-playback-guide")
+            main {
+                val guide = activity.window.decorView.findViewWithTag<View>("playback_gesture_guide") as PlaybackGuide.GuideView
+                val origin = IntArray(2).also(activity.window.decorView::getLocationOnScreen)
+                fun bounds(view: View): android.graphics.RectF {
+                    val point = IntArray(2).also(view::getLocationOnScreen)
+                    return android.graphics.RectF((point[0]-origin[0]).toFloat(), (point[1]-origin[1]).toFloat(),
+                        (point[0]-origin[0]+view.width).toFloat(), (point[1]-origin[1]+view.height).toFloat())
+                }
+                val controls = listOf(R.id.topBar, R.id.actionPanel, R.id.infoPanel).map { bounds(activity.findViewById(it)) }
+                assertTrue(controls.none { android.graphics.RectF.intersects(it, guide.portraitArea) })
+                assertEquals(3, guide.labelAreas.size)
+                guide.labelAreas.forEach { area ->
+                    assertFalse(area.isEmpty)
+                    assertTrue(controls.none { android.graphics.RectF.intersects(it, area) })
+                }
+                assertTrue(texts(guide).any { it.text.toString().contains("按钮区") })
+            }
+        } finally { main { PlaybackGuide.dismiss(activity); activity.finish() } }
+    }
+
     @Test fun settingsAndDataPagesRemainReadableInDarkMode() {
         val context = instrumentation.targetContext
         main { androidx.appcompat.app.AppCompatDelegate.setDefaultNightMode(androidx.appcompat.app.AppCompatDelegate.MODE_NIGHT_YES) }

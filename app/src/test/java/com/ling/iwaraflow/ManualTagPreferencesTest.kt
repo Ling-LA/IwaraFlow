@@ -35,10 +35,10 @@ class ManualTagPreferencesTest {
         }
     }
 
-    @Test fun explicitNegativeOverridesLearnedPositiveTagAndPositiveGetsRecallPriority() {
+    @Test fun manualNegativeIsAnAdditiveReductionAndPositiveGetsRecallPriority() {
         val profile = PreferenceProfile(emptyMap(), mapOf("dance" to 100.0, "robot" to 50.0),
             manualTagPreferences = mapOf("dance" to -1, "mmd" to 1))
-        assertTrue(profile.score(video("dance")) < 0)
+        assertTrue(profile.score(video("dance")) < profile.copy(manualTagPreferences = emptyMap()).score(video("dance")))
         assertEquals(listOf("mmd", "robot"), profile.topTags(2, 0.1))
     }
 

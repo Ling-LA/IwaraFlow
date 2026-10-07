@@ -26,6 +26,23 @@ class HistoryStore(context: Context) : SQLiteOpenHelper(context, "iwaraflow.db",
         Thread(r, "IwaraFlow-history-write").apply { isDaemon = true }
     }
     @Volatile private var closed = false
+    private val systemAdjustments = context.getSharedPreferences("system_interest_adjustments", Context.MODE_PRIVATE)
+    private val interestMetadata = context.getSharedPreferences("interest_metadata", Context.MODE_PRIVATE)
+    val interestRevision: Long get() = interestMetadata.getLong("revision", 0L)
+    private fun notifyInterestChanged() { interestMetadata.edit().putLong("revision", interestRevision + 1L).apply() }
+
+    fun systemTagMultipliers(): Map<String, Double> = systemAdjustments.all.mapNotNull { (key, value) ->
+        (value as? Float)?.let { key to it.toDouble().coerceIn(0.0, 1.5) }
+    }.toMap()
+
+    fun setSystemTagMultiplier(tag: String, multiplier: Double) {
+        require(multiplier.isFinite() && multiplier in 0.0..1.5)
+        systemAdjustments.edit().putFloat(SearchQuery.canonicalTag(tag), multiplier.toFloat()).apply()
+        notifyInterestChanged()
+    }
+
+    fun systemTagScores(): Map<String, Double> = preferenceProfileAt(System.currentTimeMillis(), false).tagWeights
+
 
     /**
      * 当前登录的 Iwara 账号 id，页面在启动和登录时写进来（见 [AppPrefs.accountId]）。
@@ -563,10 +580,16 @@ class HistoryStore(context: Context) : SQLiteOpenHelper(context, "iwaraflow.db",
     fun recordInteraction(item: VideoItem, action: String, weight: Double) {
         val now = System.currentTimeMillis()
         val db = writableDatabase
-        db.insert("interactions", null, interactionValues(item, action, weight, now))
+        if (!weight.isFinite()) return
+        // Repeated toggles / replays of one video cannot farm the same signal indefinitely.
+        val recent = db.rawQuery("SELECT COUNT(*) FROM interactions WHERE video_id=? AND action=? AND created_at>?",
+            arrayOf(item.id, action, (now - 86_400_000L).toString())).use { it.moveToFirst(); it.getInt(0) }
+        if (recent >= 3) return
+        val boundedWeight = weight.coerceIn(-3.0, 3.0)
+        db.insert("interactions", null, interactionValues(item, action, boundedWeight, now))
         // 同一笔行为还要累加进长期画像，见 [PREFERENCE_TABLE]。
         if (countsTowardLongTerm(action)) {
-            applyPreferenceDeltas(db, item.author, item.authorId, item.tags, weight, now)
+            applyPreferenceDeltas(db, item.author, item.authorId, item.tags, boundedWeight, now)
         }
         trimInteractions()
     }
@@ -612,6 +635,7 @@ class HistoryStore(context: Context) : SQLiteOpenHelper(context, "iwaraflow.db",
         ).use { c ->
             if (c.moveToFirst()) score += c.getDouble(0) * decayFactor(now - c.getLong(1))
         }
+        score = score.coerceIn(-6.0, 8.0)
         if (kotlin.math.abs(score) < PREFERENCE_FLOOR) {
             db.delete("preference_entities", "type=? AND entity_key=?", arrayOf(type, key))
             return
@@ -641,7 +665,7 @@ class HistoryStore(context: Context) : SQLiteOpenHelper(context, "iwaraflow.db",
                     val bucket = out[c.getString(0)] ?: continue
                     val key = c.getString(1).orEmpty()
                     if (key.isBlank()) continue
-                    bucket[key] = c.getDouble(2) * decayFactor(now - c.getLong(3))
+                    bucket[key] = c.getDouble(2).coerceIn(-6.0, 8.0) * decayFactor(now - c.getLong(3))
                 }
             }
         }
@@ -780,13 +804,14 @@ class HistoryStore(context: Context) : SQLiteOpenHelper(context, "iwaraflow.db",
     fun preferenceProfile(): PreferenceProfile = preferenceProfileAt(System.currentTimeMillis())
 
     @Synchronized
-    internal fun preferenceProfileAt(now: Long): PreferenceProfile {
+    internal fun preferenceProfileAt(now: Long, applySystemAdjustments: Boolean = true): PreferenceProfile {
         // 长期口味来自聚合表（不会因为滚出窗口而突然消失），当前兴趣仍然来自行为窗口。
         val longTerm = longTermPreferences(now)
         val author = HashMap(longTerm.getValue(PREF_AUTHOR))
         val authorIds = HashMap(longTerm.getValue(PREF_AUTHOR_ID))
         val tags = HashMap(longTerm.getValue(PREF_TAG))
         val videos = HashMap<String, Double>()
+        val positiveTags = HashMap<String, Double>()
         // 长期持续快速划走：同一作者 / 标签攒够 [LONG_TERM_SKIPS] 次划走，再额外压一层。
         val authorSkips = HashMap<String, Int>()
         val authorIdSkips = HashMap<String, Int>()
@@ -822,6 +847,12 @@ class HistoryStore(context: Context) : SQLiteOpenHelper(context, "iwaraflow.db",
                     inSession -> SESSION_BOOST - 1.0
                     else -> 0.0
                 }
+                if (action in setOf("like", "favorite", "follow", "complete", ACTION_CLOUD_LIKE) && c.getDouble(2) > 0) {
+                    splitTags(c.getString(1)).forEach { tag ->
+                        val key = SearchQuery.canonicalTag(tag)
+                        positiveTags[key] = ((positiveTags[key] ?: 0.0) + c.getDouble(2).coerceAtMost(3.0) * decay).coerceAtMost(8.0)
+                    }
+                }
                 if (share == 0.0 && action != ACTION_SKIP) continue
                 val w = c.getDouble(2) * decay * share
                 // 「不感兴趣：当前视频」是视频级的：只压这一条，不落到作者和标签上。
@@ -846,7 +877,14 @@ class HistoryStore(context: Context) : SQLiteOpenHelper(context, "iwaraflow.db",
         authorSkips.forEach { (key, n) -> if (n >= LONG_TERM_SKIPS) author[key] = (author[key] ?: 0.0) - LONG_TERM_AUTHOR_PENALTY }
         authorIdSkips.forEach { (key, n) -> if (n >= LONG_TERM_SKIPS) authorIds[key] = (authorIds[key] ?: 0.0) - LONG_TERM_AUTHOR_PENALTY }
         tagSkips.forEach { (key, n) -> if (n >= LONG_TERM_SKIPS) tags[key] = (tags[key] ?: 0.0) - LONG_TERM_TAG_PENALTY }
-        return PreferenceProfile(author, tags, authorIds, videos, muted.authors, muted.authorIds, muted.tags, manualTagPreferences())
+        val multipliers = if (applySystemAdjustments) systemTagMultipliers() else emptyMap()
+        val boundedTags = tags.entries.groupBy { SearchQuery.canonicalTag(it.key) }.mapValues { (key, entries) ->
+            (entries.sumOf { it.value }.coerceIn(-6.0, 8.0) * (multipliers[key] ?: 1.0)).coerceIn(-6.0, 8.0)
+        }
+        return PreferenceProfile(author.mapValues { it.value.coerceIn(-6.0, 8.0) }, boundedTags,
+            authorIds.mapValues { it.value.coerceIn(-6.0, 8.0) }, videos.mapValues { it.value.coerceIn(-6.0, 8.0) },
+            muted.authors, muted.authorIds, muted.tags, manualTagPreferences(),
+            positiveTags.filter { (key, _) -> (multipliers[key] ?: 1.0) > 0 })
     }
 
     /** Device-local, explicit preferences do not decay and are never used by search. */
@@ -881,6 +919,7 @@ class HistoryStore(context: Context) : SQLiteOpenHelper(context, "iwaraflow.db",
             }
             db.setTransactionSuccessful()
         } finally { db.endTransaction() }
+        notifyInterestChanged()
     }
 
     /**

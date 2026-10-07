@@ -193,7 +193,7 @@ class SearchActivity : AppCompatActivity() {
             prefs = prefs,
             mediaCache = mediaCache,
             onDownload = ::download,
-            onEnterPip = ::enterPip,
+            onEnterPip = { FloatingVideoService.request(this, feedAdapter, ::enterPip) },
             onShare = ::shareVideo,
             onEnded = ::nextWork,
             onNeedLogin = { Toast.makeText(this, "请先在主页登录 Iwara", Toast.LENGTH_SHORT).show() },
@@ -720,6 +720,7 @@ class SearchActivity : AppCompatActivity() {
         android.app.PictureInPictureParams.Builder().setAspectRatio(android.util.Rational(16, 9)).build()
 
     private fun enterPip() {
+        if (FloatingVideoService.open(this, feedAdapter)) return
         if (!inFeed || exiting) return
         comments.close()
         // 先登记再进：系统把本页挪进独立任务时主页会被顶上来，那一刻它就得知道有小窗。

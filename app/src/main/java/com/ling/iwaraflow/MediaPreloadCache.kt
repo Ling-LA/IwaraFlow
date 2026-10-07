@@ -34,6 +34,79 @@ class MediaPreloadCache(context: Context) {
     private val appContext = context.applicationContext
     private val pending: Future<SharedState> = warmUp(appContext)
     private var closed = false
+    private val ownerId = ownerIds.incrementAndGet()
+    data class Progress(val total: Long = -1, val cached: Long = 0, val bytesPerSecond: Long = 0) {
+        val fraction: Double get() = if (total > 0) (cached.toDouble() / total).coerceIn(0.0, 1.0) else 0.0
+    }
+    private class Job {
+        @Volatile var writer: CacheWriter? = null
+        @Volatile var cancelled = false
+        @Volatile var progress = Progress()
+        @Volatile var primary = true
+    }
+    private val jobs = java.util.concurrent.ConcurrentHashMap<String, Job>()
+
+    fun progress(url: String?): Progress = if (url == null) Progress() else jobs[url]?.progress ?: Progress()
+
+    /** At most current + one lookahead transfer. A new owner cancels obsolete requests. */
+    @Synchronized fun keepPreloads(urls: Set<String>) {
+        if (urls.isEmpty()) shared.evictor.owners.remove(ownerId) else shared.evictor.owners[ownerId] = urls
+        jobs.keys.filter { it !in urls }.forEach { url ->
+            jobs.remove(url)?.let { it.cancelled = true; it.writer?.cancel() }
+        }
+    }
+
+    fun prefetchFull(url: String, primary: Boolean = true) {
+        if (closed || !url.startsWith("https://")) return
+        jobs[url]?.let { it.primary = primary; return }
+        val job = Job().apply { this.primary = primary }
+        if (jobs.putIfAbsent(url, job) != null) return
+        val state = shared
+        state.evictor.owners.compute(ownerId) { _, keys -> keys.orEmpty() + url }
+        state.executor.execute {
+            var sampleAt = android.os.SystemClock.elapsedRealtime()
+            var sampleBytes = 0L
+            var measuredRate = 0L
+            var throttleBytes = 0L
+            val throttleStart = sampleAt
+            try {
+                val writer = CacheWriter(state.cacheFactory.createDataSourceForDownloading(), DataSpec.Builder().setUri(url).build(), null) { length, cached, added ->
+                    val now = android.os.SystemClock.elapsedRealtime()
+                    sampleBytes += added
+                    if (now - sampleAt >= 1000) {
+                        measuredRate = sampleBytes * 1000 / (now - sampleAt)
+                        sampleBytes = 0; sampleAt = now
+                    }
+                    val contiguous = if (length > 0) state.cache.getCachedLength(url, 0, length).coerceAtLeast(0) else cached
+                    job.progress = Progress(length, contiguous, measuredRate)
+                    if (job.cancelled || closed) throw java.io.InterruptedIOException()
+                    if (!job.primary && added > 0) {
+                        // Leave most bandwidth to the currently prioritized video.
+                        throttleBytes += added
+                        val primaryRate = jobs.values.filter { it !== job }.maxOfOrNull { it.progress.bytesPerSecond } ?: 0
+                        val limit = (primaryRate / 4).coerceIn(128 * 1024L, 2 * 1024 * 1024L)
+                        var aheadMs = throttleBytes * 1000 / limit - (now - throttleStart)
+                        while (aheadMs > 0 && !job.primary) {
+                            if (job.cancelled || closed) throw java.io.InterruptedIOException()
+                            Thread.sleep(aheadMs.coerceAtMost(200))
+                            aheadMs = throttleBytes * 1000 / limit - (android.os.SystemClock.elapsedRealtime() - throttleStart)
+                        }
+                    }
+                }
+                job.writer = writer
+                if (!job.cancelled && !closed) {
+                    writer.cache()
+                    // The final fragment is committed on close, after the last progress callback.
+                    val length = androidx.media3.datasource.cache.ContentMetadata.getContentLength(state.cache.getContentMetadata(url))
+                        .takeIf { it > 0 } ?: job.progress.total
+                    if (length > 0) job.progress = job.progress.copy(total = length,
+                        cached = state.cache.getCachedLength(url, 0, length).coerceAtLeast(0))
+                }
+            } catch (_: Exception) {
+                jobs.remove(url, job) // Allow retry after a transient network failure.
+            } finally { job.writer = null }
+        }
+    }
 
     private val shared: SharedState
         get() = try {
@@ -66,7 +139,7 @@ class MediaPreloadCache(context: Context) {
                     .setPosition(0)
                     .setLength(bytes)
                     .build()
-                CacheWriter(state.cacheFactory.createDataSource(), dataSpec, null, null).cache()
+                CacheWriter(state.cacheFactory.createDataSourceForDownloading(), dataSpec, null, null).cache()
             }
         }
     }
@@ -74,6 +147,7 @@ class MediaPreloadCache(context: Context) {
     fun close() {
         if (closed) return
         closed = true
+        keepPreloads(emptySet())
         // 引用计数必须等 acquire 真正跑完，否则会漏掉一次释放。
         runCatching { pending.get() }
         releaseShared()
@@ -81,6 +155,7 @@ class MediaPreloadCache(context: Context) {
 
     private class SharedState(
         val cache: SimpleCache,
+        val evictor: ActiveVideoCacheEvictor,
         val cacheFactory: CacheDataSource.Factory,
         val mediaSourceFactory: DefaultMediaSourceFactory,
         val executor: ExecutorService
@@ -89,6 +164,7 @@ class MediaPreloadCache(context: Context) {
     companion object {
         private val lock = Any()
         private val refs = AtomicInteger(0)
+        private val ownerIds = AtomicInteger(0)
         @Volatile private var state: SharedState? = null
         private val initExecutor = Executors.newSingleThreadExecutor { task ->
             Thread(task, "IwaraFlow-media-cache-init").apply { isDaemon = true }
@@ -106,9 +182,10 @@ class MediaPreloadCache(context: Context) {
             }
 
             val databaseProvider = StandaloneDatabaseProvider(context)
+            val evictor = ActiveVideoCacheEvictor(2L * 1024L * 1024L * 1024L)
             val cache = SimpleCache(
                 File(context.cacheDir, "video_preload"),
-                LeastRecentlyUsedCacheEvictor(256L * 1024L * 1024L),
+                evictor,
                 databaseProvider
             )
             val upstreamFactory = DefaultHttpDataSource.Factory()
@@ -122,9 +199,10 @@ class MediaPreloadCache(context: Context) {
                 .setFlags(CacheDataSource.FLAG_IGNORE_CACHE_ON_ERROR)
             val created = SharedState(
                 cache = cache,
+                evictor = evictor,
                 cacheFactory = cacheFactory,
                 mediaSourceFactory = DefaultMediaSourceFactory(cacheFactory),
-                executor = Executors.newSingleThreadExecutor()
+                executor = Executors.newFixedThreadPool(3)
             )
             state = created
             refs.set(1)

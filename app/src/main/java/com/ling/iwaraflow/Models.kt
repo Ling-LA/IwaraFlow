@@ -159,7 +159,8 @@ data class PreferenceProfile(
     val mutedAuthorIds: Set<String> = emptySet(),
     /** 用户明确点过「不感兴趣：标签」的标签。 */
     val mutedTags: Set<String> = emptySet(),
-    val manualTagPreferences: Map<String, Int> = emptyMap()
+    val manualTagPreferences: Map<String, Int> = emptyMap(),
+    val positiveTagWeights: Map<String, Double> = emptyMap()
 ) {
     fun score(item: VideoItem): Double {
         val byId = item.authorId.takeIf { it.isNotBlank() }?.let { authorIdWeights[it] }
@@ -179,7 +180,7 @@ data class PreferenceProfile(
         // A manual interest is a modest boost, not a filter. Matching more chosen tags must
         // not multiply it beyond the entire learned-profile budget or reward tag stuffing.
         val positive = if (choices.any { it > 0 }) MANUAL_POSITIVE_BOOST else 0.0
-        val negative = choices.count { it < 0 }.coerceAtMost(TOP_TAGS) * MANUAL_NEGATIVE_WEIGHT
+        val negative = if (choices.any { it < 0 }) MANUAL_NEGATIVE_WEIGHT else 0.0
         return positive - negative
     }
 
@@ -197,13 +198,7 @@ data class PreferenceProfile(
     private fun matchedTagScore(item: VideoItem): Double =
         item.tags.distinctBy(SearchQuery::canonicalTag)
             .mapNotNull { tag ->
-                val choice = manualTagPreferences[SearchQuery.canonicalTag(tag)] ?: 0
-                val learned = tagWeights[tag.lowercase()] ?: return@mapNotNull null
-                when {
-                    choice < 0 -> null // Explicit negative overrides learned positive for this tag.
-                    choice > 0 -> learned.coerceAtLeast(0.0)
-                    else -> learned
-                }
+                (tagWeights[SearchQuery.canonicalTag(tag)] ?: tagWeights[tag.lowercase()])?.coerceIn(-6.0, 8.0)
             }
             .sortedByDescending { kotlin.math.abs(it) }
             .take(TOP_TAGS)
@@ -237,7 +232,7 @@ data class PreferenceProfile(
     companion object {
         /** 一条视频最多按几个标签算分。 */
         const val TOP_TAGS = 4
-        const val MANUAL_POSITIVE_BOOST = 3.0
-        const val MANUAL_NEGATIVE_WEIGHT = 8.0
+        const val MANUAL_POSITIVE_BOOST = 1.5
+        const val MANUAL_NEGATIVE_WEIGHT = 3.0
     }
 }

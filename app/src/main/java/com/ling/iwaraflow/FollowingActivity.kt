@@ -30,6 +30,7 @@ class FollowingActivity : AppCompatActivity() {
         .readTimeout(12, TimeUnit.SECONDS)
         .build()
     private var closed = false
+    private val followers: Boolean get() = intent.getBooleanExtra("followers", false)
 
     private val authorLauncher = registerForActivityResult(ActivityResultContracts.StartActivityForResult()) {
         // Keep this following page exactly where it was after returning from an author.
@@ -41,6 +42,7 @@ class FollowingActivity : AppCompatActivity() {
 
         api = IwaraApi(this)
         status = findViewById(R.id.followingStatus)
+        findViewById<TextView>(R.id.followingTitle).text = if (followers) "我的粉丝" else "我的关注"
         listView = findViewById(R.id.followingList)
         adapter = FollowingAuthorAdapter(items, ::openAuthor)
         listView.layoutManager = LinearLayoutManager(this)
@@ -70,7 +72,8 @@ class FollowingActivity : AppCompatActivity() {
     }
 
     private fun loadFollowingPage(userId: String, page: Int) {
-        api.getFollowingUsers(userId, page) { result ->
+        val request: (String, Int, (Result<FollowingPage>) -> Unit) -> Unit = if (followers) api::getFollowers else api::getFollowingUsers
+        request(userId, page) { result ->
             result.onSuccess { followingPage ->
                 val more = followingPage.hasMore && page + 1 < MAX_PAGES
                 runOnUiThread {
@@ -81,7 +84,7 @@ class FollowingActivity : AppCompatActivity() {
                     items += fresh
                     adapter.notifyItemRangeInserted(start, fresh.size)
                     status.text = statusText(followingPage.total, more)
-                    fresh.forEachIndexed { offset, author -> enrichProfile(start + offset, author) }
+                    if (!followers) fresh.forEachIndexed { offset, author -> enrichProfile(start + offset, author) }
                 }
                 if (more) loadFollowingPage(userId, page + 1)
             }.onFailure { e -> runOnUiThread {
@@ -94,7 +97,7 @@ class FollowingActivity : AppCompatActivity() {
 
     private fun statusText(total: Int, loadingMore: Boolean): String {
         val progress = if (total > items.size) "${items.size} / $total" else "${items.size}"
-        return "已关注 $progress 位作者" + if (loadingMore) " · 正在加载更多…" else ""
+        return (if (followers) "粉丝 $progress 位" else "已关注 $progress 位作者") + if (loadingMore) " · 正在加载更多…" else ""
     }
 
     private fun enrichProfile(index: Int, author: IwaraAuthor) {

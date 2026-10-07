@@ -80,6 +80,8 @@ class SettingsDialogController(
         val tapPause = CheckBox(activity).apply {
             text = "点一下画面暂停播放"; isChecked = prefs.tapToPause
         }
+        val preload = CheckBox(activity).apply { text = "网络稳定时提前加载后续视频"; isChecked = prefs.preloadNext }
+        panel.addView(preload)
         panel.addView(autoNext); panel.addView(autoPip); panel.addView(pauseIcon); panel.addView(tapPause)
         panel.addView(TextView(activity).apply {
             text = "关掉后点一下画面不再暂停：只在「标题 / 标签 / 操作栏」和「进度条 / 快进后退 / 剩余时长」之间切换，视频照常播，要暂停就点控件里的暂停按钮。"
@@ -215,11 +217,12 @@ class SettingsDialogController(
 
         // 多了“维护”这一段，矮屏幕上放不下，内容区要能滚动。
         // 限高：和主菜单差不多大，内容多出来的部分滚动看，弹窗不顶到屏幕上下沿。
+        PageLayout.styleSections(panel)
         val scroll = ScrollView(activity).apply {
             addView(panel)
             layoutParams = LinearLayout.LayoutParams(
                 LinearLayout.LayoutParams.MATCH_PARENT,
-                (activity.resources.displayMetrics.heightPixels * SCROLL_FRACTION).toInt()
+                0, 1f
             )
         }
         // 取消 / 保存放在滚动区下面、弹窗自己的一栏里，常驻底部，不随内容滚走，
@@ -239,8 +242,9 @@ class SettingsDialogController(
             orientation = LinearLayout.VERTICAL
             addView(scroll); addView(divider); addView(buttonBar)
         }
-        val dialog = AlertDialog.Builder(activity).setTitle("设置").setMessage("播放行为、画质、推荐过滤和维护工具").setView(content).create()
-        cancel.setOnClickListener { dialog.dismiss() }
+        val page = PageLayout(activity, "设置")
+        page.body.addView(content, LinearLayout.LayoutParams(-1, -1))
+        cancel.setOnClickListener { activity.finish() }
         save.setOnClickListener {
             // 只有“排除已看视频”和“老片穿插”会改变推荐候选，也只有推荐流受它们影响；
             // 其它几项重拉一遍列表只会把用户刷到一半的位置冲掉。
@@ -254,6 +258,7 @@ class SettingsDialogController(
             prefs.skipSeenEverywhere = skipSeenEverywhere.isChecked
             prefs.recommendDebug = recommendDebug.isChecked
             prefs.autoOpenClipboardLinks = clipboardLinks.isChecked
+            prefs.preloadNext = preload.isChecked
             prefs.showPauseIndicator = pauseIcon.isChecked
             prefs.tapToPause = tapPause.isChecked
             prefs.skipSeconds = skipValues[skip.selectedItemPosition]
@@ -290,11 +295,11 @@ class SettingsDialogController(
             prefs.translation = newTranslation
             Translator.configure(newTranslation)
             Toast.makeText(activity, "设置已保存", Toast.LENGTH_SHORT).show()
-            dialog.dismiss()
+            activity.setResult(Activity.RESULT_OK)
             // 网络路径变了，之前失败的请求要重新来。
             onSaved(reloadFeed || proxyChanged)
         }
-        dialog.show()
+
     }
 
     /** 和 AlertDialog 按钮栏同款的文字按钮，给自己摆的底栏用。 */
@@ -346,7 +351,8 @@ class SettingsDialogController(
         }
 
     private fun sectionTitle(text: String) = TextView(activity).apply {
-        this.text = text; setTextColor(0xFFFF6F91.toInt()); textSize = 13f; setPadding(0, dp(12), 0, dp(4)); setTypeface(null, android.graphics.Typeface.BOLD)
+        tag = "section_heading"
+        this.text = text; setTextColor(0xFF285C7B.toInt()); textSize = 18f; setPadding(0, dp(12), 0, dp(4)); setTypeface(null, android.graphics.Typeface.BOLD)
     }
 
     companion object {

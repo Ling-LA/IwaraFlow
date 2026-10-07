@@ -13,6 +13,9 @@
         </intent>
     </queries>
 
+    <uses-permission android:name="android.permission.SYSTEM_ALERT_WINDOW" />
+    <uses-permission android:name="android.permission.FOREGROUND_SERVICE" />
+    <uses-permission android:name="android.permission.FOREGROUND_SERVICE_MEDIA_PLAYBACK" />
     <application
         android:name=".IwaraFlowApplication"
         android:allowBackup="true"
@@ -84,5 +87,10 @@
             android:resizeableActivity="true"
             android:configChanges="screenSize|smallestScreenSize|screenLayout|orientation"
             android:exported="false" />
+        <activity android:name=".SettingsActivity" android:exported="false" />
+        <activity android:name=".InterestActivity" android:exported="false" />
+        <activity android:name=".MyActivity" android:exported="false" />
+        <activity android:name=".UploadActivity" android:exported="false" />
+        <service android:name=".FloatingVideoService" android:exported="false" android:foregroundServiceType="mediaPlayback" />
     </application>
 </manifest>

@@ -182,7 +182,7 @@ class MainActivityV3 : AppCompatActivity() {
             prefs = prefs,
             mediaCache = mediaCache,
             onDownload = ::enqueueDownload,
-            onEnterPip = ::enterPip,
+            onEnterPip = { FloatingVideoService.request(this, adapter, ::enterPip) },
             onEnded = ::onVideoEnded,
             onNeedLogin = ::showLoginDialog,
             onShare = ::shareVideo,
@@ -249,6 +249,8 @@ class MainActivityV3 : AppCompatActivity() {
 
     override fun onNewIntent(intent: Intent) {
         super.onNewIntent(intent)
+        if (intent.getBooleanExtra(PageNavigation.HOME, false)) { openingInternalPage = false; returnToRecommend() }
+        if (intent.getBooleanExtra("sync_likes", false)) syncLikedVideos()
         setIntent(intent)
         // 从桌面图标再次打开：singleTop 的主页收到的是启动器的 intent。
         if (intent.hasCategory(Intent.CATEGORY_LAUNCHER) || intent.action == Intent.ACTION_MAIN) launchedFromIcon = true
@@ -257,6 +259,7 @@ class MainActivityV3 : AppCompatActivity() {
 
     /** 这次 onResume 是不是用户点桌面图标带来的（而不是子页面进小窗把主页顶出来）。 */
     private var launchedFromIcon = false
+    private var lastInterestRevision = 0L
 
     private fun hideStatusBar() {
         if (Build.VERSION.SDK_INT >= 30) window.insetsController?.hide(WindowInsets.Type.statusBars())
@@ -609,7 +612,8 @@ class MainActivityV3 : AppCompatActivity() {
      * 口味变了、或者手滑点错了，不该永远出不来。
      */
     private fun showInterestManager() {
-        InterestManager.show(this, history, ::rerankQueue)
+        adapter.suspendPlayback()
+        settingsLauncher.launch(Intent(this, InterestActivity::class.java))
     }
 
     /** 上次重排剩余候选之后翻了几页。 */
@@ -895,14 +899,14 @@ class MainActivityV3 : AppCompatActivity() {
     private fun showMainMenu() {
         val account = if (api.isLoggedIn()) "退出 Iwara 登录" else "登录 Iwara"
         // 同步点赞记录和诊断信息都挪进了设置页：主菜单留常用入口就够了。
-        val items = arrayOf(account, "浏览历史", "我的收藏", "已下载", "已关注用户", "设置", "检查更新", "重新加载当前流")
+        val items = arrayOf(account, "浏览历史", "我的", "已下载", "兴趣管理", "设置", "检查更新", "重新加载当前流")
         val dialog = AlertDialog.Builder(this).setTitle("IwaraFlow").setItems(items) { _, which ->
             when (which) {
                 0 -> if (api.isLoggedIn()) { logOut() } else showLoginDialog()
                 1 -> openSavedVideos(SavedVideosActivity.KIND_HISTORY)
-                2 -> openSavedVideos(SavedVideosActivity.KIND_FAVORITES)
+                2 -> { adapter.suspendPlayback(); startActivity(Intent(this, MyActivity::class.java)) }
                 3 -> openSavedVideos(SavedVideosActivity.KIND_DOWNLOADS)
-                4 -> openFollowingPage()
+                4 -> showInterestManager()
                 5 -> showSettingsDialog()
                 6 -> updates.check(manual = true)
                 7 -> loadFeed(reset = true)
@@ -1091,17 +1095,15 @@ class MainActivityV3 : AppCompatActivity() {
      * 设置弹窗自己是一个类（[SettingsDialogController]）：那三百行全是搭界面和存偏好，
      * 和这个页面的播放、导航、下载没有关系。这里只回答它问的几个问题。
      */
+    private val settingsLauncher = registerForActivityResult(androidx.activity.result.contract.ActivityResultContracts.StartActivityForResult()) { result ->
+        recommender.classicsEvery = prefs.classicsEvery
+        adapter.applyDisplayPrefs()
+        if (result.data?.getBooleanExtra("reload", false) == true) loadFeed(reset = true) else rerankQueue()
+    }
+
     private fun showSettingsDialog() {
-        SettingsDialogController(
-            activity = this,
-            prefs = prefs,
-            currentMode = { mode },
-            onClassicsChanged = { recommender.classicsEvery = it },
-            onSaved = { reload -> if (reload) loadFeed(reset = true) else adapter.applyDisplayPrefs() },
-            onSyncLikes = { syncLikedVideos() },
-            onInterestManager = { showInterestManager() },
-            onDiagnostics = { NavigationDiagnostics.show(this) }
-        ).show()
+        adapter.suspendPlayback()
+        settingsLauncher.launch(Intent(this, SettingsActivity::class.java).putExtra("mode", mode))
     }
 
     private fun styleDialogButtons(dialog: AlertDialog) {
@@ -1185,6 +1187,7 @@ class MainActivityV3 : AppCompatActivity() {
         PictureInPictureParams.Builder().setAspectRatio(Rational(16, 9)).build()
 
     private fun enterPip() {
+        if (FloatingVideoService.open(this, adapter)) return
         comments.close()
         try { enterPictureInPictureMode(pipParams()) }
         catch (e: Exception) { Toast.makeText(this, "画中画启动失败：${e.message}", Toast.LENGTH_SHORT).show() }
@@ -1217,6 +1220,10 @@ class MainActivityV3 : AppCompatActivity() {
 
     override fun onResume() {
         super.onResume()
+        if (lastInterestRevision != history.interestRevision) {
+            lastInterestRevision = history.interestRevision
+            rerankQueue()
+        }
         hideStatusBar()
         if (consumeSharedLink()) {
             if (!openingInternalPage) adapter.resumeActive()

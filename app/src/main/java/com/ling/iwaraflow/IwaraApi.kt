@@ -188,10 +188,18 @@ class IwaraApi(context: Context, private val apiRoot: String = DEFAULT_API_ROOT)
     }
 
     fun getAuthorVideosBlocking(userId: String, page: Int = 0, limit: Int = 36): List<VideoItem> {
+        return getAuthorVideoPageBlocking(userId, page, limit).videos
+    }
+
+    fun getAuthorVideoPage(userId: String, page: Int, limit: Int, callback: (Result<VideoListPage>) -> Unit) {
+        enqueue(callback) { runCatching { getAuthorVideoPageBlocking(userId, page, limit) } }
+    }
+
+    private fun getAuthorVideoPageBlocking(userId: String, page: Int, limit: Int): VideoListPage {
         val url = "$apiRoot/videos".toHttpUrl().newBuilder()
             .addQueryParameter("user", userId).addQueryParameter("rating", "all")
             .addQueryParameter("page", page.toString()).addQueryParameter("limit", limit.toString()).build()
-        return parseVideoPage(getJsonObject(url.toString(), optionalAuth = true))
+        return parseVideoListPage(getJsonObject(url.toString(), optionalAuth = true))
     }
 
     fun getVideo(videoId: String, callback: (Result<VideoItem>) -> Unit) {
@@ -417,10 +425,15 @@ class IwaraApi(context: Context, private val apiRoot: String = DEFAULT_API_ROOT)
         enqueue(callback) { runCatching { getFollowingPageBlocking(userId, page) } }
     }
 
-    fun getFollowingPageBlocking(userId: String, page: Int = 0): FollowingPage {
+    fun getFollowers(userId: String, page: Int = 0, callback: (Result<FollowingPage>) -> Unit) {
+        enqueue(callback) { runCatching { getFollowingPageBlocking(userId, page, followers = true) } }
+    }
+
+    fun getFollowingPageBlocking(userId: String, page: Int = 0, followers: Boolean = false): FollowingPage {
         // Iwara 会把列表 limit 截断到自己的上限，请求 100 也只会返回 50 条。
         // 之前用“返回条数 < 请求条数”判断结尾，于是关注超过 50 位时永远停在第一页。
-        val url = "$apiRoot/user/$userId/following".toHttpUrl().newBuilder()
+        val relation = if (followers) "followers" else "following"
+        val url = "$apiRoot/user/$userId/$relation".toHttpUrl().newBuilder()
             .addQueryParameter("page", page.toString())
             .addQueryParameter("limit", MAX_PAGE_LIMIT.toString()).build()
         val root = getJsonObject(url.toString(), requireAuth = true)
@@ -429,7 +442,7 @@ class IwaraApi(context: Context, private val apiRoot: String = DEFAULT_API_ROOT)
             for (i in 0 until arr.length()) {
                 val wrapper = arr.optJSONObject(i) ?: continue
                 val user = wrapper.optJSONObject("user") ?: wrapper
-                add(parseAuthor(user).copy(following = true))
+                add(parseAuthor(user).let { if (followers) it else it.copy(following = true) })
             }
         }
         return FollowingPage(users, root.optInt("count", -1), hasMorePages(root, page, users.size))

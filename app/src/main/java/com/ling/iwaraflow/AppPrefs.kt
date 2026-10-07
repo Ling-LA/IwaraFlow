@@ -20,6 +20,30 @@ class AppPrefs(context: Context) {
         get() = prefs.getString("handled_clipboard_link", "").orEmpty()
         set(value) = prefs.edit().putString("handled_clipboard_link", value).apply()
 
+    internal var inspectedClipboardTimestamp: Long
+        get() = prefs.getLong("inspected_clipboard_timestamp", 0L)
+        set(value) = prefs.edit().putLong("inspected_clipboard_timestamp", value).apply()
+
+    var preloadNext: Boolean
+        get() = prefs.getBoolean("preload_next", true)
+        set(value) = prefs.edit().putBoolean("preload_next", value).apply()
+
+    var danmakuEnabled: Boolean
+        get() = prefs.getBoolean("danmaku_enabled", true)
+        set(value) = prefs.edit().putBoolean("danmaku_enabled", value).apply()
+    var danmakuSize: Int
+        get() = prefs.getInt("danmaku_size", 18).coerceIn(12, 32)
+        set(value) = prefs.edit().putInt("danmaku_size", value.coerceIn(12, 32)).apply()
+    var danmakuOpacity: Int
+        get() = prefs.getInt("danmaku_opacity", 80).coerceIn(20, 100)
+        set(value) = prefs.edit().putInt("danmaku_opacity", value.coerceIn(20, 100)).apply()
+    var danmakuDuration: Int
+        get() = prefs.getInt("danmaku_duration", 10).coerceIn(4, 20)
+        set(value) = prefs.edit().putInt("danmaku_duration", value.coerceIn(4, 20)).apply()
+    var danmakuRegion: Int
+        get() = prefs.getInt("danmaku_region", 0).coerceIn(0, 2)
+        set(value) = prefs.edit().putInt("danmaku_region", value.coerceIn(0, 2)).apply()
+
     var skipSeen: Boolean
         get() = prefs.getBoolean("skip_seen", true)
         set(value) = prefs.edit().putBoolean("skip_seen", value).apply()

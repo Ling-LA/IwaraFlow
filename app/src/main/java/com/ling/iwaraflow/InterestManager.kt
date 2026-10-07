@@ -20,12 +20,51 @@ object InterestManager {
         }
         fun label(text: String, heading: Boolean = false) = TextView(context).apply {
             this.text = text
+            if (heading) tag = "section_heading"
             textSize = if (heading) 18f else 14f
             setPadding(0, (12 * dp).toInt(), 0, (8 * dp).toInt())
             if (heading) setTypeface(null, android.graphics.Typeface.BOLD)
             panel.addView(this)
         }
-        label("主动调整兴趣", true)
+        label("系统兴趣管理", true)
+        label("系统根据观看、点赞、收藏和关注分析兴趣。分数有上限，并随时间降低；调整比例只改变系统分数，不影响手动偏好。0% 表示忽略该标签的系统判断，可随时恢复。")
+        val systemRows = LinearLayout(context).apply { orientation = LinearLayout.VERTICAL }
+        panel.addView(systemRows)
+        fun renderSystem() {
+            systemRows.removeAllViews()
+            val scores = history.systemTagScores()
+            val adjustments = history.systemTagMultipliers()
+            val keys = (scores.keys + adjustments.keys).sortedByDescending { kotlin.math.abs(scores[it] ?: 0.0) }
+            for ((positive, heading) in listOf(true to "感兴趣", false to "不感兴趣")) {
+                systemRows.addView(TextView(context).apply { text = heading; textSize = 16f })
+                val selected = keys.filter { ((scores[it] ?: 0.0) >= 0) == positive && (adjustments[it] ?: 1.0) > 0 }
+                if (selected.isEmpty()) systemRows.addView(TextView(context).apply { text = "暂无分析结果" })
+                selected.forEach { tag ->
+                    val factor = adjustments[tag] ?: 1.0
+                    systemRows.addView(Button(context).apply {
+                        text = "#$tag  ${"%.2f".format(scores[tag] ?: 0.0)} · ${(factor * 100).toInt()}%"
+                        isAllCaps = false
+                        setOnClickListener {
+                            val factors = doubleArrayOf(0.0, 0.25, 0.5, 1.0, 1.5)
+                            AlertDialog.Builder(context).setTitle("调整 #$tag 系统权重")
+                                .setItems(arrayOf("删除此项（忽略系统判断）", "25%", "50%", "100%（恢复）", "150%（受总上限约束）")) { _, index ->
+                                    history.setSystemTagMultiplier(tag, factors[index]); onChanged(); renderSystem()
+                                }.show()
+                        }
+                    })
+                }
+            }
+            val ignored = adjustments.filterValues { it == 0.0 }.keys
+            if (ignored.isNotEmpty()) systemRows.addView(TextView(context).apply { text = "已移除的系统判断 · 点击恢复" })
+            ignored.forEach { tag ->
+                systemRows.addView(Button(context).apply {
+                    text = "恢复 #$tag"; isAllCaps = false
+                    setOnClickListener { history.setSystemTagMultiplier(tag, 1.0); onChanged(); renderSystem() }
+                })
+            }
+        }
+        renderSystem()
+        label("手动兴趣管理 · 主动调整兴趣", true)
         label("感兴趣的标签会获得更多推荐机会，同时保留其他题材；不感兴趣的标签会减少推荐。仅影响推荐，不影响主动搜索。空格连接一个标签内的单词，多个标签请分次添加。")
         val input = EditText(context).apply {
             hint = "输入标签，例如 mmd / hatsune_miku"
@@ -97,8 +136,7 @@ object InterestManager {
         }
         refreshMutes = ::renderMutes
         renderMutes()
-        AlertDialog.Builder(context).setTitle("兴趣管理")
-            .setView(ScrollView(context).apply { addView(panel) })
-            .setPositiveButton("完成", null).show()
+        PageLayout.styleSections(panel)
+        if (host is android.app.Activity) PageLayout(host, "兴趣管理").scroll(panel)
     }
 }

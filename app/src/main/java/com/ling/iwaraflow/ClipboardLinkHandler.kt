@@ -12,6 +12,7 @@ import java.security.MessageDigest
 /** Android permits clipboard reads only once our foreground window has focus. */
 class ClipboardLinkHandler : Application.ActivityLifecycleCallbacks {
     private val listeners = mutableMapOf<Activity, ViewTreeObserver.OnWindowFocusChangeListener>()
+    private var inspectedTimestamp = Long.MIN_VALUE
 
     override fun onActivityResumed(activity: Activity) {
         val decor = activity.window.decorView
@@ -31,12 +32,30 @@ class ClipboardLinkHandler : Application.ActivityLifecycleCallbacks {
         }
     }
 
-    internal fun check(activity: Activity) {
+    internal fun check(activity: Activity, attempt: Int = 0) {
         if (activity.isFinishing || activity.isDestroyed) return
         val prefs = AppPrefs(activity)
         if (!prefs.autoOpenClipboardLinks) return
         val clipboard = activity.getSystemService(Context.CLIPBOARD_SERVICE) as? ClipboardManager ?: return
+        // Description reads do not trigger Android's clipboard-access notification.
+        val description = runCatching { clipboard.primaryClipDescription }.getOrNull() ?: return
+        if (description.extras?.getBoolean(OWN_COPY) == true || description.timestamp == inspectedTimestamp) return
+        if (description.timestamp > 0 && description.timestamp == prefs.inspectedClipboardTimestamp) return
+        if (!description.hasMimeType("text/*")) return
+        if (android.os.Build.VERSION.SDK_INT >= 31) {
+            if (description.classificationStatus != android.content.ClipDescription.CLASSIFICATION_COMPLETE) {
+                if (attempt < 3) activity.window.decorView.postDelayed({
+                    if (activity.hasWindowFocus() && !activity.isInPictureInPictureMode) check(activity, attempt + 1)
+                }, 300L)
+                return
+            }
+            if (description.getConfidenceScore(android.view.textclassifier.TextClassifier.TYPE_URL) <= 0f) return
+        }
         val clip = runCatching { clipboard.primaryClip }.getOrNull() ?: return
+        // The clipboard can change during classification. Never process an older snapshot.
+        if (clip.description.timestamp != description.timestamp) return
+        inspectedTimestamp = description.timestamp
+        prefs.inspectedClipboardTimestamp = description.timestamp
         if (clip.description.extras?.getBoolean(OWN_COPY) == true) return
         // Only the current primary clip, never clipboard history or other clip items.
         if (clip.itemCount == 0) return

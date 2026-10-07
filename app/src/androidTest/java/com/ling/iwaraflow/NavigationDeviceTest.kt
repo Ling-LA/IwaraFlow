@@ -8,7 +8,6 @@ import android.os.SystemClock
 import android.os.ParcelFileDescriptor
 import android.view.KeyEvent
 import android.view.View
-import androidx.media3.common.Player
 import androidx.media3.exoplayer.ExoPlayer
 import androidx.recyclerview.widget.RecyclerView
 import androidx.test.ext.junit.runners.AndroidJUnit4
@@ -102,10 +101,9 @@ class NavigationDeviceTest {
     }
 
     private fun playFixture(activity: Activity, pagerId: Int) {
-        // Use the app's actual local source and its current bound player. A ViewPager rebind can
-        // replace that player between frames; looking it up and seeking in the same main-thread
-        // turn avoids sending commands to an instance that has already been released.
-        var armedPlayer: ExoPlayer? = null
+        // Let the fixture really play past 1.5s, then navigation must persist that progress.
+        // Observe the current bound player without injecting a seek while its source is being
+        // prepared. A ViewPager rebind can replace it between any two main-thread turns.
         val deadline = SystemClock.uptimeMillis() + 45_000
         var lastState = "No bound player"
         while (SystemClock.uptimeMillis() < deadline) {
@@ -115,13 +113,8 @@ class NavigationDeviceTest {
                 val holder = recycler.findViewHolderForAdapterPosition(0)
                 val player = holder?.let { field(it, "player") as? ExoPlayer }
                 if (player != null) {
-                    if (player !== armedPlayer) {
-                        player.seekTo(1_500)
-                        player.play()
-                        armedPlayer = player
-                    }
-                    ready = (player.isPlaying || player.playbackState == Player.STATE_READY) &&
-                        (player.videoSize.width > 0 || player.currentPosition > 1_700)
+                    if (!player.playWhenReady) player.play()
+                    ready = player.isPlaying && player.currentPosition >= 1_500 && player.videoSize.width > 0
                     lastState = "playing=${player.isPlaying} state=${player.playbackState} " +
                         "position=${player.currentPosition} size=${player.videoSize.width} " +
                         "error=${player.playerError?.errorCodeName}"
@@ -345,7 +338,11 @@ class NavigationDeviceTest {
                 playFixture(playerActivity, pagerId)
                 val adapter = (playerActivity as PlaybackGuideHost).playbackGuideAdapter
                 val current = adapter.activeItem()
-                main { playerActivity.startActivity(Intent(playerActivity, SettingsActivity::class.java)) }
+                main {
+                    // Match the real menus: suspend before internal navigation to avoid auto-PiP.
+                    adapter.suspendPlayback()
+                    playerActivity.startActivity(Intent(playerActivity, SettingsActivity::class.java))
+                }
                 settings = awaitActivity(SettingsActivity::class.java)
                 val originalSettings = settings!!
                 lateinit var checkbox: android.widget.CheckBox
@@ -399,7 +396,7 @@ class NavigationDeviceTest {
     }
 
     private fun fixtureVideo(): File {
-        return File(instrumentation.targetContext.cacheDir, "navigation-fixture.mp4").apply {
+        return File.createTempFile("navigation-fixture-", ".mp4", instrumentation.targetContext.cacheDir).apply {
             instrumentation.context.assets.open("navigation-fixture.mp4").use { input ->
                 outputStream().use { output -> input.copyTo(output) }
             }

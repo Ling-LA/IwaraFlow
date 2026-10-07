@@ -451,8 +451,9 @@ class NavigationDeviceTest {
             assertSame(home, awaitActivity(MainActivityV3::class.java)); assertPaused()
             shell("input keyevent KEYCODE_HOME")
             SystemClock.sleep(500)
-            instrumentation.startActivitySync(Intent(app, MainActivityV3::class.java).addFlags(
-                Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_REORDER_TO_FRONT or Intent.FLAG_ACTIVITY_SINGLE_TOP))
+            // This reuses the existing Activity, so wait for resume rather than creation.
+            main { home.startActivity(Intent(app, MainActivityV3::class.java).addFlags(
+                Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_REORDER_TO_FRONT or Intent.FLAG_ACTIVITY_SINGLE_TOP)) }
             assertSame(home, awaitActivity(MainActivityV3::class.java)); assertPaused()
 
             shell("appops set ${app.packageName} SYSTEM_ALERT_WINDOW allow")

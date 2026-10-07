@@ -55,8 +55,12 @@ class NetworkCleanupTest {
 
     @Test fun followingDestroyReleasesProfileConnectionsOffMainThread() = assertBackgroundClose { client ->
         val controller = Robolectric.buildActivity(FollowingActivity::class.java).create()
-        setClient(controller.get(), "profileClient", client)
+        val activity = controller.get()
+        val api = activity.javaClass.getDeclaredField("api").apply { isAccessible = true }.get(activity) as IwaraApi
+        setClient(api, "client", client)
         controller.destroy()
+        val executor = activity.javaClass.getDeclaredField("profilePool").apply { isAccessible = true }.get(activity) as java.util.concurrent.ExecutorService
+        assertTrue(executor.isShutdown)
     }
 
     @Test fun updaterCloseReleasesTlsConnectionsOffMainThread() = assertBackgroundClose { client ->

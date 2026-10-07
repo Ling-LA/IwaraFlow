@@ -34,7 +34,7 @@ class FollowingAuthorAdapter(
                 // 搜索作者是按关注数排的，把这个数一起摆出来才看得出排序依据。
                 if (item.followers >= 0) {
                     if (isNotEmpty()) append("  ·  ")
-                    append("${formatCount(item.followers)} 关注")
+                    append("${formatCount(item.followers)} 粉丝")
                 }
             }
             description.text = item.description.replace('\n', ' ').trim().ifBlank { emptyDescription }

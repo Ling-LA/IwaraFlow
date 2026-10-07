@@ -30,8 +30,15 @@ class ProfileUiDeviceTest {
         val bitmap = instrumentation.uiAutomation.takeScreenshot()
         assertNotNull(bitmap)
         val directory = File(instrumentation.targetContext.getExternalFilesDir(null), "ui-checks").apply { mkdirs() }
-        File(directory, "$name.png").outputStream().use { bitmap.compress(Bitmap.CompressFormat.PNG, 100, it) }
+        val file = File(directory, "$name.png")
+        file.outputStream().use { bitmap.compress(Bitmap.CompressFormat.PNG, 100, it) }
         bitmap.recycle()
+        // Gradle 卸载测试应用会删除 externalFilesDir；立即用 shell 导出到独立目录。
+        val export = "/sdcard/Download/IwaraFlow-ui-checks"
+        val descriptor = instrumentation.uiAutomation.executeShellCommand(
+            "mkdir -p '$export' && cp '${file.absolutePath}' '$export/$name.png' && echo exported")
+        val output = android.os.ParcelFileDescriptor.AutoCloseInputStream(descriptor).bufferedReader().use { it.readText() }
+        assertTrue("Screenshot export failed: $output", output.contains("exported"))
     }
     @Test fun profileSectionsAndNativeUploadRenderAsFullPages() {
         val context = instrumentation.targetContext
@@ -58,6 +65,11 @@ class ProfileUiDeviceTest {
                 assertTrue(my.findViewById<RecyclerView>(R.id.authorVideos).height > my.resources.displayMetrics.heightPixels / 3)
             }
         } finally { main { my.finish() } }
+        HistoryStore(context).use { history ->
+            listOf("animation", "music", "landscape", "dance", "nature", "game", "art", "travel").forEachIndexed { i, tag ->
+                history.recordInteraction(VideoItem("ui-tag-$i", "示例作品", "fixture", listOf(tag), 120), "like", 1.0)
+            }
+        }
         val interest = instrumentation.startActivitySync(Intent(context, InterestActivity::class.java).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK))
         try {
             screenshot("interest-manual")
@@ -77,4 +89,35 @@ class ProfileUiDeviceTest {
             }
         } finally { main { upload.finish() } }
     }
+    @Test fun fullscreenGuideAndLandscapeDislikePanelRenderWithoutCoveringTheVideo() {
+        val context = instrumentation.targetContext
+        val activity = instrumentation.startActivitySync(Intent(context, AuthorActivity::class.java).putExtra(AuthorActivity.EXTRA_ID, "fixture").addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)) as AuthorActivity
+        val history = HistoryStore(context)
+        try {
+            main {
+                (field(activity, "api").get(activity) as IwaraApi).close()
+                activity.setContentView(TextView(activity).apply { text = "示例播放画面"; textSize = 24f; setTextColor(-1); setBackgroundColor(0xFF162C3D.toInt()); gravity = android.view.Gravity.CENTER })
+                activity.requestedOrientation = android.content.pm.ActivityInfo.SCREEN_ORIENTATION_LANDSCAPE
+            }
+            val deadline = android.os.SystemClock.uptimeMillis() + 5000
+            while (activity.resources.configuration.orientation != android.content.res.Configuration.ORIENTATION_LANDSCAPE && android.os.SystemClock.uptimeMillis() < deadline) android.os.SystemClock.sleep(100)
+            instrumentation.waitForIdleSync()
+            main { PlaybackGuide.show(activity, true) }
+            screenshot("fullscreen-guide-landscape")
+            main {
+                PlaybackGuide.dismiss(activity)
+                DislikeSheet.show(activity, VideoItem("fixture", "示例作品", "示例作者", listOf("animation", "music", "nature", "game", "travel", "art"), 60), history, null)
+            }
+            screenshot("dislike-landscape")
+            instrumentation.sendKeyDownUpSync(android.view.KeyEvent.KEYCODE_BACK)
+            main {
+                activity.requestedOrientation = android.content.pm.ActivityInfo.SCREEN_ORIENTATION_PORTRAIT
+            }
+            val portraitDeadline = android.os.SystemClock.uptimeMillis() + 5000
+            while (activity.resources.configuration.orientation != android.content.res.Configuration.ORIENTATION_PORTRAIT && android.os.SystemClock.uptimeMillis() < portraitDeadline) android.os.SystemClock.sleep(100)
+            main { PlaybackGuide.show(activity, false) }
+            screenshot("fullscreen-guide-portrait")
+        } finally { main { PlaybackGuide.dismiss(activity); activity.finish() }; history.close() }
+    }
+
 }

@@ -338,6 +338,15 @@
             android:src="@drawable/ic_download"
             android:visibility="gone" />
 
+        <ImageView
+            android:id="@+id/pauseFavorite"
+            android:layout_width="40dp"
+            android:layout_height="40dp"
+            android:contentDescription="收藏视频"
+            android:padding="8dp"
+            android:src="@drawable/ic_star_rounded_outline"
+            android:visibility="gone" />
+
         <TextView
             android:id="@+id/pauseRemaining"
             android:layout_width="wrap_content"

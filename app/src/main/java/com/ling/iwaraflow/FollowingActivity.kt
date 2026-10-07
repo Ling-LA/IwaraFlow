@@ -10,12 +10,7 @@ import androidx.activity.OnBackPressedCallback
 import androidx.appcompat.app.AppCompatActivity
 import androidx.recyclerview.widget.LinearLayoutManager
 import androidx.recyclerview.widget.RecyclerView
-import okhttp3.OkHttpClient
-import okhttp3.Request
-import org.json.JSONObject
-import java.net.URLEncoder
 import java.util.concurrent.Executors
-import java.util.concurrent.TimeUnit
 
 class FollowingActivity : AppCompatActivity() {
     private lateinit var api: IwaraApi
@@ -25,11 +20,8 @@ class FollowingActivity : AppCompatActivity() {
     private val items = mutableListOf<IwaraAuthor>()
     private val seenIds = mutableSetOf<String>()
     private val profilePool = Executors.newFixedThreadPool(4)
-    private val profileClient = OkHttpClient.Builder()
-        .connectTimeout(8, TimeUnit.SECONDS)
-        .readTimeout(12, TimeUnit.SECONDS)
-        .build()
     private var closed = false
+    private var followingTotal = -1
     private val followers: Boolean get() = intent.getBooleanExtra("followers", false)
 
     private val authorLauncher = registerForActivityResult(ActivityResultContracts.StartActivityForResult()) {
@@ -44,7 +36,7 @@ class FollowingActivity : AppCompatActivity() {
         status = findViewById(R.id.followingStatus)
         findViewById<TextView>(R.id.followingTitle).text = if (followers) "我的粉丝" else "我的关注"
         listView = findViewById(R.id.followingList)
-        adapter = FollowingAuthorAdapter(items, ::openAuthor)
+        adapter = FollowingAuthorAdapter(items, ::openAuthor, emptyDescription = if (followers) "关注了你" else "已关注")
         listView.layoutManager = LinearLayoutManager(this)
         listView.adapter = adapter
         findViewById<View>(R.id.followingBack).setOnClickListener { finish() }
@@ -61,12 +53,12 @@ class FollowingActivity : AppCompatActivity() {
     }
 
     private fun loadFollowing() {
-        status.text = "正在读取 Iwara 关注列表…"
+        status.text = if (followers) "正在读取 Iwara 粉丝列表…" else "正在读取 Iwara 关注列表…"
         api.getCurrentUser { result ->
             result.onSuccess { me -> loadFollowingPage(me.id, 0) }
                 .onFailure { e -> runOnUiThread {
                     if (closed) return@runOnUiThread
-                    status.text = "关注列表加载失败：${IwaraApi.explainError(e)}"
+                    status.text = "${if (followers) "粉丝" else "关注"}列表加载失败：${IwaraApi.explainError(e)}"
                 } }
         }
     }
@@ -83,14 +75,15 @@ class FollowingActivity : AppCompatActivity() {
                     val start = items.size
                     items += fresh
                     adapter.notifyItemRangeInserted(start, fresh.size)
+                    followingTotal = followingPage.total
                     status.text = statusText(followingPage.total, more)
-                    if (!followers) fresh.forEachIndexed { offset, author -> enrichProfile(start + offset, author) }
+                    fresh.forEachIndexed { offset, author -> enrichProfile(start + offset, author) }
                 }
                 if (more) loadFollowingPage(userId, page + 1)
             }.onFailure { e -> runOnUiThread {
                 if (closed) return@runOnUiThread
-                status.text = if (items.isEmpty()) "关注列表加载失败：${IwaraApi.explainError(e)}"
-                else "已关注 ${items.size} 位作者 · 后续加载失败：${IwaraApi.explainError(e)}"
+                status.text = if (items.isEmpty()) "${if (followers) "粉丝" else "关注"}列表加载失败：${IwaraApi.explainError(e)}"
+                else "${statusText(followingTotal, false)} · 后续加载失败：${IwaraApi.explainError(e)}"
             } }
         }
     }
@@ -104,37 +97,14 @@ class FollowingActivity : AppCompatActivity() {
         if (author.username.isBlank()) return
         profilePool.execute {
             val updated = runCatching {
-                val encoded = URLEncoder.encode(author.username, "UTF-8").replace("+", "%20")
-                val request = Request.Builder()
-                    .url("https://apiq.iwara.tv/profile/$encoded")
-                    .header("Referer", "https://www.iwara.tv/")
-                    .header("Origin", "https://www.iwara.tv")
-                    .header("X-Site", "www.iwara.tv")
-                    .header("Accept", "application/json")
-                    .header("User-Agent", "Mozilla/5.0 (Linux; Android 14) AppleWebKit/537.36 Chrome/152 Mobile Safari/537.36")
-                    .build()
-                profileClient.newCall(request).execute().use { response ->
-                    if (!response.isSuccessful) return@use author
-                    val root = JSONObject(response.body?.string().orEmpty())
-                    val user = root.optJSONObject("user") ?: return@use author
-                    val avatar = user.optJSONObject("avatar")
-                    val avatarId = avatar?.optString("id").orEmpty()
-                    val avatarName = avatar?.optString("name").orEmpty()
-                    val avatarFile = when {
-                        avatarName.isBlank() -> ""
-                        avatarName.endsWith(".jpg", true) -> avatarName
-                        else -> "$avatarName.jpg"
-                    }
-                    val avatarUrl = if (avatarId.isNotBlank() && avatarFile.isNotBlank()) {
-                        "https://i.iwara.tv/image/avatar/$avatarId/${URLEncoder.encode(avatarFile, "UTF-8").replace("+", "%20")}"
-                    } else ""
-                    author.copy(
-                        name = user.optString("name").ifBlank { author.name },
-                        description = root.optString("body").ifBlank { author.description },
-                        avatarUrl = avatarUrl,
-                        following = true
-                    )
-                }
+                val profile = api.getAuthorProfileBlocking(author.username)
+                author.copy(
+                    name = profile.name.ifBlank { author.name },
+                    description = profile.description.ifBlank { author.description },
+                    avatarUrl = profile.avatarUrl.ifBlank { author.avatarUrl },
+                    following = author.following || profile.following,
+                    followers = profile.followers.takeIf { it >= 0 } ?: author.followers
+                )
             }.getOrDefault(author)
 
             runOnUiThread {
@@ -146,6 +116,7 @@ class FollowingActivity : AppCompatActivity() {
     }
 
     private fun openAuthor(author: IwaraAuthor) {
+        if (author.username.isBlank() || author.id.isBlank()) return
         authorLauncher.launch(Intent(this, AuthorActivity::class.java).apply {
             putExtra(AuthorActivity.EXTRA_ID, author.id)
             putExtra(AuthorActivity.EXTRA_NAME, author.name)
@@ -157,7 +128,6 @@ class FollowingActivity : AppCompatActivity() {
         closed = true
         api.close()
         profilePool.shutdownNow()
-        HttpClientCleanup.close(profileClient)
         super.onDestroy()
     }
 

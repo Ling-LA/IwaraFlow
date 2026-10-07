@@ -409,11 +409,13 @@ class IwaraApi(context: Context, private val apiRoot: String = DEFAULT_API_ROOT)
     }
 
     fun getAuthorProfile(username: String, callback: (Result<IwaraAuthor>) -> Unit) {
-        enqueue(callback) { runCatching {
-            val root = getJsonObject("$apiRoot/profile/${UriEncoder.encodePath(username)}", optionalAuth = true)
-            val user = root.optJSONObject("user") ?: throw IOException("作者资料不存在")
-            parseAuthor(user, root.optString("body"), followerCount(root, user))
-        } }
+        enqueue(callback) { runCatching { getAuthorProfileBlocking(username) } }
+    }
+
+    internal fun getAuthorProfileBlocking(username: String): IwaraAuthor {
+        val root = getJsonObject("$apiRoot/profile/${UriEncoder.encodePath(username)}", optionalAuth = true)
+        val user = root.optJSONObject("user") ?: throw IOException("作者资料不存在")
+        return parseAuthor(user, root.optString("body"), followerCount(root, user))
     }
 
     fun getUploadRules(callback: (Result<JSONObject>) -> Unit) {
@@ -451,11 +453,18 @@ class IwaraApi(context: Context, private val apiRoot: String = DEFAULT_API_ROOT)
         val users = buildList {
             for (i in 0 until arr.length()) {
                 val wrapper = arr.optJSONObject(i) ?: continue
-                val user = wrapper.optJSONObject("user") ?: wrapper
-                add(parseAuthor(user).let { if (followers) it else it.copy(following = true) })
+                // 官网粉丝页读取 relation.follower，关注页读取 relation.user。
+                // 关系自身也有 id，不能把它当作账号 ID。
+                val field = if (followers) "follower" else "user"
+                val user = wrapper.optJSONObject(field) ?: wrapper.takeIf { !it.has(field) && !it.has("user") && !it.has("follower") }
+                    ?: continue
+                val author = parseAuthor(user)
+                if (author.id.isBlank() || author.id == "null" || author.username.isBlank() || author.username == "null") continue
+                add(if (followers) author else author.copy(following = true))
             }
         }
-        return FollowingPage(users, root.optInt("count", -1), hasMorePages(root, page, users.size))
+        // 已注销/缺失账号仍占据服务端分页位置，不能让过滤后的数量截断后续页。
+        return FollowingPage(users, root.optInt("count", -1), hasMorePages(root, page, arr.length()))
     }
 
     fun resolveSources(videoId: String, callback: (Result<List<VideoSource>>) -> Unit) {

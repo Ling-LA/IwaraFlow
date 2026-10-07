@@ -46,7 +46,19 @@ object DislikeSheet {
             setPadding(dp(12), dp(4), dp(12), dp(12))
             background = androidx.core.content.ContextCompat.getDrawable(activity, R.drawable.bg_comments_panel)
         }
-        val sheet = ScrollView(activity).apply { addView(list) }
+        val sheet = ScrollView(activity).apply { addView(list); isFillViewport = false }
+        val container = LinearLayout(activity).apply {
+            orientation = LinearLayout.VERTICAL
+            background = androidx.core.content.ContextCompat.getDrawable(activity, R.drawable.bg_comments_panel)
+        }
+        val header = LinearLayout(activity).apply { gravity = Gravity.CENTER_VERTICAL; setPadding(dp(18), 0, dp(8), 0) }
+        header.addView(TextView(activity).apply { text = "不感兴趣"; textSize = 17f; setTextColor(0xFF17324A.toInt()) }, LinearLayout.LayoutParams(0, dp(48), 1f))
+        header.addView(TextView(activity).apply {
+            text = "×"; textSize = 26f; gravity = Gravity.CENTER; setTextColor(0xFF285C7B.toInt()); contentDescription = "关闭不感兴趣选项"
+            setOnClickListener { dialog.dismiss() }
+        }, LinearLayout.LayoutParams(dp(48), dp(48)))
+        container.addView(header)
+        container.addView(sheet, LinearLayout.LayoutParams(-1, 0, 1f))
         // 拖拽把手：整块 28dp 高都能按到，按住往下拖过面板高度的四分之一（或者甩得够快）就收起。
         val handle = android.widget.FrameLayout(activity).apply {
             layoutParams = LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, dp(28))
@@ -63,7 +75,8 @@ object DislikeSheet {
                 textSize = 15f
                 setTextColor(if (strong) 0xFF17324A.toInt() else 0xFF285C7B.toInt())
                 gravity = Gravity.CENTER_VERTICAL
-                minHeight = dp(50)
+                minHeight = dp(48)
+                maxLines = 2; ellipsize = android.text.TextUtils.TruncateAt.END
                 setPadding(dp(18), 0, dp(18), 0)
                 background = with(android.util.TypedValue()) {
                     activity.theme.resolveAttribute(android.R.attr.selectableItemBackground, this, true)
@@ -91,17 +104,30 @@ object DislikeSheet {
         divider()
         row("取消") { }
 
-        dialog.setContentView(sheet)
+        dialog.setContentView(container)
         dialog.setCanceledOnTouchOutside(true)
         dialog.window?.apply {
             setBackgroundDrawable(ColorDrawable(Color.TRANSPARENT))
-            setGravity(Gravity.BOTTOM)
-            setLayout(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT)
+
             addFlags(WindowManager.LayoutParams.FLAG_DIM_BEHIND)
             setDimAmount(0.3f)
         }
         dialog.show()
+        val decor = activity.window.decorView
+        val width = decor.width.takeIf { it > 0 } ?: context.resources.displayMetrics.widthPixels
+        val height = decor.height.takeIf { it > 0 } ?: context.resources.displayMetrics.heightPixels
+        val size = panelSize(width, height, density)
+        dialog.window?.apply {
+            // 横屏左侧紧凑面板；始终保留一半以上的视频画面，长列表在面板内滚动。
+            setGravity(if (width > height) Gravity.START or Gravity.CENTER_VERTICAL else Gravity.BOTTOM or Gravity.CENTER_HORIZONTAL)
+            attributes = attributes.apply { x = if (width > height) dp(16) else 0; y = if (width > height) 0 else dp(12) }
+            setLayout(size.first, size.second)
+        }
     }
+
+    internal fun panelSize(width: Int, height: Int, density: Float): Pair<Int, Int> =
+        if (width > height) minOf((width*0.44f).toInt(), (360*density).toInt()) to (height*0.86f).toInt()
+        else minOf((width-24*density).toInt(), (560*density).toInt()).coerceAtLeast(1) to (height*0.7f).toInt()
 
     /** 只把选中的那一维写进画像：作者不带标签，标签不带作者。 */
     internal fun apply(context: Context, item: VideoItem, history: HistoryStore, kind: Kind, tag: String, onApplied: ((VideoItem, Kind) -> Unit)?) {

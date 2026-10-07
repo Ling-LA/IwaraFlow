@@ -208,6 +208,8 @@ class SettingsDialogController(
             override fun onNothingSelected(parent: android.widget.AdapterView<*>?) {}
         }
 
+        panel.addView(sectionTitle("操作帮助"))
+        panel.addView(actionRow("操作引导", "查看横屏 / 竖屏的三段长按、双连、加速和播放手势。") { PlaybackGuide.show(activity) })
         panel.addView(sectionTitle("维护"))
         panel.addView(actionRow("同步点赞记录", "把在网页端点过的赞补进“已看”，刷新推荐后生效。") { onSyncLikes() })
         panel.addView(actionRow("兴趣管理", "主动添加感兴趣或不感兴趣的标签，调整推荐机会；也可恢复已屏蔽内容。不影响主动搜索。") { onInterestManager() })

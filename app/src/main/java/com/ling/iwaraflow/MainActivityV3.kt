@@ -609,17 +609,6 @@ class MainActivityV3 : AppCompatActivity() {
         loadingMore = false
     }
 
-    /**
-     * 兴趣管理：主动调整标签偏好，并保留已屏蔽作者 / 标签的恢复入口。
-     *
-     * 明确的负反馈本来连探索位都不给，恢复入口就是它唯一的出路——
-     * 口味变了、或者手滑点错了，不该永远出不来。
-     */
-    private fun showInterestManager() {
-        adapter.suspendPlayback()
-        settingsLauncher.launch(Intent(this, InterestActivity::class.java))
-    }
-
     /** 上次重排剩余候选之后翻了几页。 */
     private var pagesSinceRerank = 0
     private var rerankSerial = 0
@@ -903,17 +892,16 @@ class MainActivityV3 : AppCompatActivity() {
     private fun showMainMenu() {
         val account = if (api.isLoggedIn()) "退出 Iwara 登录" else "登录 Iwara"
         // 同步点赞记录和诊断信息都挪进了设置页：主菜单留常用入口就够了。
-        val items = arrayOf(account, "浏览历史", "我的", "已下载", "兴趣管理", "设置", "检查更新", "重新加载当前流")
+        val items = arrayOf(account, "浏览历史", "我的", "已下载", "设置", "检查更新", "重新加载当前流")
         val dialog = AlertDialog.Builder(this).setTitle("IwaraFlow").setItems(items) { _, which ->
             when (which) {
                 0 -> if (api.isLoggedIn()) { logOut() } else showLoginDialog()
                 1 -> openSavedVideos(SavedVideosActivity.KIND_HISTORY)
                 2 -> { adapter.suspendPlayback(); startActivity(Intent(this, MyActivity::class.java)) }
                 3 -> openSavedVideos(SavedVideosActivity.KIND_DOWNLOADS)
-                4 -> showInterestManager()
-                5 -> showSettingsDialog()
-                6 -> updates.check(manual = true)
-                7 -> loadFeed(reset = true)
+                4 -> showSettingsDialog()
+                5 -> updates.check(manual = true)
+                6 -> loadFeed(reset = true)
             }
         }.create()
         dialog.setOnShowListener { styleDialogButtons(dialog) }; dialog.show()

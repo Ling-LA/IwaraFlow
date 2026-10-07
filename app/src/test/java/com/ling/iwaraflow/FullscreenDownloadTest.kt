@@ -27,15 +27,19 @@ class FullscreenDownloadTest {
             val download = root.findViewById<View>(R.id.pauseDownload)
             assertEquals(row.indexOfChild(root.findViewById(R.id.pausePip)) + 1, row.indexOfChild(download))
             assertTrue(download.hasOnClickListeners())
+            val favorite = root.findViewById<View>(R.id.pauseFavorite)
+            assertTrue(favorite.hasOnClickListeners())
             val place = PauseSeekBar::class.java.getDeclaredMethod("placeTopRow", View::class.java,
                 Long::class.javaPrimitiveType, Long::class.javaPrimitiveType).apply { isAccessible = true }
             val bar = root.findViewById<PauseSeekBar>(R.id.pauseSeekBar)
             root.setTag(R.id.chrome_mode, PauseSeekBar.MODE_FULLSCREEN)
             place.invoke(bar, root, 0L, 1000L)
             assertEquals(View.VISIBLE, download.visibility)
+            assertEquals(View.VISIBLE, favorite.visibility)
             root.setTag(R.id.chrome_mode, PauseSeekBar.MODE_NORMAL)
             place.invoke(bar, root, 0L, 1000L)
             assertEquals(View.GONE, download.visibility)
+            assertEquals(View.GONE, favorite.visibility)
         } finally { adapter.releaseAll() }
     }
 }

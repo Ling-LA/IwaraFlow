@@ -120,4 +120,51 @@ class FollowingPaginationTest {
             assertFalse(api.getFollowingPageBlocking("fixture-user", 1).hasMore)
         } finally { api.close() }
     }
+    private fun fixture(body: String) {
+        server.dispatcher = object : Dispatcher() {
+            override fun dispatch(request: RecordedRequest) = MockResponse().setBody(body)
+        }
+    }
+
+    @Test fun followersUseTheFollowerAccountNotTheRelationOrTargetUser() {
+        fixture("""{"count":1,"limit":50,"results":[{"id":"relation-1",
+            "user":{"id":"my-id","name":"我","username":"me"},
+            "follower":{"id":"fan-id","name":"示例粉丝","username":"sample_fan","following":false,
+            "avatar":{"id":"avatar-id","name":"portrait.png"}}}]}""")
+        val api = loggedInApi()
+        try {
+            val page = api.getFollowingPageBlocking("my-id", followers = true)
+            val fan = page.users.single()
+            assertEquals("fan-id", fan.id); assertEquals("sample_fan", fan.username)
+            assertEquals("示例粉丝", fan.name)
+            assertEquals("https://i.iwara.tv/image/avatar/avatar-id/portrait.png", fan.avatarUrl)
+            assertFalse("粉丝不代表我也关注对方", fan.following)
+            assertEquals(1, page.total); assertFalse(page.hasMore)
+            assertEquals("/user/my-id/followers", server.takeRequest().requestUrl!!.encodedPath)
+        } finally { api.close() }
+    }
+
+    @Test fun unavailableFollowerRowsNeverBecomeBlankAccountsOrStopLaterPages() {
+        fixture("""{"count":3,"limit":2,"results":[{"id":"relation-1","follower":null},
+            {"id":"relation-2","user":{"id":"my-id","username":"me"}}]}""")
+        val api = loggedInApi()
+        try {
+            val page = api.getFollowingPageBlocking("my-id", followers = true)
+            assertTrue(page.users.isEmpty()); assertEquals(3, page.total)
+            assertTrue("不可用账号仍占服务端分页位置", page.hasMore)
+        } finally { api.close() }
+    }
+
+    @Test fun followingKeepsItsOwnDirectionAndDirectAccountResponsesStillWork() {
+        fixture("""{"count":2,"limit":50,"results":[{"id":"relation-1",
+            "user":{"id":"author-id","username":"creator"},"follower":{"id":"my-id","username":"me"}},
+            {"id":"direct-id","username":"direct_creator"}]}""")
+        val api = loggedInApi()
+        try {
+            val users = api.getFollowingPageBlocking("my-id").users
+            assertEquals(listOf("author-id", "direct-id"), users.map { it.id })
+            assertTrue(users.all { it.following }); assertEquals("creator", users.first().name)
+        } finally { api.close() }
+    }
+
 }

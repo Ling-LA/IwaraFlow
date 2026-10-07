@@ -22,7 +22,6 @@ object PageNavigation {
         actions += "我的收藏" to { saved(activity, SavedVideosActivity.KIND_FAVORITES) }
         actions += "已下载" to { saved(activity, SavedVideosActivity.KIND_DOWNLOADS) }
         actions += "搜索" to { activity.startActivity(Intent(activity, SearchActivity::class.java)) }
-        actions += "兴趣管理" to { activity.startActivity(Intent(activity, InterestActivity::class.java)) }
         actions += "设置" to { activity.startActivity(Intent(activity, SettingsActivity::class.java)) }
         AlertDialog.Builder(activity).setTitle("跳转页面")
             .setItems(actions.map { it.first }.toTypedArray()) { _, index -> beforeNavigate(); actions[index].second() }.show()

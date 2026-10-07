@@ -412,6 +412,7 @@ class VideoAdapter(
         private var lastTap = 0L
         /** 播放控件是被点出来的（没暂停也显示）。 */
         private var controlsPinned = false
+        private var pausedControlsHidden = false
 
         private val touchSlop = ViewConfiguration.get(itemView.context).scaledTouchSlop
         /** 加速进行中允许手指挪动的距离：约 48dp，比点按阈值宽得多。 */
@@ -564,6 +565,7 @@ class VideoAdapter(
         fun bind(item: VideoItem) {
             release()
             // 卡片被回收复用：上一条点出来的控件不要跟着带到下一条。
+            setPausedControlsHidden(false)
             setControlsPinned(false)
             bound = item
             likeBusy = false
@@ -640,8 +642,8 @@ class VideoAdapter(
             }
 
             itemView.setOnClickListener {
-                val now = System.currentTimeMillis()
-                if (now - lastTap <= 320L) {
+                val now = android.os.SystemClock.uptimeMillis()
+                if (lastTap != 0L && now - lastTap <= 320L) {
                     pendingSingleTap?.let { tapHandler.removeCallbacks(it) }
                     pendingSingleTap = null
                     lastTap = 0L
@@ -651,14 +653,18 @@ class VideoAdapter(
                 } else {
                     lastTap = now
                     val action = Runnable {
-                        if (System.currentTimeMillis() - lastTap >= 280L) {
+                        if (android.os.SystemClock.uptimeMillis() - lastTap >= 280L) {
                             // 设置里可以把「点一下画面暂停播放」关掉：那时点一下只是在
                             // 信息栏和播放控件之间切换，视频照常播。
                             if (prefs.tapToPause) {
+                                setPausedControlsHidden(false)
                                 setControlsPinned(false)
                                 player?.let { p -> if (p.isPlaying) p.pause() else if (active) p.play() }
                             } else {
-                                setControlsPinned(!controlsPinned)
+                                val paused = player?.let { !it.playWhenReady } == true
+                                val showing = if (paused) !pausedControlsHidden else controlsPinned
+                                setPausedControlsHidden(paused && showing)
+                                setControlsPinned(!showing)
                             }
                             lastTap = 0L
                         }
@@ -813,6 +819,11 @@ class VideoAdapter(
                         if (!firstFrame) { firstFrame = true; PlaybackMetrics.firstFrame(android.os.SystemClock.elapsedRealtime() - startedAt) }
                     }
 
+                    override fun onPlayWhenReadyChanged(playWhenReady: Boolean, reason: Int) {
+                        // A new pause starts with transport controls; subsequent taps may hide them.
+                        setPausedControlsHidden(false)
+                    }
+
                     override fun onIsPlayingChanged(isPlaying: Boolean) {
                         if (bound?.id == item.id) { notePlaying(isPlaying); danmaku.invalidate() }
                     }
@@ -938,6 +949,7 @@ class VideoAdapter(
                 if (!active && player == null) return
                 if (active) { recordWatchSignals(swipedAway = false); persistHistory(completed = false) }
                 active = false
+                setPausedControlsHidden(false)
                 setControlsPinned(false)
                 generation++
                 pendingSingleTap?.let { tapHandler.removeCallbacks(it) }
@@ -976,9 +988,15 @@ class VideoAdapter(
             pauseIndicator.controlsPinned = pinned
         }
 
+        private fun setPausedControlsHidden(hidden: Boolean) {
+            pausedControlsHidden = hidden
+            pauseSeekBar.hidePausedControls = hidden
+            pauseIndicator.hidePausedControls = hidden
+        }
+
         fun applyDisplayPrefs() {
             // 设置里又把「点一下画面暂停播放」打开了：点出来的控件跟着收起。
-            if (prefs.tapToPause) setControlsPinned(false)
+            if (prefs.tapToPause) { setPausedControlsHidden(false); setControlsPinned(false) }
             pauseIndicator.indicatorEnabled = prefs.showPauseIndicator
             val seconds = prefs.skipSeconds.toString()
             skipBackLabel.text = seconds

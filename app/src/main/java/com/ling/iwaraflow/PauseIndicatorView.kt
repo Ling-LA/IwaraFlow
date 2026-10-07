@@ -36,6 +36,14 @@ class PauseIndicatorView @JvmOverloads constructor(
             refreshState()
         }
 
+    /** Explicitly showing the information/actions panel while the video remains paused. */
+    var hidePausedControls = false
+        set(value) {
+            if (field == value) return
+            field = value
+            refreshState()
+        }
+
     private val handler = Handler(Looper.getMainLooper())
     private val poll = object : Runnable {
         override fun run() {
@@ -75,7 +83,7 @@ class PauseIndicatorView @JvmOverloads constructor(
             player.playbackState != Player.STATE_ENDED
         val explicitlyPaused = alive && player != null && !player.playWhenReady
         // 点出来的控件里也有这个按钮：正在播就显示暂停图标。
-        val shown = explicitlyPaused || (controlsPinned && alive)
+        val shown = (explicitlyPaused || (controlsPinned && alive)) && !(explicitlyPaused && hidePausedControls)
         visibility = if (shown) View.VISIBLE else View.GONE
         if (shown) {
             val playing = player != null && player.isPlaying

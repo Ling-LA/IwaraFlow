@@ -315,6 +315,33 @@ class NavigationDeviceTest {
                     sources = listOf(VideoSource("fixture", android.net.Uri.fromFile(mediaFile).toString(), 1)))
                 home.playbackGuideAdapter.replace(listOf(homeVideo)); home.playbackGuideAdapter.setActive(0)
             }
+            // The disabled tap-to-pause option toggles chrome without resuming a paused video.
+            playFixture(home, R.id.pager, mediaFile)
+            val fixturePlayer = awaitFixturePlayer(home, R.id.pager)
+            main {
+                AppPrefs(app).tapToPause = false
+                home.findViewById<View>(R.id.root).performClick()
+            }
+            SystemClock.sleep(500)
+            main { home.findViewById<View>(R.id.pauseIndicator).performClick() }
+            SystemClock.sleep(300)
+            main {
+                assertFalse(fixturePlayer.playWhenReady)
+                home.findViewById<View>(R.id.root).performClick()
+            }
+            SystemClock.sleep(500)
+            main {
+                assertFalse(fixturePlayer.playWhenReady)
+                assertEquals(View.VISIBLE, home.findViewById<View>(R.id.actionPanel).visibility)
+                assertEquals(View.GONE, home.findViewById<View>(R.id.pauseSeekBar).visibility)
+                home.findViewById<View>(R.id.root).performClick()
+            }
+            SystemClock.sleep(500)
+            main {
+                assertFalse(fixturePlayer.playWhenReady)
+                assertEquals(View.VISIBLE, home.findViewById<View>(R.id.pauseSeekBar).visibility)
+                AppPrefs(app).tapToPause = true
+            }
             for (fromAuthor in listOf(false, true)) {
                 val playerActivity: Activity
                 val pagerId: Int
@@ -381,7 +408,7 @@ class NavigationDeviceTest {
                 main { assertSame(current, adapter.activeItem()); assertEquals(android.content.res.Configuration.ORIENTATION_PORTRAIT, playerActivity.resources.configuration.orientation) }
             }
         } finally {
-            main { settings?.finish(); author?.let { PlaybackGuide.dismiss(it); it.finish() }; PlaybackGuide.dismiss(home); home.finish() }
+            main { AppPrefs(app).tapToPause = true; settings?.finish(); author?.let { PlaybackGuide.dismiss(it); it.finish() }; PlaybackGuide.dismiss(home); home.finish() }
             app.unregisterActivityLifecycleCallbacks(callbacks)
         }
     }

@@ -39,6 +39,14 @@ class PauseSeekBar @JvmOverloads constructor(
             refreshFromPlayer()
         }
 
+    /** Explicitly showing the information/actions panel while the video remains paused. */
+    var hidePausedControls = false
+        set(value) {
+            if (field == value) return
+            field = value
+            refreshFromPlayer()
+        }
+
     private val updater = object : Runnable {
         override fun run() {
             refreshFromPlayer()
@@ -130,6 +138,7 @@ class PauseSeekBar @JvmOverloads constructor(
         removeCallbacks(updater)
         observedPlayer = null
         controlsPinned = false
+        hidePausedControls = false
         visibility = View.GONE
         controls(cardRoot())?.visibility = View.GONE
         hideExtras(cardRoot())
@@ -146,7 +155,7 @@ class PauseSeekBar @JvmOverloads constructor(
         val alive = p != null && p.playbackState != Player.STATE_IDLE && p.playbackState != Player.STATE_ENDED
         val paused = alive && p != null && !p.isPlaying && !p.playWhenReady
         // 关掉「点一下画面暂停播放」时点出来的控件：没暂停也要显示。
-        if (root == null || !(paused || (controlsPinned && alive)) || duration <= 0L) {
+        if (root == null || !((paused || controlsPinned) && alive && !(paused && hidePausedControls)) || duration <= 0L) {
             visibility = View.GONE
             controls(root)?.visibility = View.GONE
             hideExtras(root)

@@ -88,7 +88,7 @@ class SettingsDialogController(
         })
         panel.addView(autoNext); panel.addView(autoPip); panel.addView(pauseIcon); panel.addView(tapPause)
         panel.addView(TextView(activity).apply {
-            text = "关掉后点一下画面不再暂停：只在「标题 / 标签 / 操作栏」和「进度条 / 快进后退 / 剩余时长」之间切换，视频照常播，要暂停就点控件里的暂停按钮。"
+            text = "关掉后点一下画面不再暂停：只在「标题 / 标签 / 操作栏」和「进度条 / 快进后退 / 剩余时长」之间切换，播放和暂停状态均保持不变；暂停后也能单击切换界面，播放 / 暂停请点控件里的按钮。"
             textSize = 12f; setTextColor(UiPalette.resolve(context, 0xFF607D93.toInt())); setPadding(dp(4), dp(4), 0, dp(8))
         })
         val skipValues = intArrayOf(5, 10, 15, 30, 60)

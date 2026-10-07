@@ -41,13 +41,14 @@ class UploadActivity : AppCompatActivity() {
             text = label; isAllCaps = false; textSize = 15f
             backgroundTintList = null
             setBackgroundResource(if (primary) R.drawable.bg_profile_primary else R.drawable.bg_profile_button)
-            setTextColor(if (primary) -1 else 0xFF285C7B.toInt())
+            setTextColor(if (primary) -1 else UiPalette.resolve(context, 0xFF285C7B.toInt()))
             layoutParams = LinearLayout.LayoutParams(-1, page.dp(48)).apply { topMargin = page.dp(8) }
             setOnClickListener { click() }
         }
         val info = page.card()
         panel.addView(info)
         info.addView(text("使用当前 Iwara 账号投稿，文件与信息将直接提交至官网。"))
+        info.addView(button("查看上传任务") { startActivity(Intent(this, UploadTasksActivity::class.java)) })
         choose = button("选择 MP4 视频") { picker.launch(arrayOf("video/mp4")) }
         info.addView(choose)
         fileLabel = text("尚未选择视频")
@@ -128,12 +129,12 @@ class UploadActivity : AppCompatActivity() {
         officialLink("查看官网规则原文", "https://www.iwara.tv/rules")
 
 
-        titleInput.setText(state?.getString("title").orEmpty())
-        bodyInput.setText(state?.getString("body").orEmpty())
-        tagsInput.setText(state?.getString("tags").orEmpty())
-        rating.setSelection(state?.getInt("rating") ?: 0)
-        visibility.setSelection(state?.getInt("visibility") ?: 0)
-        rules.isChecked = state?.getBoolean("rules") ?: false
+        titleInput.setText(state?.getString("title") ?: model.draft?.title.orEmpty())
+        bodyInput.setText(state?.getString("body") ?: model.draft?.body.orEmpty())
+        tagsInput.setText(state?.getString("tags") ?: model.draft?.tags?.joinToString(", ").orEmpty())
+        rating.setSelection(state?.getInt("rating") ?: if (model.draft?.rating == "ecchi") 1 else 0)
+        visibility.setSelection(state?.getInt("visibility") ?: when { model.draft?.privateVideo == true -> 1; model.draft?.unlisted == true -> 2; else -> 0 })
+        rules.isChecked = state?.getBoolean("rules") ?: model.draft?.rulesAgreement ?: false
         if (model.uri == null) state?.getString("uri")?.let { selectFile(Uri.parse(it)) }
         if (state?.getBoolean("publishing") == true && !model.busy && model.state.value?.videoId == null) {
             model.publicationUncertain = true
@@ -148,6 +149,8 @@ class UploadActivity : AppCompatActivity() {
             progress.progress = value.percent.coerceAtLeast(0)
             val editable = !value.busy && value.videoId == null
             listOf<View>(titleInput, bodyInput, tagsInput, rating, visibility, rules, choose).forEach { it.isEnabled = editable }
+            choose.isEnabled = !value.busy
+            choose.text = if (value.videoId != null) "选择下一个视频" else "选择 MP4 视频"
             submit.isEnabled = editable && model.loggedIn()
             submit.text = when {
                 value.videoId != null -> "已提交"
@@ -170,10 +173,12 @@ class UploadActivity : AppCompatActivity() {
         })
     }
     private fun leave() {
+        saveDraft()
         if (!model.busy) { finish(); return }
-        AlertDialog.Builder(this).setTitle("停止本次上传？")
-            .setMessage("退出会停止文件上传或处理查询。若已经发送发布请求，请在我的作品中确认结果。")
-            .setPositiveButton("停止并返回") { _, _ -> finish() }.setNegativeButton("继续上传", null).show()
+        AlertDialog.Builder(this).setTitle("上传正在进行")
+            .setMessage("可以在后台继续上传，也可暂停后稍后恢复。发布结果未知时仍需先确认我的作品。")
+            .setPositiveButton("后台继续") { _, _ -> finish() }
+            .setNeutralButton("暂停并返回") { _, _ -> model.pause(); finish() }.setNegativeButton("留在此页", null).show()
     }
     private fun selectFile(uri: Uri) {
         if (model.busy) return
@@ -214,9 +219,19 @@ class UploadActivity : AppCompatActivity() {
                 VideoUploadDraft.parseTags(tagsInput.text.toString()), if (rating.selectedItemPosition == 1) "ecchi" else "general",
                 visibility.selectedItemPosition == 1, visibility.selectedItemPosition == 2, rules.isChecked)
             draft.validate()
+            if (android.os.Build.VERSION.SDK_INT >= 33 && checkSelfPermission(android.Manifest.permission.POST_NOTIFICATIONS) != android.content.pm.PackageManager.PERMISSION_GRANTED)
+                requestPermissions(arrayOf(android.Manifest.permission.POST_NOTIFICATIONS), 89)
             model.submit(draft)
         }.onFailure { status.text = it.message ?: "请检查投稿信息" }
     }
+    private fun saveDraft() {
+        if (!::titleInput.isInitialized || model.busy) return
+        model.saveDraft(VideoUploadDraft(titleInput.text.toString(), bodyInput.text.toString(),
+            VideoUploadDraft.parseTags(tagsInput.text.toString()), if (rating.selectedItemPosition == 1) "ecchi" else "general",
+            visibility.selectedItemPosition == 1, visibility.selectedItemPosition == 2, rules.isChecked))
+    }
+    override fun onPause() { saveDraft(); super.onPause() }
+
     override fun onSaveInstanceState(out: Bundle) {
         super.onSaveInstanceState(out)
         out.putString("title", titleInput.text.toString()); out.putString("body", bodyInput.text.toString())

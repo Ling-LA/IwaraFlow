@@ -25,7 +25,7 @@ object FullscreenMode {
         } else {
             ActivityInfo.SCREEN_ORIENTATION_PORTRAIT
         }
-        if (enabled) activity.window.decorView.post {
+        if (enabled && landscapeVideo) activity.window.decorView.post {
             if (adapter.isFullscreen && !activity.isFinishing && !activity.isDestroyed) PlaybackGuide.showOnce(activity, landscapeVideo)
         } else PlaybackGuide.dismiss(activity)
         return enabled

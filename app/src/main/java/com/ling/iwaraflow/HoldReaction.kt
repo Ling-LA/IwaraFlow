@@ -11,6 +11,7 @@ import android.view.View
 /** A single cancellable gesture, with no click after a completed or cancelled hold. */
 class HoldReaction(private val view: View, color: Int, private val partner: View? = null,
     partnerColor: Int = color, private val complete: () -> Unit) {
+    companion object { const val DURATION_MS = 2500L }
     private inner class Ring(color: Int) : Drawable() {
         val paint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
             this.color = color; style = Paint.Style.STROKE; strokeWidth = 3f * view.resources.displayMetrics.density
@@ -50,10 +51,10 @@ class HoldReaction(private val view: View, color: Int, private val partner: View
                         override fun run() {
                             if (cancelled || fired) return
                             val elapsed = android.os.SystemClock.uptimeMillis() - startedAt
-                            ring.progress = (elapsed / 3000f).coerceIn(0f, 1f); ring.invalidateSelf()
+                            ring.progress = (elapsed / DURATION_MS.toFloat()).coerceIn(0f, 1f); ring.invalidateSelf()
                             partnerRing.progress = ring.progress; partnerRing.invalidateSelf()
-                            if (elapsed >= 3000L) { fired = true; complete() }
-                            else handler.postDelayed(this, minOf(16L, 3000L - elapsed))
+                            if (elapsed >= DURATION_MS) { fired = true; complete() }
+                            else handler.postDelayed(this, minOf(16L, DURATION_MS - elapsed))
                         }
                     }
                     handler.post(animation!!)

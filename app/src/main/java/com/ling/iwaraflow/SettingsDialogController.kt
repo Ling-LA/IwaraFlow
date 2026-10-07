@@ -46,11 +46,11 @@ class SettingsDialogController(
         panel.addView(skipSeenEverywhere)
         panel.addView(TextView(activity).apply {
             text = "三个榜单页默认照着官方顺序看，刷过的还会出现。打开后它们和推荐流一个口径：看过的不再重复露面（整页都看过时仍然照常显示，不给空页）。"
-            textSize = 12f; setTextColor(0xFF607D93.toInt()); setPadding(dp(4), dp(4), 0, dp(8))
+            textSize = 12f; setTextColor(UiPalette.resolve(context, 0xFF607D93.toInt())); setPadding(dp(4), dp(4), 0, dp(8))
         })
         panel.addView(TextView(activity).apply {
             text = "开启后只在生成新的推荐列表时过滤历史记录，不会在滑动过程中连续自动跳过。"; textSize = 12f
-            setTextColor(0xFF607D93.toInt()); setPadding(dp(4), 0, 0, dp(8))
+            setTextColor(UiPalette.resolve(context, 0xFF607D93.toInt())); setPadding(dp(4), 0, 0, dp(8))
         })
         val classicsValues = intArrayOf(0, 8, 12, 16, 24)
         val classicsNames = arrayOf("不穿插老片", "每 8 条穿插一条老片", "每 12 条穿插一条老片", "每 16 条穿插一条老片", "每 24 条穿插一条老片")
@@ -61,7 +61,7 @@ class SettingsDialogController(
         panel.addView(classics)
         panel.addView(TextView(activity).apply {
             text = "老片指点赞很高、发布超过一年的作品，随机插在每一组里的任意位置。避免短时间刷太多把新片刷没、后面越刷越旧，也避免一直碰不到历史上的高质量作品。"
-            textSize = 12f; setTextColor(0xFF607D93.toInt()); setPadding(dp(4), dp(4), 0, dp(8))
+            textSize = 12f; setTextColor(UiPalette.resolve(context, 0xFF607D93.toInt())); setPadding(dp(4), dp(4), 0, dp(8))
         })
         val recommendDebug = CheckBox(activity).apply {
             text = "显示推荐调试信息"; isChecked = prefs.recommendDebug
@@ -69,7 +69,7 @@ class SettingsDialogController(
         panel.addView(recommendDebug)
         panel.addView(TextView(activity).apply {
             text = "打开后简介面板里会在「推荐理由」下面写清这条视频的分是怎么来的：来源 / 质量 / 新鲜度 / 画像 / 扰动各占多少、命中了哪些标签、来自哪一路召回。只用于调推荐算法，平时可以关着。"
-            textSize = 12f; setTextColor(0xFF607D93.toInt()); setPadding(dp(4), dp(4), 0, dp(8))
+            textSize = 12f; setTextColor(UiPalette.resolve(context, 0xFF607D93.toInt())); setPadding(dp(4), dp(4), 0, dp(8))
         })
         panel.addView(sectionTitle("播放"))
         val autoNext = CheckBox(activity).apply { text = "播放完毕自动进入下一条"; isChecked = prefs.autoNext }
@@ -82,10 +82,14 @@ class SettingsDialogController(
         }
         val preload = CheckBox(activity).apply { text = "网络稳定时提前加载后续视频"; isChecked = prefs.preloadNext }
         panel.addView(preload)
+        panel.addView(CheckBox(activity).apply {
+            text = "移动 / 计量网络也预加载后续视频"; isChecked = prefs.preloadOnMetered
+            setOnCheckedChangeListener { _, checked -> prefs.preloadOnMetered = checked }
+        })
         panel.addView(autoNext); panel.addView(autoPip); panel.addView(pauseIcon); panel.addView(tapPause)
         panel.addView(TextView(activity).apply {
             text = "关掉后点一下画面不再暂停：只在「标题 / 标签 / 操作栏」和「进度条 / 快进后退 / 剩余时长」之间切换，视频照常播，要暂停就点控件里的暂停按钮。"
-            textSize = 12f; setTextColor(0xFF607D93.toInt()); setPadding(dp(4), dp(4), 0, dp(8))
+            textSize = 12f; setTextColor(UiPalette.resolve(context, 0xFF607D93.toInt())); setPadding(dp(4), dp(4), 0, dp(8))
         })
         val skipValues = intArrayOf(5, 10, 15, 30, 60)
         val skipNames = skipValues.map { "前进 / 后退 $it 秒" }.toTypedArray()
@@ -96,7 +100,7 @@ class SettingsDialogController(
         panel.addView(skip)
         panel.addView(TextView(activity).apply {
             text = "暂停时左下角的两个按钮一次跳多少秒。"
-            textSize = 12f; setTextColor(0xFF607D93.toInt()); setPadding(dp(4), dp(4), 0, dp(8))
+            textSize = 12f; setTextColor(UiPalette.resolve(context, 0xFF607D93.toInt())); setPadding(dp(4), dp(4), 0, dp(8))
         })
         panel.addView(sectionTitle("分享链接"))
         val clipboardLinks = CheckBox(activity).apply {
@@ -106,7 +110,7 @@ class SettingsDialogController(
         panel.addView(clipboardLinks)
         panel.addView(TextView(activity).apply {
             text = "复制视频或作者主页链接后打开应用即可跳转。同一次复制只打开一次；分享视频上划后继续推荐。"
-            textSize = 12f; setTextColor(0xFF607D93.toInt()); setPadding(dp(4), dp(4), 0, dp(8))
+            textSize = 12f; setTextColor(UiPalette.resolve(context, 0xFF607D93.toInt())); setPadding(dp(4), dp(4), 0, dp(8))
         })
         panel.addView(sectionTitle("默认清晰度"))
         val qualityValues = arrayOf("highest", "Source", "1080", "720", "540", "360")
@@ -117,7 +121,7 @@ class SettingsDialogController(
         panel.addView(sectionTitle("网络"))
         panel.addView(TextView(activity).apply {
             text = "Iwara 在部分地区无法直连。代理工具只开了本地端口、没开 VPN 模式时，可以让本应用自己走那个端口。"
-            textSize = 12f; setTextColor(0xFF607D93.toInt()); setPadding(dp(4), 0, 0, dp(6))
+            textSize = 12f; setTextColor(UiPalette.resolve(context, 0xFF607D93.toInt())); setPadding(dp(4), 0, 0, dp(6))
         })
         val proxyTypes = arrayOf(NetworkProxy.TYPE_NONE, NetworkProxy.TYPE_HTTP, NetworkProxy.TYPE_SOCKS)
         val proxyNames = arrayOf("不使用代理", "HTTP 代理", "SOCKS5 代理")
@@ -132,7 +136,7 @@ class SettingsDialogController(
         panel.addView(sectionTitle("翻译"))
         panel.addView(TextView(activity).apply {
             text = "简介和评论自动翻成中文用哪家服务。默认的谷歌免费接口不用密钥；其它几家填上自己的密钥，也可以接 AI 中转站。"
-            textSize = 12f; setTextColor(0xFF607D93.toInt()); setPadding(dp(4), 0, 0, dp(6))
+            textSize = 12f; setTextColor(UiPalette.resolve(context, 0xFF607D93.toInt())); setPadding(dp(4), 0, 0, dp(6))
         })
         val translation = prefs.translation
         val providerIds = Translator.PROVIDERS.map { it.first }
@@ -164,7 +168,7 @@ class SettingsDialogController(
         val trAiBase = settingsInput("接口地址，例如 https://api.openai.com/v1（中转站填它给的地址）", translation.endpoint, InputType.TYPE_CLASS_TEXT or InputType.TYPE_TEXT_VARIATION_URI)
         val trModel = settingsInput("模型名，例如 gpt-4o-mini、deepseek-chat、qwen-plus", translation.model, InputType.TYPE_CLASS_TEXT)
         val trHint = TextView(activity).apply {
-            textSize = 12f; setTextColor(0xFF607D93.toInt()); setPadding(dp(4), dp(4), 0, dp(8))
+            textSize = 12f; setTextColor(UiPalette.resolve(context, 0xFF607D93.toInt())); setPadding(dp(4), dp(4), 0, dp(8))
         }
         val translationFields = listOf(trAiVendor, trAiBase, trKey, trModel, trRegion, trAppId, trEndpoint, trCustomUrl, trMethod, trBody, trHeaders, trResultPath, trLangPath)
         translationFields.forEach { panel.addView(it) }
@@ -211,6 +215,13 @@ class SettingsDialogController(
         panel.addView(sectionTitle("操作帮助"))
         panel.addView(actionRow("操作引导", "查看横屏 / 竖屏的三段长按、双连、加速和播放手势。") { PlaybackGuide.show(activity) })
         panel.addView(sectionTitle("维护"))
+        panel.addView(actionRow("数据与存储", "管理缓存、收藏和兴趣备份，清理历史及推荐画像。") {
+            activity.startActivity(android.content.Intent(activity, DataManagementActivity::class.java))
+        })
+        panel.addView(CheckBox(activity).apply {
+            text = "不记录浏览与推荐行为（收藏仍可保存）"; isChecked = prefs.privateBrowsing
+            setOnCheckedChangeListener { _, checked -> prefs.privateBrowsing = checked }
+        })
         panel.addView(actionRow("同步点赞记录", "把在网页端点过的赞补进“已看”，刷新推荐后生效。") { onSyncLikes() })
         panel.addView(actionRow("兴趣管理", "主动添加感兴趣或不感兴趣的标签，调整推荐机会；也可恢复已屏蔽内容。不影响主动搜索。") { onInterestManager() })
         panel.addView(actionRow("诊断信息", "最近的异常、退出原因和加载线索、推荐质量指标，只存在本机，不会上传。") {
@@ -325,7 +336,7 @@ class SettingsDialogController(
             transformationMethod = android.text.method.PasswordTransformationMethod.getInstance()
         }
         if (multiline) { minLines = 2; maxLines = 5 }
-        setTextColor(0xFF17324A.toInt()); setHintTextColor(0x99607D93.toInt())
+        setTextColor(UiPalette.resolve(context, 0xFF17324A.toInt())); setHintTextColor(0x99607D93.toInt())
         background = ContextCompat.getDrawable(activity, R.drawable.bg_input)
         setPadding(dp(16), dp(10), dp(16), dp(10))
         layoutParams = LinearLayout.LayoutParams(LinearLayout.LayoutParams.MATCH_PARENT, LinearLayout.LayoutParams.WRAP_CONTENT)
@@ -347,14 +358,14 @@ class SettingsDialogController(
                 setTypeface(null, android.graphics.Typeface.BOLD)
             })
             addView(TextView(context).apply {
-                text = subtitle; textSize = 12f; setTextColor(0xFF607D93.toInt()); setPadding(0, dp(2), 0, 0)
+                text = subtitle; textSize = 12f; setTextColor(UiPalette.resolve(context, 0xFF607D93.toInt())); setPadding(0, dp(2), 0, 0)
             })
             setOnClickListener { onClick() }
         }
 
     private fun sectionTitle(text: String) = TextView(activity).apply {
         tag = "section_heading"
-        this.text = text; setTextColor(0xFF285C7B.toInt()); textSize = 18f; setPadding(0, dp(12), 0, dp(4)); setTypeface(null, android.graphics.Typeface.BOLD)
+        this.text = text; setTextColor(UiPalette.resolve(context, 0xFF285C7B.toInt())); textSize = 18f; setPadding(0, dp(12), 0, dp(4)); setTypeface(null, android.graphics.Typeface.BOLD)
     }
 
     companion object {

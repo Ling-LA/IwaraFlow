@@ -24,6 +24,20 @@ class AppPrefs(context: Context) {
         get() = prefs.getLong("inspected_clipboard_timestamp", 0L)
         set(value) = prefs.edit().putLong("inspected_clipboard_timestamp", value).apply()
 
+    var preloadOnMetered: Boolean
+        get() = prefs.getBoolean("preload_metered", false)
+        set(value) = prefs.edit().putBoolean("preload_metered", value).apply()
+    var isolateInterests: Boolean
+        get() = prefs.getBoolean("isolate_interests", false)
+        set(value) { prefs.edit().putBoolean("isolate_interests", value).apply() }
+
+    var privateBrowsing: Boolean
+        get() = prefs.getBoolean("private_browsing", false)
+        set(value) = prefs.edit().putBoolean("private_browsing", value).apply()
+    var danmakuDensity: Int
+        get() = prefs.getInt("danmaku_density", 3).coerceIn(1, 6)
+        set(value) = prefs.edit().putInt("danmaku_density", value.coerceIn(1, 6)).apply()
+
     var preloadNext: Boolean
         get() = prefs.getBoolean("preload_next", true)
         set(value) = prefs.edit().putBoolean("preload_next", value).apply()

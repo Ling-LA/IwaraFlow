@@ -8,7 +8,10 @@ import android.os.IBinder
 import android.provider.Settings
 import android.view.*
 import android.widget.FrameLayout
-import android.widget.TextView
+import android.widget.ImageButton
+import android.graphics.drawable.GradientDrawable
+import android.graphics.drawable.RippleDrawable
+import android.content.res.ColorStateList
 import androidx.media3.common.Player
 import androidx.media3.exoplayer.ExoPlayer
 import androidx.media3.ui.PlayerView
@@ -18,6 +21,7 @@ class FloatingVideoService : Service() {
     private var player: ExoPlayer? = null
     private var cache: MediaPreloadCache? = null
     private var window: FrameLayout? = null
+    private var controls: FloatingControls? = null
     private var returnIntent: Intent? = null
     private var videoId = ""
     private var closed = false
@@ -45,45 +49,81 @@ class FloatingVideoService : Service() {
             WindowManager.LayoutParams.TYPE_APPLICATION_OVERLAY,
             WindowManager.LayoutParams.FLAG_NOT_FOCUSABLE or WindowManager.LayoutParams.FLAG_LAYOUT_IN_SCREEN,
             PixelFormat.TRANSLUCENT).apply { gravity = Gravity.TOP or Gravity.START; x = dp(12); y = dp(100) }
-        val root = FrameLayout(this).apply { setBackgroundColor(0xFF000000.toInt()) }
+        val root = FrameLayout(this).apply {
+            background = GradientDrawable().apply { setColor(0xFF000000.toInt()); cornerRadius = dp(16).toFloat() }
+            clipToOutline = true
+        }
         window = root
         cache = MediaPreloadCache(this)
         val p = ExoPlayer.Builder(this).build().also { player = it }
-        val video = PlayerView(this).apply { useController = false; player = p }
+        val video = (LayoutInflater.from(this).inflate(R.layout.view_floating_video, root, false) as PlayerView).apply { player = p }
         root.addView(video, FrameLayout.LayoutParams(-1, -1))
-        fun control(text: String, label: String, gravity: Int, action: () -> Unit): TextView = TextView(this).apply {
-            this.text = text; contentDescription = label; textSize = 25f; setTextColor(-1)
-            this.gravity = Gravity.CENTER; setBackgroundColor(0x66000000)
-            root.addView(this, FrameLayout.LayoutParams(dp(48), dp(48), gravity))
+        val buttons = mutableListOf<View>()
+        fun control(icon: Int, label: String, gravity: Int, action: () -> Unit): ImageButton = ImageButton(this).apply {
+            setImageResource(icon); contentDescription = label
+            scaleType = android.widget.ImageView.ScaleType.CENTER_INSIDE
+            setPadding(dp(11), dp(11), dp(11), dp(11))
+            background = RippleDrawable(ColorStateList.valueOf(0x44FFFFFF), null,
+                GradientDrawable().apply { shape = GradientDrawable.OVAL; setColor(-1) })
+            root.addView(this, FrameLayout.LayoutParams(dp(48), dp(48), gravity).apply { setMargins(dp(4), dp(4), dp(4), dp(4)) })
+            buttons += this
             setOnClickListener { action() }
+            setOnTouchListener { _, event ->
+                when (event.actionMasked) {
+                    MotionEvent.ACTION_DOWN -> controls?.suspend()
+                    MotionEvent.ACTION_UP, MotionEvent.ACTION_CANCEL -> controls?.resume()
+                }
+                false
+            }
         }
-        control("↖", "返回软件", Gravity.TOP or Gravity.START) {
+        control(R.drawable.ic_floating_return, "返回软件", Gravity.TOP or Gravity.START) {
             val reopen = returnIntent ?: return@control
             savePosition()
             releaseWindow(); stopSelf()
             startActivity(reopen.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_REORDER_TO_FRONT or Intent.FLAG_ACTIVITY_SINGLE_TOP))
         }
-        control("×", "关闭小窗", Gravity.TOP or Gravity.END) { savePosition(); releaseWindow(); stopSelf() }
-        val toggle = control("Ⅱ", "播放或暂停", Gravity.BOTTOM or Gravity.CENTER_HORIZONTAL) {
-            if (p.playWhenReady) p.pause() else p.play()
+        control(R.drawable.ic_floating_close, "关闭小窗", Gravity.TOP or Gravity.END) { savePosition(); releaseWindow(); stopSelf() }
+        val toggle = control(R.drawable.ic_pause, "播放或暂停", Gravity.BOTTOM or Gravity.CENTER_HORIZONTAL) {
+            if (p.playWhenReady) p.pause() else {
+                if (p.playbackState == Player.STATE_ENDED) p.seekTo(0)
+                p.play()
+            }
+            controls?.show()
         }
+        controls = FloatingControls(buttons)
         p.addListener(object : Player.Listener {
-            override fun onIsPlayingChanged(playing: Boolean) { toggle.text = if (playing) "Ⅱ" else "▶" }
-            override fun onPlaybackStateChanged(state: Int) { if (state == Player.STATE_ENDED) toggle.text = "▶" }
+            override fun onPlayWhenReadyChanged(ready: Boolean, reason: Int) {
+                toggle.setImageResource(if (ready && p.playbackState != Player.STATE_ENDED) R.drawable.ic_pause else R.drawable.ic_play)
+            }
+            override fun onPlaybackStateChanged(state: Int) {
+                if (state == Player.STATE_ENDED) { toggle.setImageResource(R.drawable.ic_play); controls?.show() }
+            }
         })
-        var downX = 0f; var downY = 0f; var startX = 0; var startY = 0
+        var downX = 0f; var downY = 0f; var startX = 0; var startY = 0; var dragging = false
+        val slop = ViewConfiguration.get(this).scaledTouchSlop
+        video.contentDescription = "小窗画面，轻触显示或隐藏控件，拖动移动小窗"
+        video.setOnClickListener { controls?.toggle() }
         video.setOnTouchListener { _, event ->
             when (event.actionMasked) {
-                MotionEvent.ACTION_DOWN -> { downX = event.rawX; downY = event.rawY; startX = params.x; startY = params.y }
-                MotionEvent.ACTION_MOVE -> {
-                    params.x = (startX + event.rawX - downX).toInt().coerceIn(0, (resources.displayMetrics.widthPixels - width).coerceAtLeast(0))
-                    params.y = (startY + event.rawY - downY).toInt().coerceIn(0, (resources.displayMetrics.heightPixels - params.height).coerceAtLeast(0))
-                    runCatching { wm.updateViewLayout(root, params) }
+                MotionEvent.ACTION_DOWN -> {
+                    downX = event.rawX; downY = event.rawY; startX = params.x; startY = params.y
+                    dragging = false; controls?.suspend()
                 }
+                MotionEvent.ACTION_MOVE -> {
+                    if (kotlin.math.hypot(event.rawX - downX, event.rawY - downY) > slop) dragging = true
+                    if (dragging) {
+                        params.x = (startX + event.rawX - downX).toInt().coerceIn(0, (resources.displayMetrics.widthPixels - width).coerceAtLeast(0))
+                        params.y = (startY + event.rawY - downY).toInt().coerceIn(0, (resources.displayMetrics.heightPixels - params.height).coerceAtLeast(0))
+                        runCatching { wm.updateViewLayout(root, params) }
+                    }
+                }
+                MotionEvent.ACTION_UP -> { if (!dragging) video.performClick() else controls?.resume() }
+                MotionEvent.ACTION_CANCEL -> controls?.resume()
             }; true
         }
         try {
             wm.addView(root, params)
+            controls?.show()
             p.setMediaSource(cache!!.createMediaSource(url)); p.seekTo(intent.getLongExtra("position", 0))
             p.setAudioAttributes(androidx.media3.common.AudioAttributes.DEFAULT, true)
             p.prepare(); p.play(); cache?.prefetchFull(url)
@@ -93,6 +133,7 @@ class FloatingVideoService : Service() {
     private fun savePosition() { if (videoId.isNotBlank()) lastPosition = videoId to (player?.currentPosition ?: 0L) }
     private fun releaseWindow() {
         closed = true
+        controls?.close(); controls = null
         player?.release(); player = null
         cache?.close(); cache = null
         window?.let { runCatching { (getSystemService(WINDOW_SERVICE) as WindowManager).removeView(it) } }; window = null

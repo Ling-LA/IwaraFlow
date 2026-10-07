@@ -16,12 +16,12 @@ object InterestManager {
         fun dp(n: Int) = page.dp(n)
         fun column() = LinearLayout(context).apply { orientation = LinearLayout.VERTICAL }
         fun label(value: String, size: Float = 14f) = TextView(context).apply {
-            text = value; textSize = size; setTextColor(0xFF48697F.toInt())
+            text = value; textSize = size; setTextColor(UiPalette.resolve(context, 0xFF48697F.toInt()))
             setPadding(0, dp(8), 0, dp(8))
         }
         fun button(value: String, active: Boolean = false, click: () -> Unit) = Button(context).apply {
             text = value; textSize = 13f; isAllCaps = false
-            setTextColor(if (active) android.graphics.Color.WHITE else 0xFF285C7B.toInt())
+            setTextColor(if (active) android.graphics.Color.WHITE else UiPalette.resolve(context, 0xFF285C7B.toInt()))
             backgroundTintList = null
             setBackgroundResource(if (active) R.drawable.bg_profile_primary else R.drawable.bg_profile_button)
             minHeight = dp(48); minimumHeight = dp(48); minWidth = 0; minimumWidth = 0
@@ -119,12 +119,13 @@ object InterestManager {
             val categories = column()
             val rows = column()
             content.addView(categories); content.addView(rows)
+            val scores = history.systemTagScores()
+            val evidence = history.tagEvidence()
             var category = 0
             var limit = 24
             lateinit var render: () -> Unit
             render = {
                 categories.removeAllViews(); rows.removeAllViews()
-                val scores = history.systemTagScores()
                 val adjustments = history.systemTagMultipliers()
                 val keys = (scores.keys + adjustments.keys).sortedWith(
                     compareByDescending<String> { kotlin.math.abs(scores[it] ?: 0.0) }.thenBy { it })
@@ -143,7 +144,7 @@ object InterestManager {
                     val factor = adjustments[tag] ?: 1.0
                     "#$tag\n${"%.2f".format(scores[tag] ?: 0.0)} · ${(factor * 100).toInt()}%" to {
                         val factors = doubleArrayOf(0.0, 0.25, 0.5, 1.0, 1.5)
-                        AlertDialog.Builder(context).setTitle("调整 #$tag 系统权重")
+                        AlertDialog.Builder(context).setTitle("调整 #$tag · 近期证据 ${(evidence.confidence(tag) * 100).toInt()}%")
                             .setItems(arrayOf("删除此项（忽略系统判断）", "25%", "50%", "100%（恢复）", "150%（受总上限约束）")) { _, index ->
                                 history.setSystemTagMultiplier(tag, factors[index]); onChanged(); render()
                             }.show()

@@ -51,9 +51,10 @@ class IwaraUploadClient(
     private val accessToken: () -> String,
     private val apiRoot: String = "https://api.iwara.tv",
     private val filesRoot: String = "https://files.iwara.tv",
-    private val authExpired: () -> Unit = {}
+    private val authExpired: () -> Unit = {},
+    private val sessionValid: () -> Boolean = { true }
 ) : Closeable {
-    private val client = OkHttpClient.Builder().connectTimeout(20, TimeUnit.SECONDS)
+    private val client = OkHttpClient.Builder().addInterceptor(RequestScheduler).connectTimeout(20, TimeUnit.SECONDS)
         .readTimeout(90, TimeUnit.SECONDS).writeTimeout(90, TimeUnit.SECONDS)
         .retryOnConnectionFailure(false).followRedirects(false).build()
     @Volatile private var closed = false
@@ -61,11 +62,11 @@ class IwaraUploadClient(
         .header("Accept", "application/json").header("Origin", "https://www.iwara.tv")
         .header("Referer", "https://www.iwara.tv/").header("X-Site", "www.iwara.tv")
         .apply {
-            check(!closed) { "上传已取消" }
+            check(!closed && sessionValid()) { "上传已暂停或账号已改变" }
             if (authenticated) header("Authorization", "Bearer ${accessToken()}")
         }
     private fun json(request: Request, expectedCode: Int? = null): JSONObject {
-        if (closed || Thread.currentThread().isInterrupted) throw IOException("上传已取消")
+        if (closed || Thread.currentThread().isInterrupted || !sessionValid()) throw IOException("上传已取消")
         return client.newCall(request).execute().use { response ->
             val raw = response.body?.string().orEmpty()
             val data = runCatching { JSONObject(raw) }.getOrNull()
@@ -99,7 +100,7 @@ class IwaraUploadClient(
                     var sent = 0L
                     var previous = -1
                     while (true) {
-                        if (closed || Thread.currentThread().isInterrupted) throw IOException("上传已取消")
+                        if (closed || Thread.currentThread().isInterrupted || !sessionValid()) throw IOException("上传已取消")
                         val count = stream.read(buffer)
                         if (count == -1) break
                         sink.write(buffer, 0, count)

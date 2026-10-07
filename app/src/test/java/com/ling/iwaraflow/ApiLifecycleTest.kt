@@ -59,6 +59,18 @@ class ApiLifecycleTest {
         }
     }
 
+    @Test fun playbackWorkDoesNotQueueBehindBlockedMetadataWorkers() {
+        val api = IwaraApi(RuntimeEnvironment.getApplication())
+        val started = CountDownLatch(6); val release = CountDownLatch(1); val result = CountDownLatch(1)
+        try {
+            repeat(6) { enqueue(api, {}) { started.countDown(); release.await(5, TimeUnit.SECONDS); 0 } }
+            assertTrue(started.await(3, TimeUnit.SECONDS))
+            val callback: (Any?) -> Unit = { result.countDown() }; val work: () -> Any? = { 42 }
+            api.javaClass.declaredMethods.single { it.name == "enqueuePlayback" }.apply { isAccessible = true }.invoke(api, callback, work)
+            assertTrue(result.await(1, TimeUnit.SECONDS))
+        } finally { release.countDown(); api.close() }
+    }
+
     private fun enqueue(api: IwaraApi, callback: (Any?) -> Unit, request: () -> Any?) {
         api.javaClass.declaredMethods.single { it.name == "enqueue" }
             .apply { isAccessible = true }.invoke(api, callback, request)

@@ -1,0 +1,10 @@
+<resources>
+    <color name="page_background">#111B24</color>
+    <color name="page_header">#182C3B</color>
+    <color name="page_text">#E0EFF9</color>
+    <color name="page_secondary">#A3BDCD</color>
+    <color name="page_border">#345063</color>
+    <color name="page_surface">#20303D</color>
+    <color name="page_accent">#A2D6F7</color>
+    <color name="page_button">#253D4F</color>
+</resources>

@@ -14,12 +14,12 @@
         <item name="buttonBarNeutralButtonStyle">@style/IwaraFlow.DialogButton.Text</item>
     </style>
 
-    <style name="Theme.IwaraFlow.Dialog" parent="Theme.AppCompat.Light.Dialog.Alert">
+    <style name="Theme.IwaraFlow.Dialog" parent="Theme.AppCompat.DayNight.Dialog.Alert">
         <item name="android:windowBackground">@drawable/bg_dialog_surface</item>
         <item name="android:colorAccent">#FF5C85</item>
         <item name="colorAccent">#FF5C85</item>
-        <item name="android:textColorPrimary">#17324A</item>
-        <item name="android:textColorSecondary">#607D93</item>
+        <item name="android:textColorPrimary">@color/page_text</item>
+        <item name="android:textColorSecondary">@color/page_secondary</item>
         <item name="buttonBarPositiveButtonStyle">@style/IwaraFlow.DialogButton.Text</item>
         <item name="buttonBarNegativeButtonStyle">@style/IwaraFlow.DialogButton.Text</item>
         <item name="buttonBarNeutralButtonStyle">@style/IwaraFlow.DialogButton.Text</item>

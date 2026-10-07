@@ -71,6 +71,11 @@ class SecureSessionStore(context: Context) {
         }
     }
 
+    fun putSecretDurable(name: String, value: String?): Boolean {
+        val store = prefs() ?: return false
+        return if (value == null) store.edit().remove(name).commit() else store.edit().putString(name, value).commit()
+    }
+
     var refreshToken: String?
         get() = secret("refresh_token")
         set(value) = putSecret("refresh_token", value)
@@ -79,12 +84,22 @@ class SecureSessionStore(context: Context) {
         get() = secret("access_token")
         set(value) = putSecret("access_token", value)
 
-    fun clear() {
+    /** Account logout must preserve translation provider credentials. */
+    fun clearAuthentication() = synchronized(accountLock) {
+        accountRevision++
+        putSecret("refresh_token", null); putSecret("access_token", null)
+    }
+
+    fun clear() = synchronized(accountLock) {
+        accountRevision++
         prefs()?.edit()?.clear()?.apply()
         synchronized(memory) { memory.clear() }
     }
 
     companion object {
+        internal val accountLock = Any()
+        internal val refreshLock = Any()
+        @Volatile internal var accountRevision = 0L
         /** 进程级的内存退路，见 [memory]。 */
         private val processMemory = HashMap<String, String>()
 

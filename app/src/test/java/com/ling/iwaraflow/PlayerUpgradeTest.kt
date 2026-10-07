@@ -17,13 +17,13 @@ import java.util.Random
 @RunWith(RobolectricTestRunner::class)
 @Config(sdk = [36])
 class PlayerUpgradeTest {
-    @Test fun holdRequiresThreeSecondsAndDoesNotClickOnRelease() {
+    @Test fun holdRequiresTwoAndAHalfSecondsAndDoesNotClickOnRelease() {
         val view = ImageView(RuntimeEnvironment.getApplication())
         var doubles = 0; var clicks = 0
         view.setOnClickListener { clicks++ }
         val hold = HoldReaction(view, -1) { doubles++ }
         touch(view, MotionEvent.ACTION_DOWN)
-        shadowOf(Looper.getMainLooper()).idleFor(Duration.ofMillis(2999))
+        shadowOf(Looper.getMainLooper()).idleFor(Duration.ofMillis(2499))
         assertEquals(0, doubles)
         shadowOf(Looper.getMainLooper()).idleFor(Duration.ofMillis(1))
         assertEquals(1, doubles)
@@ -56,7 +56,7 @@ class PlayerUpgradeTest {
         var completed = 0
         val hold = HoldReaction(like, 0xFFFF365D.toInt(), favorite, 0xFFFFD54F.toInt()) { completed++ }
         touch(like, MotionEvent.ACTION_DOWN)
-        shadowOf(Looper.getMainLooper()).idleFor(Duration.ofMillis(1500))
+        shadowOf(Looper.getMainLooper()).idleFor(Duration.ofMillis(1250))
         fun arc(name: String): Pair<Float, Int> {
             val ring = hold.javaClass.getDeclaredField(name).apply { isAccessible = true }.get(hold) as android.graphics.drawable.Drawable
             val canvas = org.mockito.Mockito.mock(android.graphics.Canvas::class.java)

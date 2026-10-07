@@ -38,6 +38,16 @@ class SavedVideosActivity : AppCompatActivity() {
     private var closed = false
     private var inFeed = false
     private var kind = KIND_HISTORY
+    private var listTotal = 0
+    private var listLoading = false
+    private var listSerial = 0
+    private var listOffset = 0
+    private var listQuery = ""
+    private var ascending = false
+    private var advanceAfterLoad = false
+    private val listWorker = java.util.concurrent.Executors.newSingleThreadExecutor()
+    private val listHandler = android.os.Handler(android.os.Looper.getMainLooper())
+    private var searchTask: Runnable? = null
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
@@ -64,20 +74,6 @@ class SavedVideosActivity : AppCompatActivity() {
         kind = intent.getStringExtra(EXTRA_KIND) ?: KIND_HISTORY
         findViewById<TextView>(R.id.savedTitle).text = pageTitle()
         findViewById<TextView>(R.id.savedFeedBack).text = "‹ ${pageTitle()}"
-
-        items += when (kind) {
-            KIND_FAVORITES -> history.localFavorites(300)
-            KIND_DOWNLOADS -> DownloadLibrary.entries(this, history)
-                .also { entries -> entries.forEach { downloads[it.item.id] = it } }
-                .map { it.item }
-            else -> history.recentHistory(200)
-        }
-        adapter.notifyDataSetChanged()
-        findViewById<TextView>(R.id.savedSubtitle).text = when (kind) {
-            KIND_FAVORITES -> "共 ${items.size} 条"
-            KIND_DOWNLOADS -> downloadsSubtitle()
-            else -> "最近观看的 ${items.size} 条视频"
-        }
 
         feedAdapter = VideoAdapter(
             api = api,
@@ -113,12 +109,92 @@ class SavedVideosActivity : AppCompatActivity() {
             override fun onPageSelected(position: Int) {
                 comments.close()
                 feedAdapter.setActive(position)
+                if (position >= items.size - 5) loadLibraryPage()
             }
         })
-        // 列表是本地的、一次全在，所以滑到底就是真的到底了。
-        EndOfFeedHint.install(pager) { false }
+        EndOfFeedHint.install(pager) { listLoading || items.size < listTotal }
+        installLibraryControls()
+        loadLibraryPage(reset = true)
+    }
 
-        enrichMissingVideoDetails()
+    private fun installLibraryControls() {
+        if (kind == KIND_DOWNLOADS) return
+        val header = findViewById<TextView>(R.id.savedSubtitle).parent as android.widget.LinearLayout
+        val controls = android.widget.LinearLayout(this).apply { gravity = android.view.Gravity.CENTER_VERTICAL }
+        val input = android.widget.EditText(this).apply {
+            hint = "搜索标题、作者或标签"; textSize = 14f; setSingleLine()
+            contentDescription = "搜索本地列表"
+        }
+        val sort = android.widget.Button(this).apply {
+            text = "最新在前"; setOnClickListener {
+                ascending = !ascending; text = if (ascending) "最早在前" else "最新在前"
+                loadLibraryPage(reset = true)
+            }
+        }
+        controls.addView(input, android.widget.LinearLayout.LayoutParams(0, -2, 1f))
+        controls.addView(sort); header.addView(controls)
+        input.addTextChangedListener(object : android.text.TextWatcher {
+            override fun beforeTextChanged(s: CharSequence?, start: Int, count: Int, after: Int) {}
+            override fun onTextChanged(s: CharSequence?, start: Int, before: Int, count: Int) {
+                listQuery = s?.toString().orEmpty()
+                searchTask?.let(listHandler::removeCallbacks)
+                searchTask = Runnable { loadLibraryPage(reset = true) }.also { listHandler.postDelayed(it, 250) }
+            }
+            override fun afterTextChanged(s: android.text.Editable?) {}
+        })
+        listView.addOnScrollListener(object : RecyclerView.OnScrollListener() {
+            override fun onScrolled(view: RecyclerView, dx: Int, dy: Int) {
+                if ((view.layoutManager as LinearLayoutManager).findLastVisibleItemPosition() >= items.size - 8)
+                    loadLibraryPage()
+            }
+        })
+    }
+
+    private fun loadLibraryPage(reset: Boolean = false) {
+        if (closed) return
+        if (reset) { listSerial++; listOffset = 0; listLoading = false; listTotal = Int.MAX_VALUE }
+        if (listLoading || listOffset >= listTotal) return
+        val serial = listSerial
+        val offset = listOffset
+        val query = listQuery
+        val order = ascending
+        listLoading = true
+        listWorker.execute {
+            val result = runCatching {
+                if (kind == KIND_DOWNLOADS) {
+                    val entries = DownloadLibrary.entries(this, history)
+                    Triple(SavedLibrary.Page(entries.map { it.item }, entries.size), entries, true)
+                } else Triple(SavedLibrary.page(history.readableDatabase, kind == KIND_FAVORITES,
+                    offset, 48, query, order), emptyList<DownloadLibrary.Entry>(), false)
+            }
+            runOnUiThread {
+                if (closed || serial != listSerial) return@runOnUiThread
+                listLoading = false
+                result.onSuccess { (page, entries, downloaded) ->
+                    val from = if (reset) 0 else items.size
+                    if (reset) { items.clear(); downloads.clear() }
+                    entries.forEach { downloads[it.item.id] = it }
+                    val known = items.mapTo(HashSet()) { it.id }
+                    val added = page.items.filter { known.add(it.id) }
+                    items += added
+                    listOffset = offset + page.items.size
+                    listTotal = page.total
+                    if (reset) adapter.notifyDataSetChanged() else adapter.notifyItemRangeInserted(from, added.size)
+                    if (inFeed && !reset) feedAdapter.append(added.map { it.copy() })
+                    findViewById<TextView>(R.id.savedSubtitle).text = if (downloaded) downloadsSubtitle()
+                        else "共 ${page.total} 条 · 已加载 ${items.size} 条" + if (items.size < page.total) " · 下滑继续" else ""
+                    enrichMissingVideoDetails(from)
+                    if (advanceAfterLoad) {
+                        advanceAfterLoad = false
+                        if (pager.currentItem + 1 < feedAdapter.itemCount) pager.setCurrentItem(pager.currentItem + 1, true)
+                    }
+                }.onFailure {
+                    findViewById<TextView>(R.id.savedSubtitle).apply {
+                        text = "读取失败，点击重试"; setOnClickListener { loadLibraryPage(reset) }
+                    }
+                }
+            }
+        }
     }
 
     private fun pageTitle(): String = when (kind) {
@@ -138,8 +214,9 @@ class SavedVideosActivity : AppCompatActivity() {
         }
     }
 
-    private fun enrichMissingVideoDetails() {
-        items.forEachIndexed { index, original ->
+    private fun enrichMissingVideoDetails(from: Int = 0) {
+        items.drop(from).forEachIndexed { relative, original ->
+            val index = from + relative
             api.getVideo(original.id) { result ->
                 result.onSuccess { fresh ->
                     if (closed) return@onSuccess
@@ -223,6 +300,7 @@ class SavedVideosActivity : AppCompatActivity() {
     private fun nextVideo(position: Int) {
         if (closed) return
         if (position + 1 < feedAdapter.itemCount) pager.setCurrentItem(position + 1, true)
+        else if (items.size < listTotal || listLoading) { advanceAfterLoad = true; loadLibraryPage() }
         else EndOfFeedHint.show(this)
     }
 
@@ -364,6 +442,9 @@ class SavedVideosActivity : AppCompatActivity() {
 
     override fun onDestroy() {
         closed = true
+        listSerial++
+        listHandler.removeCallbacksAndMessages(null)
+        listWorker.shutdownNow()
         PipRegistry.leave(this)
         if (::comments.isInitialized) comments.release()
         if (::feedAdapter.isInitialized) feedAdapter.releaseAll()

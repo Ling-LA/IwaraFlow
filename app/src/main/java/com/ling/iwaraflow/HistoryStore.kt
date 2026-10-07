@@ -16,7 +16,7 @@ data class MutedEntities(
     val tags: Set<String> = emptySet()
 )
 
-class HistoryStore(context: Context) : SQLiteOpenHelper(context, "iwaraflow.db", null, 11) {
+class HistoryStore(context: Context, private val profileFile: String? = null) : SQLiteOpenHelper(context, profileFile ?: "iwaraflow.db", null, 11) {
     /**
      * **UI 线程不写库**。划一条视频要写好几笔（观看记录、行为、已看标记），
      * 而这些方法都是 `@Synchronized` 的——和后台算画像抢同一把锁，用久了就是划走那一下的微卡顿。
@@ -26,7 +26,22 @@ class HistoryStore(context: Context) : SQLiteOpenHelper(context, "iwaraflow.db",
         Thread(r, "IwaraFlow-history-write").apply { isDaemon = true }
     }
     @Volatile private var closed = false
-    private val systemAdjustments = context.getSharedPreferences("system_interest_adjustments", Context.MODE_PRIVATE)
+    private val appPrefs = AppPrefs(context.applicationContext)
+    fun invalidateInterests() = notifyInterestChanged()
+    private val appContext = context.applicationContext
+    private val profiles = java.util.concurrent.ConcurrentHashMap<String, HistoryStore>()
+    private val queuedScope = ThreadLocal<String>()
+    private fun interestScope(): String = queuedScope.get() ?: if (appPrefs.isolateInterests) {
+        java.security.MessageDigest.getInstance("SHA-256").digest(accountId.ifBlank { "anonymous" }.toByteArray())
+            .joinToString("") { "%02x".format(it) }
+    } else ""
+    internal val interestDatabase: SQLiteDatabase get() {
+        val scope = interestScope()
+        return if (profileFile != null || scope.isBlank()) writableDatabase
+        else profiles.computeIfAbsent(scope) { HistoryStore(appContext, "interest_$scope.db") }.writableDatabase
+    }
+    private val systemAdjustments get() = appContext.getSharedPreferences(
+        "system_interest_adjustments" + interestScope().let { if (it.isBlank()) "" else "_$it" }, Context.MODE_PRIVATE)
     private val interestMetadata = context.getSharedPreferences("interest_metadata", Context.MODE_PRIVATE)
     val interestRevision: Long get() = interestMetadata.getLong("revision", 0L)
     private fun notifyInterestChanged() { interestMetadata.edit().putLong("revision", interestRevision + 1L).apply() }
@@ -42,14 +57,21 @@ class HistoryStore(context: Context) : SQLiteOpenHelper(context, "iwaraflow.db",
     }
 
     fun systemTagScores(): Map<String, Double> = preferenceProfileAt(System.currentTimeMillis(), false).tagWeights
+    fun tagEvidence(): InterestEvidence {
+        val evidence = InterestEvidence()
+        interestDatabase.query("interactions", arrayOf("video_id", "author_id", "author", "tags"),
+            "weight>0 AND action<>? AND $ACCOUNT_SCOPE", arrayOf(ACTION_SEARCH, accountId), null, null, "created_at DESC", PROFILE_ROWS.toString()).use { c ->
+            while (c.moveToNext()) evidence.observe(c.getString(0), c.getString(1).ifBlank { c.getString(2) }, splitTags(c.getString(3)))
+        }
+        return evidence
+    }
 
 
     /**
      * 当前登录的 Iwara 账号 id，页面在启动和登录时写进来（见 [AppPrefs.accountId]）。
      *
-     * 只影响**从云端导进来的**那部分数据：官方点赞种子、同步进来的已看标记。
-     * 本机自己的行为（看了多久、本地收藏、不感兴趣）永远是设备级的，不带账号。
-     * 空串表示没登录 / 还不知道是谁——那就只认设备级的数据。
+     * 决定云端点赞和已看标记的范围；开启按账号隔离兴趣后，也选择该账号的兴趣库。
+     * 本机收藏与浏览历史仍为设备级。空串表示未登录，隔离模式下使用独立的匿名兴趣库。
      * 构造时直接从偏好里读一份，这样每个页面各自 new 出来的库都已经知道现在是谁。
      */
     @Volatile var accountId: String = runCatching {
@@ -61,17 +83,22 @@ class HistoryStore(context: Context) : SQLiteOpenHelper(context, "iwaraflow.db",
     fun post(block: () -> Unit) {
         if (closed) return
         // shutdown 之后排队的写照旧跑完（close 会等它们），只有新来的才丢。
-        runCatching { writes.execute { runCatching { block() } } }
+        val scope = interestScope()
+        runCatching { writes.execute {
+            queuedScope.set(scope)
+            try { runCatching { block() } }
+            finally { queuedScope.remove() }
+        } }
     }
 
     /** 划走 / 点赞这些都发生在 UI 线程上，写库交给写线程。 */
     fun recordInteractionAsync(item: VideoItem, action: String, weight: Double) =
-        post { recordInteraction(item, action, weight) }
+        if (!appPrefs.privateBrowsing) post { recordInteraction(item, action, weight) } else Unit
 
     fun recordWatchAsync(item: VideoItem, positionMs: Long, durationMs: Long, completed: Boolean) =
-        post { recordWatch(item, positionMs, durationMs, completed) }
+        if (!appPrefs.privateBrowsing) post { recordWatch(item, positionMs, durationMs, completed) } else Unit
 
-    fun markSeenAsync(videoId: String) = post { markSeen(videoId) }
+    fun markSeenAsync(videoId: String) { if (!appPrefs.privateBrowsing) post { markSeen(videoId) } }
 
     /** 收藏状态 UI 立刻就要用，所以先在调用线程上改好，落库再排队。 */
     fun setLocalFavoriteAsync(item: VideoItem, enabled: Boolean) {
@@ -88,12 +115,15 @@ class HistoryStore(context: Context) : SQLiteOpenHelper(context, "iwaraflow.db",
     }
 
     override fun close() {
-        if (!closed) {
+        synchronized(this) {
+            if (closed) return
             closed = true
+            writes.execute { profiles.values.forEach { it.close() }; profiles.clear(); super.close() }
             writes.shutdown()
+        }
+        if (android.os.Looper.myLooper() != android.os.Looper.getMainLooper()) {
             runCatching { writes.awaitTermination(AWAIT_WRITES_MS, java.util.concurrent.TimeUnit.MILLISECONDS) }
         }
-        super.close()
     }
 
     override fun onCreate(db: SQLiteDatabase) {
@@ -300,9 +330,9 @@ class HistoryStore(context: Context) : SQLiteOpenHelper(context, "iwaraflow.db",
      */
     @Synchronized
     fun mute(type: String, key: String) {
-        val value = key.trim().let { if (type == MUTE_AUTHOR_ID) it else it.lowercase() }
+        val value = key.trim().let { if (type == MUTE_AUTHOR_ID) it else if (type == MUTE_TAG) SearchQuery.canonicalTag(it) else it.lowercase() }
         if (value.isBlank()) return
-        insertMute(writableDatabase, type, value, System.currentTimeMillis())
+        insertMute(interestDatabase, type, value, System.currentTimeMillis())
     }
 
     /**
@@ -314,7 +344,7 @@ class HistoryStore(context: Context) : SQLiteOpenHelper(context, "iwaraflow.db",
     fun muteAuthor(name: String, authorId: String) {
         val label = name.trim().lowercase()
         val id = authorId.trim()
-        val db = writableDatabase
+        val db = interestDatabase
         val now = System.currentTimeMillis()
         if (label.isNotBlank()) insertMute(db, MUTE_AUTHOR, label, now, id)
         if (id.isNotBlank()) insertMute(db, MUTE_AUTHOR_ID, id, now, label)
@@ -327,7 +357,7 @@ class HistoryStore(context: Context) : SQLiteOpenHelper(context, "iwaraflow.db",
         if (key.isBlank()) return emptyList()
         val out = ArrayList<Pair<String, String>>()
         runCatching {
-            readableDatabase.query(
+            interestDatabase.query(
                 "muted_entities", arrayOf("type", "entity_key"),
                 "type IN (?, ?) AND (entity_key=? OR entity_key=? OR alias=? OR alias=?)",
                 arrayOf(MUTE_AUTHOR, MUTE_AUTHOR_ID, key, key.lowercase(), key, key.lowercase()),
@@ -342,7 +372,7 @@ class HistoryStore(context: Context) : SQLiteOpenHelper(context, "iwaraflow.db",
     fun unmuteAuthor(key: String): Int {
         val value = key.trim()
         if (value.isBlank()) return 0
-        return writableDatabase.delete(
+        return interestDatabase.delete(
             "muted_entities",
             "type IN (?, ?) AND (entity_key=? OR entity_key=? OR alias=? OR alias=?)",
             arrayOf(MUTE_AUTHOR, MUTE_AUTHOR_ID, value, value.lowercase(), value, value.lowercase())
@@ -352,9 +382,13 @@ class HistoryStore(context: Context) : SQLiteOpenHelper(context, "iwaraflow.db",
     /** 兴趣管理里的“恢复”：解除静音，返回删掉了几条。 */
     @Synchronized
     fun unmute(type: String, key: String): Int {
-        val value = key.trim().let { if (type == MUTE_AUTHOR_ID) it else it.lowercase() }
+        val value = key.trim().let { if (type == MUTE_AUTHOR_ID) it else if (type == MUTE_TAG) SearchQuery.canonicalTag(it) else it.lowercase() }
         if (value.isBlank()) return 0
-        return writableDatabase.delete("muted_entities", "type=? AND entity_key=?", arrayOf(type, value))
+        if (type == MUTE_TAG) {
+            val aliases = mutedEntities().tags.filter { SearchQuery.canonicalTag(it) == value }
+            return aliases.sumOf { interestDatabase.delete("muted_entities", "type=? AND entity_key=?", arrayOf(type, it)) }
+        }
+        return interestDatabase.delete("muted_entities", "type=? AND entity_key=?", arrayOf(type, value))
     }
 
     /** 当前所有的硬屏蔽：作者名、作者 id、标签各一份。 */
@@ -364,7 +398,7 @@ class HistoryStore(context: Context) : SQLiteOpenHelper(context, "iwaraflow.db",
         val authorIds = HashSet<String>()
         val tags = HashSet<String>()
         runCatching {
-            readableDatabase.query("muted_entities", arrayOf("type", "entity_key"), null, null, null, null, null)
+            interestDatabase.query("muted_entities", arrayOf("type", "entity_key"), null, null, null, null, null)
                 .use { c ->
                     while (c.moveToNext()) {
                         val key = c.getString(1).orEmpty()
@@ -448,6 +482,7 @@ class HistoryStore(context: Context) : SQLiteOpenHelper(context, "iwaraflow.db",
 
     @Synchronized
     fun recordWatch(item: VideoItem, positionMs: Long, durationMs: Long, completed: Boolean) {
+        if (appPrefs.privateBrowsing) return
         val now = System.currentTimeMillis()
         val values = ContentValues().apply {
             put("video_id", item.id)
@@ -465,6 +500,7 @@ class HistoryStore(context: Context) : SQLiteOpenHelper(context, "iwaraflow.db",
 
     @Synchronized
     fun markSeen(videoId: String, timestamp: Long = System.currentTimeMillis()) {
+        if (appPrefs.privateBrowsing) return
         if (videoId.isBlank()) return
         insertSeen(writableDatabase, videoId, timestamp, "")
     }
@@ -578,9 +614,12 @@ class HistoryStore(context: Context) : SQLiteOpenHelper(context, "iwaraflow.db",
 
     @Synchronized
     fun recordInteraction(item: VideoItem, action: String, weight: Double) {
+        if (appPrefs.privateBrowsing) return
         val now = System.currentTimeMillis()
-        val db = writableDatabase
+        val db = interestDatabase
         if (!weight.isFinite()) return
+        db.beginTransaction()
+        try {
         // Repeated toggles / replays of one video cannot farm the same signal indefinitely.
         val recent = db.rawQuery("SELECT COUNT(*) FROM interactions WHERE video_id=? AND action=? AND created_at>?",
             arrayOf(item.id, action, (now - 86_400_000L).toString())).use { it.moveToFirst(); it.getInt(0) }
@@ -592,6 +631,8 @@ class HistoryStore(context: Context) : SQLiteOpenHelper(context, "iwaraflow.db",
             applyPreferenceDeltas(db, item.author, item.authorId, item.tags, boundedWeight, now)
         }
         trimInteractions()
+        db.setTransactionSuccessful()
+        } finally { db.endTransaction() }
     }
 
     // ------------------------------------------------------------------ 长期口味聚合
@@ -621,9 +662,9 @@ class HistoryStore(context: Context) : SQLiteOpenHelper(context, "iwaraflow.db",
     ) {
         author.lowercase().takeIf { it.isNotBlank() }?.let { bumpPreference(db, PREF_AUTHOR, it, weight, now) }
         authorId.takeIf { it.isNotBlank() }?.let { bumpPreference(db, PREF_AUTHOR_ID, it, weight, now) }
-        tags.map { it.lowercase() }.filter { it.isNotBlank() }.distinct().forEach { tag ->
-            bumpPreference(db, PREF_TAG, tag, weight * TAG_SHARE, now)
-        }
+        val uniqueTags = tags.map(SearchQuery::canonicalTag).filter { it.isNotBlank() }.distinct()
+        val share = if (weight > 0) TAG_SHARE / kotlin.math.sqrt(uniqueTags.size.coerceAtLeast(1).toDouble()) else TAG_SHARE
+        uniqueTags.forEach { tag -> bumpPreference(db, PREF_TAG, tag, weight * share, now) }
     }
 
     /** 旧分按时间衰减之后加上增量。绝对值小到没意义就把这一行删掉，别让表无限长。 */
@@ -657,7 +698,7 @@ class HistoryStore(context: Context) : SQLiteOpenHelper(context, "iwaraflow.db",
             PREF_TAG to HashMap<String, Double>()
         )
         runCatching {
-            readableDatabase.query(
+            interestDatabase.query(
                 "preference_entities", arrayOf("type", "entity_key", "score", "updated_at"),
                 null, null, null, null, null
             ).use { c ->
@@ -677,7 +718,7 @@ class HistoryStore(context: Context) : SQLiteOpenHelper(context, "iwaraflow.db",
     fun forgetPreference(type: String, key: String): Int {
         val value = key.trim().let { if (type == PREF_AUTHOR_ID) it else it.lowercase() }
         if (value.isBlank()) return 0
-        return writableDatabase.delete("preference_entities", "type=? AND entity_key=?", arrayOf(type, value))
+        return interestDatabase.delete("preference_entities", "type=? AND entity_key=?", arrayOf(type, value))
     }
 
     /**
@@ -693,7 +734,7 @@ class HistoryStore(context: Context) : SQLiteOpenHelper(context, "iwaraflow.db",
         writesSinceTrim += inserted
         if (writesSinceTrim < TRIM_EVERY) return
         writesSinceTrim = 0
-        val db = writableDatabase
+        val db = interestDatabase
         val count = runCatching { android.database.DatabaseUtils.queryNumEntries(db, "interactions") }.getOrDefault(0L)
         if (count <= MAX_INTERACTIONS + TRIM_SLACK) return
         db.execSQL(
@@ -711,7 +752,7 @@ class HistoryStore(context: Context) : SQLiteOpenHelper(context, "iwaraflow.db",
     @Synchronized
     fun seedCloudLikes(items: List<VideoItem>): Int {
         if (items.isEmpty()) return 0
-        val db = writableDatabase
+        val db = interestDatabase
         val now = System.currentTimeMillis()
         var added = 0
         db.beginTransaction()
@@ -819,7 +860,7 @@ class HistoryStore(context: Context) : SQLiteOpenHelper(context, "iwaraflow.db",
         // 明确点过「不感兴趣：作者 / 标签」的：这类内容在打分之前就被剔掉，连探索位都不给。
         // 读的是独立的 muted_entities 表，不是下面这个滚动窗口——拉黑是永久的。
         val muted = mutedEntities()
-        readableDatabase.query(
+        interestDatabase.query(
             "interactions",
             arrayOf("author", "tags", "weight", "created_at", "author_id", "action", "video_id"),
             // 别的账号导进来的点赞不算这个账号的口味；本机行为（account_id 为空）永远算数。
@@ -863,10 +904,11 @@ class HistoryStore(context: Context) : SQLiteOpenHelper(context, "iwaraflow.db",
                 }
                 val a = c.getString(0).lowercase()
                 val id = c.getString(4).orEmpty()
-                val itemTags = splitTags(c.getString(1)).map { it.lowercase() }
+                val itemTags = splitTags(c.getString(1)).map(SearchQuery::canonicalTag).distinct()
                 if (a.isNotBlank()) author[a] = (author[a] ?: 0.0) + w
                 if (id.isNotBlank()) authorIds[id] = (authorIds[id] ?: 0.0) + w
-                itemTags.forEach { key -> tags[key] = (tags[key] ?: 0.0) + w * TAG_SHARE }
+                val tagShare = if (w > 0) TAG_SHARE / kotlin.math.sqrt(itemTags.size.coerceAtLeast(1).toDouble()) else TAG_SHARE
+                itemTags.forEach { key -> tags[key] = (tags[key] ?: 0.0) + w * tagShare }
                 if (action == ACTION_SKIP) {
                     if (a.isNotBlank()) authorSkips[a] = (authorSkips[a] ?: 0) + 1
                     if (id.isNotBlank()) authorIdSkips[id] = (authorIdSkips[id] ?: 0) + 1
@@ -878,8 +920,11 @@ class HistoryStore(context: Context) : SQLiteOpenHelper(context, "iwaraflow.db",
         authorIdSkips.forEach { (key, n) -> if (n >= LONG_TERM_SKIPS) authorIds[key] = (authorIds[key] ?: 0.0) - LONG_TERM_AUTHOR_PENALTY }
         tagSkips.forEach { (key, n) -> if (n >= LONG_TERM_SKIPS) tags[key] = (tags[key] ?: 0.0) - LONG_TERM_TAG_PENALTY }
         val multipliers = if (applySystemAdjustments) systemTagMultipliers() else emptyMap()
+        val evidence = tagEvidence()
         val boundedTags = tags.entries.groupBy { SearchQuery.canonicalTag(it.key) }.mapValues { (key, entries) ->
-            (entries.sumOf { it.value }.coerceIn(-6.0, 8.0) * (multipliers[key] ?: 1.0)).coerceIn(-6.0, 8.0)
+            val score = entries.sumOf { it.value }.coerceIn(-6.0, 8.0)
+            val confidence = if (score > 0) .55 + .45 * evidence.confidence(key) else 1.0
+            (score * confidence * (multipliers[key] ?: 1.0)).coerceIn(-6.0, 8.0)
         }
         return PreferenceProfile(author.mapValues { it.value.coerceIn(-6.0, 8.0) }, boundedTags,
             authorIds.mapValues { it.value.coerceIn(-6.0, 8.0) }, videos.mapValues { it.value.coerceIn(-6.0, 8.0) },
@@ -891,7 +936,7 @@ class HistoryStore(context: Context) : SQLiteOpenHelper(context, "iwaraflow.db",
     @Synchronized
     fun manualTagPreferences(): Map<String, Int> {
         val result = linkedMapOf<String, Int>()
-        readableDatabase.query("manual_tag_preferences", arrayOf("tag", "preference"),
+        interestDatabase.query("manual_tag_preferences", arrayOf("tag", "preference"),
             null, null, null, null, "tag ASC").use { cursor ->
             while (cursor.moveToNext()) result[cursor.getString(0)] = cursor.getInt(1)
         }
@@ -904,7 +949,7 @@ class HistoryStore(context: Context) : SQLiteOpenHelper(context, "iwaraflow.db",
         require(preference in -1..1)
         val tag = SearchQuery.canonicalTag(raw)
         require(tag.isNotBlank() && tag.length <= 100 && tag.none { it.isISOControl() || it in ",，、;；" })
-        val db = writableDatabase
+        val db = interestDatabase
         db.beginTransaction()
         try {
             if (preference == 0) {
@@ -938,7 +983,7 @@ class HistoryStore(context: Context) : SQLiteOpenHelper(context, "iwaraflow.db",
         exploration: Boolean = false,
         classic: Boolean = false
     ) {
-        if (session.isBlank() || item.id.isBlank() || surface.isBlank()) return
+        if (appPrefs.privateBrowsing || session.isBlank() || item.id.isBlank() || surface.isBlank()) return
         val values = ContentValues().apply {
             put("session_id", session)
             put("video_id", item.id)
@@ -1190,6 +1235,19 @@ class HistoryStore(context: Context) : SQLiteOpenHelper(context, "iwaraflow.db",
         )
     }
 
+    fun exposureDiversity(): String {
+        val tagCounts = hashMapOf<String, Int>()
+        var rows = 0
+        readableDatabase.query("recommendation_impressions", arrayOf("tags"), "surface=?", arrayOf(SURFACE_RECOMMEND), null, null, "shown_at DESC", "200").use { c ->
+            while (c.moveToNext()) {
+                rows++
+                splitTags(c.getString(0)).map(SearchQuery::canonicalTag).distinct().forEach { tagCounts[it] = (tagCounts[it] ?: 0) + 1 }
+            }
+        }
+        val topShare = if (rows == 0) 0.0 else (tagCounts.values.maxOrNull() ?: 0).toDouble() / rows
+        return "最近 $rows 次曝光 · 不同标签 ${tagCounts.size} 个 · 最集中标签占比 ${"%.0f%%".format(topShare * 100)}"
+    }
+
     /**
      * 兴趣管理里的“恢复”：把某个作者 / 标签的「不感兴趣」记录删掉，
      * 既解除硬屏蔽（muted_entities），也删掉行为表里那条压分的负反馈，
@@ -1199,7 +1257,7 @@ class HistoryStore(context: Context) : SQLiteOpenHelper(context, "iwaraflow.db",
     fun forgetDislike(kind: DislikeSheet.Kind, key: String): Int {
         val value = key.trim()
         if (value.isBlank()) return 0
-        val db = writableDatabase
+        val db = interestDatabase
         return when (kind) {
             // 兴趣管理里列的是作者名，老记录里也可能只有作者 id，两种键都能解除。
             // 长期画像里那一条也要清掉，否则“恢复”之后分数还压着，等于没恢复。

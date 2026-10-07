@@ -35,11 +35,11 @@ class FullscreenGesturesTest {
         assertEquals(expected, listOf(100f, 450f, 800f).map { FullscreenGesture.action(200f, it, 450, 900, false) })
         assertEquals(FullscreenGesture.Action.DOUBLE_REACTION, FullscreenGesture.action(300f, 0f, 900, 450, true))
     }
-    @Test fun screenRingCompletesOnlyAfterThreeSecondsAndOncePerHold() {
+    @Test fun screenRingCompletesOnlyAfterTwoAndAHalfSecondsAndOncePerHold() {
         val view = View(RuntimeEnvironment.getApplication()); view.layout(0, 0, 900, 450)
         var completed = 0
         val hold = ScreenReactionHold(view) { completed++ }
-        hold.start(450f, 225f); idle(2999); assertEquals(0, completed)
+        hold.start(450f, 225f); idle(2499); assertEquals(0, completed)
         idle(1); assertEquals(1, completed); idle(4000); assertEquals(1, completed)
         hold.cancel()
     }
@@ -48,7 +48,7 @@ class FullscreenGesturesTest {
         var completed = 0
         val hold = ScreenReactionHold(view) { completed++ }
         hold.start(450f, 225f); idle(2000); hold.cancel(); idle(4000); assertEquals(0, completed)
-        hold.start(450f, 225f); idle(3000); assertEquals(1, completed); hold.cancel()
+        hold.start(450f, 225f); idle(2500); assertEquals(1, completed); hold.cancel()
     }
     private fun fixture(block: (VideoAdapter, VideoAdapter.Holder, VideoItem, ExoPlayer) -> Unit) {
         val context = RuntimeEnvironment.getApplication()
@@ -65,7 +65,7 @@ class FullscreenGesturesTest {
         try { block(adapter, holder, item, player) } finally { adapter.releaseAll() }
     }
     @Test fun middleHoldAddsFavoriteWithoutPausingOrTogglingAnExistingLikeOff() = fixture { _, holder, item, player ->
-        touch(holder.itemView, MotionEvent.ACTION_DOWN, 450f, 180f); idle(2999)
+        touch(holder.itemView, MotionEvent.ACTION_DOWN, 450f, 180f); idle(2499)
         assertFalse(item.localFavorite); idle(1); assertTrue(item.localFavorite); assertTrue(item.liked)
         touch(holder.itemView, MotionEvent.ACTION_UP, 450f, 180f); idle(400)
         verify(player, never()).pause()
@@ -73,16 +73,40 @@ class FullscreenGesturesTest {
     @Test fun movingOrLeavingFullscreenCancelsPendingDoubleReaction() = fixture { adapter, holder, item, _ ->
         val root = holder.itemView
         touch(root, MotionEvent.ACTION_DOWN, 450f, 180f); idle(800)
-        touch(root, MotionEvent.ACTION_MOVE, 450f, 240f); idle(3000); assertFalse(item.localFavorite)
+        touch(root, MotionEvent.ACTION_MOVE, 450f, 240f); idle(2500); assertFalse(item.localFavorite)
         touch(root, MotionEvent.ACTION_UP, 450f, 240f)
         touch(root, MotionEvent.ACTION_DOWN, 450f, 180f); idle(800)
-        adapter.setFullscreen(false); idle(3000); assertFalse(item.localFavorite)
+        adapter.setFullscreen(false); idle(2500); assertFalse(item.localFavorite)
     }
     @Test fun rightSideSpeedsUpUntilReleaseWithoutAddingFavorite() = fixture { _, holder, item, player ->
         touch(holder.itemView, MotionEvent.ACTION_DOWN, 820f, 180f); idle(450)
         verify(player).setPlaybackSpeed(2f); assertFalse(item.localFavorite)
         touch(holder.itemView, MotionEvent.ACTION_UP, 820f, 180f)
         verify(player, atLeastOnce()).setPlaybackSpeed(1f)
+    }
+    @Test fun normalModeUsesTopMiddleBottomEvenForAWideVideo() = fixture { adapter, holder, item, player ->
+        adapter.setFullscreen(false)
+        set(holder, "aspect", 2f); set(holder, "landscape", true)
+        touch(holder.itemView, MotionEvent.ACTION_DOWN, 450f, 220f); idle(2500)
+        assertTrue(item.localFavorite)
+        touch(holder.itemView, MotionEvent.ACTION_UP, 450f, 220f)
+        touch(holder.itemView, MotionEvent.ACTION_DOWN, 450f, 350f); idle(450)
+        verify(player).setPlaybackSpeed(2f)
+        touch(holder.itemView, MotionEvent.ACTION_UP, 450f, 350f)
+        verify(player, atLeastOnce()).setPlaybackSpeed(1f)
+    }
+    @Test fun portraitGuideCompletionCanSequenceThePermissionPrompt() {
+        val controller = Robolectric.buildActivity(SettingsActivity::class.java).setup()
+        val activity = controller.get()
+        try {
+            activity.getSharedPreferences(AppPrefs.FILE, 0).edit().remove(PlaybackGuide.key(false)).commit()
+            var done = 0
+            PlaybackGuide.showOnce(activity, false) { done++ }
+            assertEquals(0, done)
+            PlaybackGuide.dismiss(activity)
+            PlaybackGuide.showOnce(activity, false) { done++ }
+            assertEquals(1, done)
+        } finally { controller.pause().stop().destroy() }
     }
     @Test fun landscapePanelLeavesMostOfVideoVisibleAndPortraitIsHeightLimited() {
         val landscape = DislikeSheet.panelSize(1920, 1080, 3f)
@@ -102,6 +126,23 @@ class FullscreenGesturesTest {
             PlaybackGuide.showOnce(activity, false); assertNotNull(root.findViewWithTag<View>("playback_gesture_guide"))
             PlaybackGuide.dismiss(activity); PlaybackGuide.show(activity, true)
             assertNotNull(root.findViewWithTag<View>("playback_gesture_guide"))
+        } finally { PlaybackGuide.dismiss(activity); controller.pause().stop().destroy() }
+    }
+    @Test fun verticalFullscreenDoesNotConsumeFirstLandscapeGuide() {
+        val controller = Robolectric.buildActivity(SettingsActivity::class.java).setup()
+        val activity = controller.get(); val adapter = mock(VideoAdapter::class.java)
+        val prefs = activity.getSharedPreferences(AppPrefs.FILE, 0)
+        try {
+            prefs.edit().remove(PlaybackGuide.key(true)).commit()
+            `when`(adapter.isFullscreen).thenReturn(true)
+            `when`(adapter.activeVideoAspect()).thenReturn(.6f)
+            FullscreenMode.apply(activity, adapter, emptyList(), true); idle(1)
+            assertFalse(prefs.getBoolean(PlaybackGuide.key(true), false))
+            assertNull(activity.window.decorView.findViewWithTag<View>("playback_gesture_guide"))
+            `when`(adapter.activeVideoAspect()).thenReturn(1.8f)
+            FullscreenMode.apply(activity, adapter, emptyList(), true); idle(1)
+            assertTrue(prefs.getBoolean(PlaybackGuide.key(true), false))
+            assertNotNull(activity.window.decorView.findViewWithTag<View>("playback_gesture_guide"))
         } finally { PlaybackGuide.dismiss(activity); controller.pause().stop().destroy() }
     }
     @Test fun fullscreenAnimationIsLargeAndCenteredAtThePressPoint() {

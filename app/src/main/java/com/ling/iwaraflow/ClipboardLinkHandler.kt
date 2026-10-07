@@ -63,11 +63,24 @@ class ClipboardLinkHandler : Application.ActivityLifecycleCallbacks {
         val link = IwaraSharedLink.parse(item.text?.toString() ?: item.uri?.toString().orEmpty()) ?: return
         val token = fingerprint(link, clip.description.timestamp)
         if (token == prefs.handledClipboardLink) return
-        runCatching {
+        val open = {
             activity.startActivity(Intent(activity, MainActivityV3::class.java)
                 .addFlags(Intent.FLAG_ACTIVITY_CLEAR_TOP or Intent.FLAG_ACTIVITY_SINGLE_TOP or Intent.FLAG_ACTIVITY_NO_USER_ACTION)
                 .putExtra(IwaraSharedLink.EXTRA_URL, link.url))
-        }.onSuccess { prefs.handledClipboardLink = token }
+            prefs.handledClipboardLink = token
+        }
+        if (activity is UploadActivity || activity is SettingsActivity || (activity.currentFocus is android.widget.EditText || androidx.core.view.ViewCompat.getRootWindowInsets(activity.window.decorView)?.isVisible(androidx.core.view.WindowInsetsCompat.Type.ime()) == true)) {
+            val host = activity.window.decorView as? android.view.ViewGroup ?: return
+            host.findViewWithTag<android.view.View>("pending_clipboard_link")?.let(host::removeView)
+            val banner = android.widget.TextView(activity).apply {
+                tag = "pending_clipboard_link"; text = "已识别 Iwara 链接 · 点击打开，长按关闭"
+                textSize = 14f; setTextColor(-1); setBackgroundColor(0xFF285C7B.toInt()); setPadding(20, 20, 20, 20)
+                setOnClickListener { host.removeView(this); runCatching { open() } }
+                setOnLongClickListener { host.removeView(this); true }
+                contentDescription = "打开复制的 Iwara 链接，长按关闭提示"
+            }
+            host.addView(banner, android.view.ViewGroup.LayoutParams(-1, -2))
+        } else runCatching { open() }
     }
 
     private fun removeListener(activity: Activity) {

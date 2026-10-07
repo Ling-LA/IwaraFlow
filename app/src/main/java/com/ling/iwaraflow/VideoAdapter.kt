@@ -270,7 +270,9 @@ class VideoAdapter(
                 }
                 val holder = holders.firstOrNull { it.bindingAdapterPosition == position }
                 val progress = mediaCache.progress(currentUrl)
-                val stable = holder?.readyForIdlePreload() == true
+                val stable = holder?.readyForIdlePreload() == true &&
+                    (prefs.preloadOnMetered || !NetworkProfile.isMetered(itemContext ?: return)) &&
+                    holder.hasPreloadHeadroom(progress, mediaCache.measuredBytesPerSecond())
                 val nextUrl = items.getOrNull(position + 1)?.streamUrl
                 val ahead = PreloadPolicy.ahead(prefs.preloadNext, stable, progress.fraction, mediaCache.progress(nextUrl).fraction)
                 for (offset in 1..ahead) {
@@ -280,7 +282,7 @@ class VideoAdapter(
                         allowed += url
                         mediaCache.prefetchFull(url, primary = progress.fraction >= 1.0 && offset == 1)
                     } else if (resolvingPreloads.add(item.id)) {
-                        api.resolveSources(item.id) { result ->
+                        api.resolvePreloadSources(item.id) { result ->
                             preloadHandler.post {
                                 resolvingPreloads.remove(item.id)
                                 if (!released && playbackEnabled && position == activePosition) result.onSuccess { sources ->
@@ -363,8 +365,9 @@ class VideoAdapter(
         private val likeHold = HoldReaction(like, 0xFFFF365D.toInt(), favorite, 0xFFFFD54F.toInt()) { doubleReaction() }
         private val favoriteHold = HoldReaction(favorite, 0xFFFFD54F.toInt(), like, 0xFFFF365D.toInt()) { doubleReaction() }
         private val screenReactionHold = ScreenReactionHold(view) {
-            if (active && fullscreenMode && !pipMode) { touchMoved = true; doubleReaction() }
+            if (active && !pipMode) { touchMoved = true; doubleReaction() }
         }
+        private val accessibilityActions = mutableListOf<Int>()
         private var downAction = FullscreenGesture.Action.SPEED
         private var bufferingSince = 0L
         private var stableSince = 0L
@@ -464,7 +467,7 @@ class VideoAdapter(
         }
 
         /**
-         * 普通模式保持上下两段；全屏按视频方向分三段，中央按住 3 秒双连。
+         * 普通模式及竖屏全屏为上中下三区；横屏全屏为左中右三区，中央按住 2.5 秒双连。
          * 一次按压只采用 DOWN 时的分区，小窗不触发这些操作。
          */
         private val holdToSpeed = Runnable {
@@ -593,6 +596,12 @@ class VideoAdapter(
                 // 收藏有动画、取消有图标变化，不用再弹一层提示挡着视频。
                 updateLikeUi(item)
             }
+            accessibilityActions.forEach { androidx.core.view.ViewCompat.removeAccessibilityAction(itemView, it) }
+            accessibilityActions.clear()
+            accessibilityActions += androidx.core.view.ViewCompat.addAccessibilityAction(itemView, "点赞并收藏") { _, _ -> doubleReaction(); true }
+            accessibilityActions += androidx.core.view.ViewCompat.addAccessibilityAction(itemView, "减少推荐或屏蔽") { _, _ ->
+                DislikeSheet.show(itemView.context, item, history) { target, kind -> onDisliked?.invoke(target, kind) }; true
+            }
             quality.setOnClickListener { showQualityChooser(item, false) }
             download.setOnClickListener { showQualityChooser(item, true) }
             pauseDownload.setOnClickListener { showQualityChooser(item, true) }
@@ -644,9 +653,8 @@ class VideoAdapter(
                         downY = event.y
                         touchMoved = false
                         screenReactionHold.cancel()
-                        downAction = if (fullscreenMode) FullscreenGesture.action(downX, downY, itemView.width, itemView.height,
-                            if (aspect > 0f) landscape else itemView.width > itemView.height)
-                            else if (downY < itemView.height/2f) FullscreenGesture.Action.DISLIKE else FullscreenGesture.Action.SPEED
+                        downAction = FullscreenGesture.action(downX, downY, itemView.width, itemView.height,
+                            fullscreenMode && (if (aspect > 0f) landscape else itemView.width > itemView.height))
                         tapHandler.removeCallbacks(holdToSpeed)
                         if (!pipMode && active) {
                             if (downAction == FullscreenGesture.Action.DOUBLE_REACTION) screenReactionHold.start(downX, downY)
@@ -768,6 +776,9 @@ class VideoAdapter(
         private fun start(item: VideoItem) {
             val bindGeneration = generation
             if (!active || !playbackEnabled || released || player != null) return
+            val startedAt = android.os.SystemClock.elapsedRealtime()
+            var firstFrame = false
+            var rebufferAt = 0L
             val renderersFactory = DefaultRenderersFactory(itemView.context).setEnableDecoderFallback(true)
             val p = ExoPlayer.Builder(itemView.context, renderersFactory)
                 .setLoadControl(feedLoadControl())
@@ -776,6 +787,10 @@ class VideoAdapter(
                 playWhenReady = false
                 volume = 0f
                 addListener(object : Player.Listener {
+                    override fun onRenderedFirstFrame() {
+                        if (!firstFrame) { firstFrame = true; PlaybackMetrics.firstFrame(android.os.SystemClock.elapsedRealtime() - startedAt) }
+                    }
+
                     override fun onIsPlayingChanged(isPlaying: Boolean) {
                         if (bound?.id == item.id) { notePlaying(isPlaying); danmaku.invalidate() }
                     }
@@ -787,7 +802,7 @@ class VideoAdapter(
                         val cause = error.cause
                         NavigationDiagnostics.note(
                             itemView.context,
-                            "播放错误 ${item.id}：${error.errorCodeName}" +
+                            "播放错误：${error.errorCodeName}" +
                                 (cause?.let { "（${it.javaClass.simpleName}: ${it.message?.take(120)}）" } ?: "") +
                                 " 源=${item.streamUrl?.substringBefore(':')?.take(12) ?: "无"}"
                         )
@@ -806,6 +821,12 @@ class VideoAdapter(
                     }
 
                     override fun onPlaybackStateChanged(playbackState: Int) {
+                        val now = android.os.SystemClock.elapsedRealtime()
+                        if (playbackState == Player.STATE_BUFFERING && firstFrame && rebufferAt == 0L) rebufferAt = now
+                        else if (playbackState != Player.STATE_BUFFERING && rebufferAt != 0L) {
+                            PlaybackMetrics.buffered(now - rebufferAt); rebufferAt = 0L
+                        }
+
                         if (playbackState == Player.STATE_BUFFERING) {
                             if (bufferingSince == 0L) bufferingSince = android.os.SystemClock.elapsedRealtime()
                             stableSince = 0L
@@ -999,6 +1020,13 @@ class VideoAdapter(
             return active && p.isPlaying && p.playbackState == Player.STATE_READY && stableSince > 0 &&
                 android.os.SystemClock.elapsedRealtime() - stableSince >= 6000 &&
                 (p.bufferedPosition - p.currentPosition > 15_000 || p.bufferedPercentage >= 95)
+        }
+
+        fun hasPreloadHeadroom(progress: MediaPreloadCache.Progress, measuredRate: Long): Boolean {
+            val p = player ?: return false
+            if (progress.fraction >= 1.0) return measuredRate > 256 * 1024L
+            val rate = if (progress.bytesPerSecond > 0) minOf(progress.bytesPerSecond, measuredRate) else measuredRate
+            return PreloadPolicy.enoughBandwidth(rate, progress.total, p.duration, p.bufferedPosition - p.currentPosition)
         }
 
         fun context(): android.content.Context = itemView.context

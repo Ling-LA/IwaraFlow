@@ -20,6 +20,10 @@ import java.util.Locale
 /** Local-only lifecycle and failure evidence. Never sends a log or records account/video data. */
 object NavigationDiagnostics {
     private val lock = Any()
+    private val writer = java.util.concurrent.Executors.newSingleThreadExecutor { r -> Thread(r, "IwaraFlow-diagnostics").apply { isDaemon = true } }
+    internal fun redact(value: String): String = value
+        .replace(Regex("https?://[^\\s)]+"), "[链接已隐藏]")
+        .replace(Regex("(?i)bearer\\s+[^\\s]+"), "Bearer [已隐藏]")
 
     fun install(app: Application) {
         record(app, "启动 ${version(app)} · ${Build.MANUFACTURER} ${Build.MODEL} · Android ${Build.VERSION.RELEASE} / API ${Build.VERSION.SDK_INT}")
@@ -29,7 +33,7 @@ object NavigationDiagnostics {
                 runCatching {
                     synchronized(lock) {
                         File(app.filesDir, "last-navigation-crash.txt").writeText(
-                            "${Date()} · ${version(app)} · ${thread.name}\n${error.stackTraceToString().take(48_000)}"
+                            "${Date()} · ${version(app)} · ${thread.name}\n${redact(error.stackTraceToString()).take(48_000)}"
                         )
                     }
                 }
@@ -57,6 +61,10 @@ object NavigationDiagnostics {
     fun note(context: Context, event: String) = record(context.applicationContext, event)
 
     private fun record(context: Context, event: String) {
+        val safeEvent = redact(event)
+        writer.execute { writeEvent(context, safeEvent) }
+    }
+    private fun writeEvent(context: Context, event: String) {
         runCatching {
             synchronized(lock) {
                 val file = File(context.filesDir, "navigation-lifecycle.txt")
@@ -68,7 +76,10 @@ object NavigationDiagnostics {
     }
 
     fun show(activity: Activity) {
+        writer.execute {
         val report = buildReport(activity)
+        activity.runOnUiThread {
+        if (activity.isFinishing || activity.isDestroyed) return@runOnUiThread
         AlertDialog.Builder(activity)
             .setTitle("诊断信息（仅保存在本机）")
             .setMessage(report)
@@ -80,6 +91,8 @@ object NavigationDiagnostics {
             }
             .setPositiveButton("分享文件") { _, _ -> shareAsFile(activity, report) }
             .show()
+        }
+        }
     }
 
     /**
@@ -108,11 +121,11 @@ object NavigationDiagnostics {
         val dir = File(context.cacheDir, "diagnostics").apply { mkdirs() }
         dir.listFiles()?.sortedByDescending { it.lastModified() }?.drop(4)?.forEach { it.delete() }
         val stamp = SimpleDateFormat("yyyyMMdd-HHmmss-SSS", Locale.ROOT).format(Date())
-        return File(dir, "IwaraFlow-${version(context)}-诊断-$stamp.txt").apply { writeText(report) }
+        return File(dir, "IwaraFlow-${version(context)}-诊断-$stamp.txt").apply { writeText(redact(report)) }
     }
 
     internal fun buildReport(activity: Activity): String {
-        return buildString {
+        return redact(buildString {
             appendLine("IwaraFlow ${version(activity)} · ${Build.MANUFACTURER} ${Build.MODEL}")
             appendLine("Android ${Build.VERSION.RELEASE} / API ${Build.VERSION.SDK_INT}")
             appendLine("\n最近系统退出记录：")
@@ -124,13 +137,15 @@ object NavigationDiagnostics {
             }
             appendLine("\n推荐诊断（只算本机数据，不上传）：")
             appendLine(recommendationSummary(activity))
+            appendLine("\n播放性能（仅本次进程）：")
+            appendLine(PlaybackMetrics.summary())
             appendLine("\n最近异常：")
             appendLine(runCatching { File(activity.filesDir, "last-navigation-crash.txt").readText() }
                 .getOrDefault("暂无 Java 异常记录"))
             appendLine("\n最近页面切换：")
             appendLine(runCatching { File(activity.filesDir, "navigation-lifecycle.txt").readText().takeLast(16_000) }
                 .getOrDefault("暂无记录"))
-        }
+        })
     }
 
     /**
@@ -142,6 +157,7 @@ object NavigationDiagnostics {
         try {
             buildString {
                 append(store.recommendationMetrics().summary())
+                append("\n" + store.exposureDiversity())
                 // 按来源拆开：标签召回的作品到底看不看得下去、探索位成功率多少。
                 val bySource = store.impressionSourceStats()
                 if (bySource.isNotEmpty()) {

@@ -18,7 +18,7 @@ class PlayableVideoGate(
     private val probes = Executors.newFixedThreadPool(PROBE_THREADS)
     private val lifecycleLock = Any()
     @Volatile private var closed = false
-    private val client = OkHttpClient.Builder()
+    private val client = OkHttpClient.Builder().addInterceptor(RequestScheduler)
         .connectTimeout(3, TimeUnit.SECONDS)
         .readTimeout(4, TimeUnit.SECONDS)
         .followRedirects(true)

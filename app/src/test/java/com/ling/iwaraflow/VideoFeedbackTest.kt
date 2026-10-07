@@ -41,7 +41,8 @@ class VideoFeedbackTest {
         DislikeSheet.apply(RuntimeEnvironment.getApplication(), item, history, DislikeSheet.Kind.AUTHOR, "", null)
         val profile = history.preferenceProfile()
 
-        assertTrue(profile.authorIdWeights["author-1"]!! < 0)
+        assertTrue(profile.isMuted(item))
+        assertNull(profile.authorIdWeights["author-1"])
         assertNull("作者那一档不碰标签", profile.tagWeights["miku"])
         assertNull("也不该记成视频级反馈", profile.videoWeights["v1"])
     }
@@ -51,7 +52,8 @@ class VideoFeedbackTest {
         DislikeSheet.apply(RuntimeEnvironment.getApplication(), item, history, DislikeSheet.Kind.TAG, "miku", null)
         val profile = history.preferenceProfile()
 
-        assertTrue(profile.tagWeights["miku"]!! < 0)
+        assertTrue(profile.isMuted(item))
+        assertNull(profile.tagWeights["miku"])
         assertNull("标签那一档不碰另一个标签", profile.tagWeights["dance"])
         assertNull("也不碰作者", profile.authorWeights["alice"])
         assertNull(profile.videoWeights["v1"])

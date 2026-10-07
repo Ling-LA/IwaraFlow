@@ -2,7 +2,7 @@
 <FrameLayout xmlns:android="http://schemas.android.com/apk/res/android"
     android:layout_width="match_parent"
     android:layout_height="match_parent"
-    android:background="#EEF8FE">
+    android:background="@color/page_background">
 
     <LinearLayout
         android:id="@+id/authorListPage"
@@ -21,7 +21,7 @@
             android:paddingEnd="18dp"
             android:paddingBottom="6dp"
             android:text="正在读取作者作品…"
-            android:textColor="#607D93"
+            android:textColor="@color/page_secondary"
             android:textSize="13sp" />
 
         <androidx.recyclerview.widget.RecyclerView

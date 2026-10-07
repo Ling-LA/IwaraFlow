@@ -1,11 +1,11 @@
 <LinearLayout xmlns:android="http://schemas.android.com/apk/res/android"
     android:layout_width="match_parent" android:layout_height="match_parent"
-    android:orientation="vertical" android:background="#EEF8FE">
+    android:orientation="vertical" android:background="@color/page_background">
     <include layout="@layout/view_profile_header" />
     <TextView android:id="@+id/authorStatus"
         android:layout_width="match_parent" android:layout_height="wrap_content"
         android:paddingStart="18dp" android:paddingTop="12dp" android:paddingEnd="18dp" android:paddingBottom="6dp"
-        android:text="正在读取我的作品…" android:textColor="#607D93" android:textSize="13sp" />
+        android:text="正在读取我的作品…" android:textColor="@color/page_secondary" android:textSize="13sp" />
     <androidx.recyclerview.widget.RecyclerView android:id="@+id/authorVideos"
         android:layout_width="match_parent" android:layout_height="0dp" android:layout_weight="1"
         android:clipToPadding="false" android:paddingBottom="18dp" />

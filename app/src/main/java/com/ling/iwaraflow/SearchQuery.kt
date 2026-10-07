@@ -7,7 +7,9 @@ import java.util.Locale
 data class SearchQuery(val groups: List<List<String>>) {
     // One complete term is enough for recall. Local validation checks every other term,
     // including mixed-language combinations, without a Cartesian product of API requests.
-    val seeds: List<String> get() = groups.firstOrNull().orEmpty()
+    val seeds: List<String> get() = groups.maxByOrNull { aliases ->
+        aliases.maxOfOrNull { normalize(it).replace("_", "").length } ?: 0
+    }.orEmpty()
 
     fun matchesTitle(title: String): Boolean = matches { containsTerm(title, it) }
     fun matchesAuthor(author: IwaraAuthor): Boolean = matches {
@@ -40,13 +42,9 @@ data class SearchQuery(val groups: List<List<String>>) {
 
         // Domain terms must never be sent to a general translator (e.g. 扶她 → Support Her).
         // First spelling is the canonical Iwara tag; all aliases are equivalent, not broader concepts.
-        private val aliases = listOf(
-            listOf("futanari", "futa", "扶她", "扶他", "ふたなり", "フタナリ", "フタ", "후타나리", "후타"),
-            listOf("hatsune_miku", "hatsune miku", "初音未来", "初音未來", "初音ミク", "하츠네 미쿠"),
-            listOf("genshin_impact", "genshin impact", "原神", "원신"),
-            listOf("honkai_star_rail", "honkai star rail", "崩坏星穹铁道", "崩壞星穹鐵道", "崩壊スターレイル", "붕괴 스타레일"),
-            listOf("clara", "克拉拉", "クラーラ", "클라라")
-        )
+        private val aliases: List<List<String>> = SearchQuery::class.java.getResourceAsStream("/search_aliases.tsv")
+            ?.bufferedReader()?.useLines { lines -> lines.filter { it.isNotBlank() && !it.startsWith("#") }
+                .map { it.split('\t').filter(String::isNotBlank) }.toList() }.orEmpty()
         private val aliasIndex = aliases.flatMap { group -> group.map { tagKey(it) to group } }.toMap()
 
         fun knownAliases(term: String): List<String>? = aliasIndex[tagKey(term)]

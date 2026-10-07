@@ -208,21 +208,28 @@ data class PreferenceProfile(
     fun isMuted(item: VideoItem): Boolean =
         (item.authorId.isNotBlank() && item.authorId in mutedAuthorIds) ||
             (item.author.isNotBlank() && item.author.lowercase() in mutedAuthors) ||
-            item.tags.any { it.lowercase() in mutedTags }
+            item.tags.any { tag -> mutedTags.any { SearchQuery.canonicalTag(it) == SearchQuery.canonicalTag(tag) } }
 
     /**
      * 权重最高的几个标签（至少 [minWeight]），给个性化召回用。
      * **拉黑的直接排除**：一个标签既被点过「不感兴趣」、又因为看过几条同类视频攒了正权重，
      * 是完全可能的；不排掉的话召回还会专门去抓它，抓回来再被硬过滤掉，白跑一趟请求。
      */
-    fun topTags(count: Int, minWeight: Double): List<String> {
+    fun topTags(count: Int, minWeight: Double, random: java.util.Random? = null): List<String> {
         val muted = mutedTags.map(SearchQuery::canonicalTag).toSet()
         val explicit = manualTagPreferences.filter { it.value > 0 && it.key !in muted }.keys.sorted()
         val learned = tagWeights.entries.filter {
             it.value >= minWeight && SearchQuery.canonicalTag(it.key) !in muted &&
                 (manualTagPreferences[SearchQuery.canonicalTag(it.key)] ?: 0) >= 0
         }.sortedByDescending { it.value }.map { it.key }
-        return (explicit + learned).distinctBy(SearchQuery::canonicalTag).take(count)
+        val pool = (explicit + learned).distinctBy(SearchQuery::canonicalTag)
+        if (random == null) return pool.take(count)
+        // Sample the whole pool. Neither lexical order nor one saturated tag owns recall slots.
+        return pool.sortedByDescending { tag ->
+            val weight = (tagWeights[tag] ?: 0.0).coerceIn(0.0, 8.0) / 8.0 +
+                if (tag in explicit) 1.5 else 1.0
+            kotlin.math.ln(random.nextDouble().coerceAtLeast(1e-12)) / weight
+        }.take(count)
     }
 
     fun topAuthorIds(count: Int, minWeight: Double): List<String> =

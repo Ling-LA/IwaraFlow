@@ -50,18 +50,24 @@ object QueryTranslator {
      * 把搜索词展开成最多四种写法，第一个永远是用户输入的原词。
      * 回调在主线程；不需要翻（空词、太长、没有字母）时同步回调只带原词。
      */
-    fun expand(query: String, callback: (List<String>) -> Unit) {
+    private val configuration = java.util.concurrent.atomic.AtomicInteger()
+    fun clearCache() { configuration.incrementAndGet(); synchronized(cache) { cache.clear() } }
+    internal fun expand(query: String, stillWanted: () -> Boolean = { true }, callback: (List<String>) -> Unit): RequestCancellation {
+        val cancellation = RequestCancellation()
+        val version = configuration.get()
         val original = query.trim()
-        SearchQuery.knownAliases(original)?.let { callback(it); return }
-        if (!worthTranslating(original)) { callback(listOf(original).filter { it.isNotBlank() }); return }
-        cached(original)?.let { callback(it); return }
+        SearchQuery.knownAliases(original)?.let { callback(it); return cancellation }
+        if (!worthTranslating(original)) { callback(listOf(original).filter { it.isNotBlank() }); return cancellation }
+        cached(original)?.let { callback(it); return cancellation }
         io.execute {
-            val variants = runCatching { lookup(original) }.getOrDefault(emptyList())
+            if (!stillWanted() || cancellation.cancelled) return@execute
+            val variants = cancellation.run { runCatching { lookup(original) { stillWanted() && !cancellation.cancelled } }.getOrDefault(emptyList()) }
+            if (!stillWanted() || cancellation.cancelled || version != configuration.get()) return@execute
             val merged = merge(original, variants)
-            // 一个都没翻出来时不写缓存：多半是网络不通，下次搜还该再试。
             if (merged.size > 1) synchronized(cache) { cache[original] = merged }
-            main.post { callback(merged) }
+            main.post { if (stillWanted() && !cancellation.cancelled) callback(merged) }
         }
+        return cancellation
     }
 
     /** 值不值得翻：有字母、不是一长串话。 */
@@ -79,7 +85,7 @@ object QueryTranslator {
         else -> EN
     }
 
-    private fun lookup(query: String): List<String> {
+    private fun lookup(query: String, wanted: () -> Boolean): List<String> {
         val targets = LANGUAGES.filter { it != sourceLanguage(query) }
         if (Translator.aiReady()) {
             val byAi = runCatching { parseVariants(Translator.askAiBlocking(query, AI_PROMPT)) }.getOrDefault(emptyMap())
@@ -88,6 +94,7 @@ object QueryTranslator {
         }
         // 谷歌一次只翻一种语言：哪一种失败就少那一种。
         return targets.mapNotNull { target ->
+            if (!wanted()) return@mapNotNull null
             runCatching { Translator.translateToBlocking(query, target) }.getOrNull()?.trim()?.takeIf { it.isNotBlank() }
         }
     }

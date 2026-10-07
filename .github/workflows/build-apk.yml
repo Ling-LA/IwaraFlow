@@ -12,6 +12,10 @@ permissions:
 
 jobs:
   navigation:
+    strategy:
+      fail-fast: false
+      matrix:
+        api: [28, 33, 36]
     runs-on: ubuntu-latest
     permissions:
       contents: read
@@ -29,16 +33,17 @@ jobs:
         with:
           gradle-version: '8.13'
       - name: Unit lifecycle regressions
+        if: matrix.api == 36
         run: gradle :app:testDebugUnitTest --no-daemon
       - name: Enable KVM for the test emulator
         run: |
           echo 'KERNEL=="kvm", GROUP="kvm", MODE="0666", OPTIONS+="static_node=kvm"' | sudo tee /etc/udev/rules.d/99-kvm4all.rules
           sudo udevadm control --reload-rules
           sudo udevadm trigger --name-match=kvm
-      - name: Android 16 return paths
+      - name: Android ${{ matrix.api }} return paths
         uses: reactivecircus/android-emulator-runner@v2
         with:
-          api-level: 36
+          api-level: ${{ matrix.api }}
           arch: x86_64
           target: default
           emulator-options: -no-window -gpu swiftshader -noaudio -no-boot-anim -camera-back none
@@ -48,7 +53,7 @@ jobs:
         if: always()
         uses: actions/upload-artifact@v4
         with:
-          name: navigation-regression-reports
+          name: navigation-regression-reports-api-${{ matrix.api }}
           path: |
             app/build/reports/ui-checks/
             app/build/reports/tests/

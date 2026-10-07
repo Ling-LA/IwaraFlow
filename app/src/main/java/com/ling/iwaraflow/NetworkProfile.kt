@@ -27,7 +27,7 @@ object NetworkProfile {
     fun coldStartCandidates(context: Context): Int =
         coldStartCandidates(isMetered(context), downstreamKbps(context))
 
-    private fun isMetered(context: Context): Boolean = runCatching {
+    fun isMetered(context: Context): Boolean = runCatching {
         manager(context)?.isActiveNetworkMetered ?: false
     }.getOrDefault(false)
 

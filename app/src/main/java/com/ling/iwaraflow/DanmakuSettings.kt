@@ -14,7 +14,7 @@ object DanmakuSettings {
             text = "显示评论弹幕"; isChecked = prefs.danmakuEnabled
             setOnCheckedChangeListener { _, value -> prefs.danmakuEnabled = value }
         })
-        panel.addView(TextView(context).apply { text = "当前视频评论从左向右滚动，设置即时保存。" })
+        panel.addView(TextView(context).apply { text = "当前视频评论从右向左滚动，设置即时保存。" })
         fun slider(title: String, min: Int, max: Int, value: Int, save: (Int) -> Unit) {
             val label = TextView(context).apply { text = "$title：$value"; setPadding(0, 20, 0, 0) }
             panel.addView(label)
@@ -29,6 +29,7 @@ object DanmakuSettings {
                 })
             })
         }
+        slider("同时显示行数", 1, 6, prefs.danmakuDensity) { prefs.danmakuDensity = it }
         slider("字体大小", 12, 32, prefs.danmakuSize) { prefs.danmakuSize = it }
         slider("不透明度 %", 20, 100, prefs.danmakuOpacity) { prefs.danmakuOpacity = it }
         slider("穿过画面的秒数（越小越快）", 4, 20, prefs.danmakuDuration) { prefs.danmakuDuration = it }

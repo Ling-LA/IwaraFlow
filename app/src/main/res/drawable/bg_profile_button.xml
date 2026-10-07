@@ -1,7 +1,7 @@
 <ripple xmlns:android="http://schemas.android.com/apk/res/android" android:color="#33285C7B">
     <item><shape android:shape="rectangle">
-        <solid android:color="#F6FBFF" />
-        <stroke android:width="1dp" android:color="#BFD8E8" />
+        <solid android:color="@color/page_button" />
+        <stroke android:width="1dp" android:color="@color/page_border" />
         <corners android:radius="22dp" />
     </shape></item>
 </ripple>

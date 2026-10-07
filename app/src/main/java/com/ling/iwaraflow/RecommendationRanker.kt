@@ -106,7 +106,7 @@ class RecommendationRanker(private val random: Random = Random()) {
 
     private fun weightedOrderBy(items: List<VideoItem>, score: (VideoItem) -> Double): List<VideoItem> =
         items.map { item ->
-            val weight = kotlin.math.exp((score(item) / 3.0).coerceIn(-3.0, 3.0))
+            val weight = samplingWeight(score(item))
             item to (kotlin.math.ln(random.nextDouble().coerceAtLeast(1e-12)) / weight)
         }.sortedByDescending { it.second }.map { it.first }
 
@@ -446,6 +446,9 @@ class RecommendationRanker(private val random: Random = Random()) {
     }
 
     companion object {
+        internal fun samplingWeight(score: Double): Double =
+            kotlin.math.exp(2.0 * kotlin.math.tanh(score.coerceIn(-100.0, 100.0) / 12.0))
+
         /** 质量分的先验：假设每条视频先有 400 次播放、5% 的点赞率。 */
         const val QUALITY_PRIOR_VIEWS = 400.0
         const val QUALITY_PRIOR_RATE = 0.05

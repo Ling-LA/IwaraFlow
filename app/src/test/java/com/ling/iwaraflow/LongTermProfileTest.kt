@@ -89,7 +89,7 @@ class LongTermProfileTest {
         val context = RuntimeEnvironment.getApplication()
         DislikeSheet.apply(context, item, history, DislikeSheet.Kind.AUTHOR, "", null)
         DislikeSheet.apply(context, item, history, DislikeSheet.Kind.TAG, "banned", null)
-        assertTrue(history.preferenceProfile().score(item) < 0)
+        assertTrue(history.preferenceProfile().isMuted(item))
 
         history.forgetDislike(DislikeSheet.Kind.AUTHOR, "Muted")
         history.forgetDislike(DislikeSheet.Kind.TAG, "banned")

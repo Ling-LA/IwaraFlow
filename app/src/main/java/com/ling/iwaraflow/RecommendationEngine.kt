@@ -321,7 +321,7 @@ class RecommendationEngine(
                     requests += PageRequest("likes", random.nextInt(MONTH_TOP_PAGES), if (index == 0) 2.8 else 2.4, month = month)
                 }
             }
-            val tags = profile.topTags(RECALL_TAGS, RECALL_TAG_MIN_WEIGHT)
+            val tags = profile.topTags(RECALL_TAGS, RECALL_TAG_MIN_WEIGHT, random)
             val authors = profile.topAuthorIds(RECALL_AUTHORS, RECALL_AUTHOR_MIN_WEIGHT)
             tags.forEach { requests += PageRequest(TAG_PREFIX + it, random.nextInt(2), 2.4) }
             authors.forEach { requests += PageRequest(AUTHOR_PREFIX + it, 0, 2.3) }

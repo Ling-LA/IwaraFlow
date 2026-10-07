@@ -92,14 +92,14 @@ object DislikeSheet {
             })
         }
 
-        row("不感兴趣：当前视频", strong = true) { apply(activity, item, history, Kind.VIDEO, "", onApplied) }
+        row("减少推荐：当前视频", strong = true) { apply(activity, item, history, Kind.VIDEO, "", onApplied) }
         if (item.author.isNotBlank()) {
             divider()
-            row("不感兴趣：作者 @${item.author}") { apply(activity, item, history, Kind.AUTHOR, "", onApplied) }
+            row("屏蔽作者 @${item.author}") { apply(activity, item, history, Kind.AUTHOR, "", onApplied) }
         }
         item.tags.take(MAX_TAGS).forEach { tag ->
             divider()
-            row("不感兴趣：标签 #$tag") { apply(activity, item, history, Kind.TAG, tag, onApplied) }
+            row("屏蔽标签 #$tag") { apply(activity, item, history, Kind.TAG, tag, onApplied) }
         }
         divider()
         row("取消") { }
@@ -131,6 +131,8 @@ object DislikeSheet {
 
     /** 只把选中的那一维写进画像：作者不带标签，标签不带作者。 */
     internal fun apply(context: Context, item: VideoItem, history: HistoryStore, kind: Kind, tag: String, onApplied: ((VideoItem, Kind) -> Unit)?) {
+        val before = history.mutedEntities()
+        val at = System.currentTimeMillis()
         when (kind) {
             Kind.VIDEO -> {
                 // 只记视频 id：这一行不带作者也不带标签，画像也只按视频维度算它。
@@ -142,18 +144,24 @@ object DislikeSheet {
             }
             Kind.AUTHOR -> {
                 // 两笔都要记：行为表那条负责压分（会衰减），muted_entities 那条是永久硬屏蔽。
-                history.recordInteraction(VideoItem(item.id, item.title, item.author, emptyList(), 0, authorId = item.authorId), HistoryStore.ACTION_DISLIKE_AUTHOR, AUTHOR_WEIGHT)
                 history.muteAuthor(item.author, item.authorId)
                 Toast.makeText(context, "不再推荐 @${item.author}", Toast.LENGTH_SHORT).show()
             }
             Kind.TAG -> {
-                history.recordInteraction(VideoItem(item.id, item.title, "", listOf(tag), 0), HistoryStore.ACTION_DISLIKE_TAG, TAG_WEIGHT)
                 history.mute(HistoryStore.MUTE_TAG, tag)
                 Toast.makeText(context, "不再推荐 #$tag", Toast.LENGTH_SHORT).show()
             }
         }
         history.markSeen(item.id)
         onApplied?.invoke(item, kind)
+        hostActivity(context)?.let { activity -> UndoNotice.show(activity, if (kind == Kind.VIDEO) "已减少此视频的推荐" else "已屏蔽，搜索不受影响") {
+            when (kind) {
+                Kind.VIDEO -> history.interestDatabase.delete("interactions", "video_id=? AND action=? AND created_at>=?", arrayOf(item.id, HistoryStore.ACTION_DISLIKE_VIDEO, at.toString()))
+                Kind.AUTHOR -> if (item.authorId !in before.authorIds && item.author.lowercase() !in before.authors) history.unmuteAuthor(item.author)
+                Kind.TAG -> if (SearchQuery.canonicalTag(tag) !in before.tags.map(SearchQuery::canonicalTag)) history.unmute(HistoryStore.MUTE_TAG, tag)
+            }
+            history.invalidateInterests()
+        } }
     }
 
     /** 和评论面板同一套手势：面板跟着手指走，松手时拖得够远或够快就收起，否则弹回。 */

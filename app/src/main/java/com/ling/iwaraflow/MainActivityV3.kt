@@ -234,9 +234,20 @@ class MainActivityV3 : AppCompatActivity() {
         })
 
         setupTopBar()
-        window.decorView.post { if (!isFinishing && !isDestroyed) OverlayPermissionPrompt.showOnce(this) }
+        window.decorView.post {
+            if (!isFinishing && !isDestroyed) PlaybackGuide.showOnce(this, false) { OverlayPermissionPrompt.showOnce(this) }
+        }
         if (!intent.hasExtra(IwaraSharedLink.EXTRA_URL)) {
-            if (intent.getBooleanExtra("return_recommend", false)) returnToRecommend() else loadFeed(reset = true)
+            val restoredMode = savedInstanceState?.getString("feed_mode")
+            val restored = if (savedInstanceState?.getString("feed_owner") == prefs.accountId && !prefs.privateBrowsing)
+                savedInstanceState.getString("feed_snapshot")?.let(FeedSessionCodec::decode) else null
+            if (intent.getBooleanExtra("return_recommend", false)) returnToRecommend()
+            else if (restored != null && restoredMode in FeedSessionStore.HOME_MODES) {
+                mode = restoredMode!!; homeFeedSessions.save(mode, restored); restoreHomeSession(restored)
+                listOf(R.id.tabRecommend to "recommend", R.id.tabLatest to "date", R.id.tabTrending to "trending", R.id.tabPopular to "popularity").forEach { (id, value) ->
+                    findViewById<TextView>(id).setTextColor(if (value == mode) -1 else 0x99FFFFFF.toInt())
+                }
+            } else loadFeed(reset = true)
         }
         // 官方点赞的完整同步放在首屏之后，避免和冷启动抢网络。
         window.decorView.postDelayed({ if (!isFinishing && !isDestroyed) likedSync.syncIfStale() }, 2500L)
@@ -1282,6 +1293,13 @@ class MainActivityV3 : AppCompatActivity() {
 
     override fun onSaveInstanceState(outState: Bundle) {
         outState.putBoolean("opening_internal_page", openingInternalPage)
+        if (!prefs.privateBrowsing && mode in FeedSessionStore.HOME_MODES) {
+            saveCurrentHomeSession()
+            homeFeedSessions.restorable(mode)?.let {
+                outState.putString("feed_snapshot", FeedSessionCodec.encode(it))
+                outState.putString("feed_mode", mode); outState.putString("feed_owner", prefs.accountId)
+            }
+        }
         super.onSaveInstanceState(outState)
     }
 

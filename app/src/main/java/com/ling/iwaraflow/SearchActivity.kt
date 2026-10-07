@@ -74,13 +74,14 @@ class SearchActivity : AppCompatActivity() {
     private class VideoTab : TabState() {
         /** 服务端给回来的原始顺序；[items] 是按当前排序重排后给列表看的那份。 */
         val loaded = mutableListOf<VideoItem>()
+        val rawCandidates = LinkedHashMap<String, VideoItem>()
         val items = mutableListOf<VideoItem>()
         val playable = mutableListOf<VideoItem>()
         val seenIds = mutableSetOf<String>()
 
         override fun reset(queries: List<String>) {
             super.reset(queries)
-            loaded.clear(); items.clear(); playable.clear(); seenIds.clear()
+            loaded.clear(); items.clear(); playable.clear(); seenIds.clear(); rawCandidates.clear()
         }
     }
 
@@ -128,6 +129,8 @@ class SearchActivity : AppCompatActivity() {
     private var authorPlan = SearchQuery(emptyList())
     private var querySerial = 0
     private var expansionSerial = 0
+    private val translationTasks = mutableListOf<RequestCancellation>()
+    private var originalOnly = false
     private var currentTab = Tab.VIDEOS
     private var sortKey = SearchSort.DEFAULT_KEY
     private var sortDescending = SearchSort.DEFAULT_DESCENDING
@@ -157,6 +160,7 @@ class SearchActivity : AppCompatActivity() {
         resultList = findViewById(R.id.searchResults)
         pager = findViewById(R.id.searchPager)
         statusView = findViewById(R.id.searchStatus)
+        findViewById<View>(R.id.searchMatchOptions).setOnClickListener { showMatchOptions() }
         statusView.setOnClickListener {
             videoTab.chain = 0; tagTab.chain = 0; authorTab.chain = 0
             loadNextPage(currentTab)
@@ -263,13 +267,16 @@ class SearchActivity : AppCompatActivity() {
         hideKeyboard()
         if (inFeed) showList()
         query = trimmed
+        translationTasks.forEach { it.cancel() }; translationTasks.clear()
+        expansionSerial++
+        api.cancelPendingRequests()
         querySerial++
         // 主动搜什么就是对什么感兴趣：关键词按标签记进画像。
         val terms = trimmed.split(Regex("[\\s,，、]+")).filter { it.isNotBlank() }.take(6)
         if (terms.isNotEmpty()) history.recordInteraction(VideoItem("search:$trimmed", trimmed, "", terms, 0), HistoryStore.ACTION_SEARCH, HistoryStore.SEARCH_WEIGHT)
         // 已经翻过的词直接用四种写法开搜；没翻过的先按原词搜着，译文回来再补进去。
         // 作者名只按输入的原词搜：作者的用户名就是他自己起的那一个，翻成别的语言反而搜偏。
-        searchPlan = SearchQuery.local(trimmed)
+        searchPlan = if (originalOnly) SearchQuery.literal(trimmed) else SearchQuery.local(trimmed)
         authorPlan = SearchQuery.literal(trimmed)
         val start = searchPlan.seeds
         queries = start
@@ -281,7 +288,7 @@ class SearchActivity : AppCompatActivity() {
         feedAdapter.replace(emptyList())
         loadNextPage(currentTab)
         updateStatus()
-        expandQuery(trimmed)
+        if (!originalOnly) expandQuery(trimmed)
     }
 
     /** Expand each AND term independently, then restart validation with the complete plan. */
@@ -291,26 +298,47 @@ class SearchActivity : AppCompatActivity() {
         val groups = searchPlan.groups.toMutableList()
         var remaining = terms.size
         terms.forEachIndexed { index, term ->
-            QueryTranslator.expand(term) { expanded ->
+            translationTasks += QueryTranslator.expand(term, { !exiting && query == raw && serial == expansionSerial }) { expanded ->
                 if (exiting || isFinishing || isDestroyed || query != raw || serial != expansionSerial) return@expand
                 groups[index] = expanded.ifEmpty { listOf(term) }
                 remaining--
                 if (remaining != 0) return@expand
                 val updated = SearchQuery(groups.toList())
                 if (updated == searchPlan) return@expand
-                // Re-fetch: earlier pages may contain matches that were rejected before
-                // the other terms' aliases were available. Invalidate their old callbacks.
                 searchPlan = updated
                 queries = updated.seeds
-                querySerial++
-                videoTab.reset(queries); tagTab.reset(queries)
-                // Also release author requests invalidated by the shared serial.
-                authorTab.variants.forEach { it.loading = false }
-                videoAdapter.notifyDataSetChanged(); tagAdapter.notifyDataSetChanged()
+                listOf(Tab.VIDEOS, Tab.TAGS).forEach { tab ->
+                    val state = videoState(tab) ?: return@forEach
+                    queries.filter { q -> state.variants.none { it.query == q } }.forEach { state.variants += Variant(it) }
+                    revalidateCandidates(tab, state)
+                }
                 if (!inFeed) loadNextPage(currentTab)
                 updateStatus()
             }
         }
+    }
+
+    private fun showMatchOptions() {
+        if (query.isBlank()) return
+        val terms = SearchQuery.terms(query)
+        val entries = searchPlan.groups.flatMapIndexed { index, aliases -> aliases.drop(1).map { index to it } }
+        val checked = BooleanArray(entries.size) { true }
+        androidx.appcompat.app.AlertDialog.Builder(this).setTitle("匹配词：同组任一，不同关键词全部匹配")
+            .setMultiChoiceItems(entries.map { (index, word) -> "${terms[index]} → $word" }.toTypedArray(), checked) { _, which, enabled -> checked[which] = enabled }
+            .setNeutralButton(if (originalOnly) "启用多语言" else "仅使用原词") { _, _ -> originalOnly = !originalOnly; runSearch(query) }
+            .setNegativeButton("取消", null).setPositiveButton("应用") { _, _ ->
+                expansionSerial++; translationTasks.forEach { it.cancel() }; translationTasks.clear()
+                val removed = entries.filterIndexed { index, _ -> !checked[index] }.toSet()
+                searchPlan = SearchQuery(searchPlan.groups.mapIndexed { index, aliases -> aliases.filterIndexed { aliasIndex, word -> aliasIndex == 0 || (index to word) !in removed } })
+                queries = searchPlan.seeds
+                listOf(Tab.VIDEOS, Tab.TAGS).forEach { tab -> videoState(tab)?.let { state ->
+                    // Keep successful cursor positions, but stop querying disabled aliases.
+                    state.variants.removeAll { it.query !in queries }
+                    queries.filter { q -> state.variants.none { it.query == q } }.forEach { state.variants += Variant(it) }
+                    state.cursor = 0; revalidateCandidates(tab, state)
+                } }
+                updateStatus()
+            }.show()
     }
 
     private fun showTab(tab: Tab) {
@@ -341,7 +369,7 @@ class SearchActivity : AppCompatActivity() {
     private fun styleTabs() {
         tabViews.forEach { (tab, view) ->
             val selected = tab == currentTab
-            view.setTextColor(if (selected) 0xFF17324A.toInt() else 0xFF607D93.toInt())
+            view.setTextColor(UiPalette.resolve(this, if (selected) 0xFF17324A.toInt() else 0xFF607D93.toInt()))
             view.setTypeface(null, if (selected) android.graphics.Typeface.BOLD else android.graphics.Typeface.NORMAL)
         }
     }
@@ -352,7 +380,7 @@ class SearchActivity : AppCompatActivity() {
         sortChips.forEach { (key, view) ->
             val selected = key == sortKey
             view.setBackgroundResource(if (selected) R.drawable.bg_sort_chip_active else R.drawable.bg_sort_chip)
-            view.setTextColor(if (selected) 0xFFFFFFFF.toInt() else 0xFF285C7B.toInt())
+            view.setTextColor(if (selected) 0xFFFFFFFF.toInt() else UiPalette.resolve(this, 0xFF285C7B.toInt()))
             view.setTypeface(null, if (selected) android.graphics.Typeface.BOLD else android.graphics.Typeface.NORMAL)
         }
         orderToggle.text = if (sortDescending) "倒序 ↓" else "顺序 ↑"
@@ -420,6 +448,22 @@ class SearchActivity : AppCompatActivity() {
         if (tab == Tab.AUTHORS) loadAuthorPage() else loadVideoPage(tab)
     }
 
+    private fun revalidateCandidates(tab: Tab, state: VideoTab) {
+        val plan = searchPlan
+        val serial = querySerial
+        val raw = synchronized(state.rawCandidates) { state.rawCandidates.values.toList() }
+        val matched = raw.filter { if (tab == Tab.TAGS) plan.matchesTags(it.tags) else plan.matchesTitle(it.title) }
+        gate.inspectAll(matched, prefs.defaultQuality) { checked -> runOnUiThread {
+            if (isStale(serial) || searchPlan != plan) return@runOnUiThread
+            val merged = (state.loaded + checked).distinctBy { it.id }.filter {
+                if (tab == Tab.TAGS) plan.matchesTags(it.tags) else plan.matchesTitle(it.title)
+            }
+            state.loaded.clear(); state.seenIds.clear()
+            merged.forEach { item -> if (state.seenIds.add(item.id)) state.loaded += item }
+            resort(state, tab); updateStatus()
+        } }
+    }
+
     private fun loadVideoPage(tab: Tab) {
         val state = videoState(tab) ?: return
         val variant = state.nextVariant() ?: return
@@ -439,6 +483,10 @@ class SearchActivity : AppCompatActivity() {
                         loadVideoPage(tab)
                     }
                 } else {
+                    synchronized(state.rawCandidates) {
+                        raw.forEach { state.rawCandidates[it.id] = it }
+                        while (state.rawCandidates.size > 2000) state.rawCandidates.remove(state.rawCandidates.keys.first())
+                    }
                     val matched = raw.filter {
                         if (tab == Tab.TAGS) searchPlan.matchesTags(it.tags) else searchPlan.matchesTitle(it.title)
                     }
@@ -756,6 +804,7 @@ class SearchActivity : AppCompatActivity() {
     }
 
     override fun onDestroy() {
+        translationTasks.forEach { it.cancel() }; translationTasks.clear()
         PipRegistry.leave(this)
         if (::comments.isInitialized) comments.release()
         exiting = true

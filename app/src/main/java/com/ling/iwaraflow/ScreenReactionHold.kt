@@ -10,7 +10,7 @@ import android.os.Looper
 import android.os.SystemClock
 import android.view.View
 
-/** Three seconds from touch down. The owner handles movement, UP and lifecycle cancellation. */
+/** 2.5 seconds from touch down. The owner handles movement, UP and lifecycle cancellation. */
 internal class ScreenReactionHold(private val view: View, private val complete: () -> Unit) {
     private val handler = Handler(Looper.getMainLooper())
     private val density = view.resources.displayMetrics.density
@@ -44,9 +44,9 @@ internal class ScreenReactionHold(private val view: View, private val complete: 
         override fun run() {
             if (!running) return
             val elapsed = SystemClock.uptimeMillis() - startedAt
-            ring.progress = (elapsed / 3000f).coerceIn(0f, 1f); ring.invalidateSelf()
-            if (elapsed >= 3000) { running = false; complete() }
-            else handler.postDelayed(this, minOf(16L, 3000L - elapsed))
+            ring.progress = (elapsed / HoldReaction.DURATION_MS.toFloat()).coerceIn(0f, 1f); ring.invalidateSelf()
+            if (elapsed >= HoldReaction.DURATION_MS) { running = false; complete() }
+            else handler.postDelayed(this, minOf(16L, HoldReaction.DURATION_MS - elapsed))
         }
     }
     fun start(x: Float, y: Float) {

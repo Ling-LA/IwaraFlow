@@ -95,6 +95,25 @@ class ProfileUiDeviceTest {
             }
         } finally { main { upload.finish() } }
     }
+    @Test fun settingsAndDataPagesRemainReadableInDarkMode() {
+        val context = instrumentation.targetContext
+        main { androidx.appcompat.app.AppCompatDelegate.setDefaultNightMode(androidx.appcompat.app.AppCompatDelegate.MODE_NIGHT_YES) }
+        try {
+            for ((type, name) in listOf(SettingsActivity::class.java to "settings-dark", DataManagementActivity::class.java to "data-dark", UploadTasksActivity::class.java to "upload-tasks-dark")) {
+                val activity = instrumentation.startActivitySync(Intent(context, type).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK))
+                try {
+                    screenshot(name)
+                    main {
+                        val foreground = activity.getColor(R.color.page_text)
+                        val background = activity.getColor(R.color.page_surface)
+                        assertTrue(androidx.core.graphics.ColorUtils.calculateContrast(foreground, background) >= 4.5)
+                        assertTrue(texts(activity.window.decorView).any { it.visibility == View.VISIBLE && it.text.isNotBlank() })
+                    }
+                } finally { main { activity.finish() } }
+            }
+        } finally { main { androidx.appcompat.app.AppCompatDelegate.setDefaultNightMode(androidx.appcompat.app.AppCompatDelegate.MODE_NIGHT_FOLLOW_SYSTEM) } }
+    }
+
     @Test fun fullscreenGuideAndLandscapeDislikePanelRenderWithoutCoveringTheVideo() {
         val context = instrumentation.targetContext
         val activity = instrumentation.startActivitySync(Intent(context, AuthorActivity::class.java).putExtra(AuthorActivity.EXTRA_ID, "fixture").addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)) as AuthorActivity

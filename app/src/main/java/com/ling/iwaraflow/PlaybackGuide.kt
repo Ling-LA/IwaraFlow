@@ -16,23 +16,23 @@ import android.widget.TextView
 /** A view on the current window; every tap is consumed, so dismissing cannot like or pause a video. */
 object PlaybackGuide {
     private const val TAG = "playback_gesture_guide"
-    internal fun key(horizontal: Boolean) = "fullscreen_guide_v1_" + if (horizontal) "landscape" else "portrait"
-    fun showOnce(activity: Activity, horizontal: Boolean) {
+    internal fun key(horizontal: Boolean) = if (horizontal) "fullscreen_guide_v1_landscape" else "playback_guide_v2_portrait"
+    fun showOnce(activity: Activity, horizontal: Boolean, onDismiss: () -> Unit = {}) {
         val prefs = activity.getSharedPreferences(AppPrefs.FILE, 0)
-        if (prefs.getBoolean(key(horizontal), false)) return
+        if (prefs.getBoolean(key(horizontal), false)) { onDismiss(); return }
         if (activity.isFinishing || activity.isDestroyed) return
         prefs.edit().putBoolean(key(horizontal), true).apply()
-        show(activity, horizontal)
+        show(activity, horizontal, onDismiss)
     }
     fun dismiss(activity: Activity) {
         val root = activity.window.decorView as? ViewGroup ?: return
         root.findViewWithTag<View>(TAG)?.let { root.removeView(it) }
     }
-    fun show(activity: Activity, horizontal: Boolean = activity.resources.configuration.orientation == android.content.res.Configuration.ORIENTATION_LANDSCAPE) {
+    fun show(activity: Activity, horizontal: Boolean = activity.resources.configuration.orientation == android.content.res.Configuration.ORIENTATION_LANDSCAPE, onDismiss: () -> Unit = {}) {
         if (activity.isFinishing || activity.isDestroyed) return
         dismiss(activity)
         val root = activity.window.decorView as? ViewGroup ?: return
-        root.addView(GuideView(activity, horizontal) { dismiss(activity) }.apply { tag = TAG }, ViewGroup.LayoutParams(-1, -1))
+        root.addView(GuideView(activity, horizontal) { dismiss(activity); onDismiss() }.apply { tag = TAG }, ViewGroup.LayoutParams(-1, -1))
     }
 
     internal class GuideView(activity: Activity, private var horizontal: Boolean, close: () -> Unit) : FrameLayout(activity) {
@@ -43,7 +43,7 @@ object PlaybackGuide {
             pathEffect = DashPathEffect(floatArrayOf(8*density, 7*density), 0f)
         }
         private val heading = TextView(activity).apply {
-            text = "全屏操作引导"; textSize = 20f; setTextColor(-1); typeface = Typeface.DEFAULT_BOLD; gravity = Gravity.CENTER
+            text = "播放操作引导"; textSize = 20f; setTextColor(-1); typeface = Typeface.DEFAULT_BOLD; gravity = Gravity.CENTER
         }
         private val zones = List(3) { TextView(activity).apply {
             textSize = 15f; setTextColor(-1); gravity = Gravity.CENTER; setLineSpacing(5*density, 1f)
@@ -56,7 +56,7 @@ object PlaybackGuide {
             setWillNotDraw(false); setBackgroundColor(0xD0182532.toInt()); isClickable = true; isFocusable = true
             addView(heading); zones.forEach { addView(it) }
             footer.addView(TextView(activity).apply {
-                text = "单击暂停 / 显示控件 · 左右滑动调进度\n上划切换视频 · 双击点赞"; textSize = 12f; setTextColor(-1); gravity = Gravity.CENTER
+                text = "手势用于播放画面，控件各自响应操作\n单击暂停 / 显示控件 · 左右滑动调进度 · 双击点赞"; textSize = 12f; setTextColor(-1); gravity = Gravity.CENTER
             })
             val actions = LinearLayout(activity).apply { gravity = Gravity.CENTER }
             actions.addView(switch, LinearLayout.LayoutParams(dp(148), dp(44)))
@@ -70,8 +70,9 @@ object PlaybackGuide {
             updateLabels()
         }
         private fun updateLabels() {
+            heading.text = if (horizontal) "横屏全屏操作引导" else "竖屏与普通播放操作引导"
             zones[0].text = "⊘\n长按${if (horizontal) "左侧" else "上方"}\n不感兴趣\n选择视频、作者或标签"
-            zones[1].text = "♡ + ☆\n按住中间 3 秒\n点赞＋收藏\n提前松开即可取消"
+            zones[1].text = "♡ + ☆\n按住中间 2.5 秒\n点赞＋收藏\n提前松开即可取消"
             zones[2].text = "≫\n长按${if (horizontal) "右侧" else "下方"}\n2× 加速\n松开恢复正常速度"
             switch.text = if (horizontal) "查看竖屏操作" else "查看横屏操作"
         }

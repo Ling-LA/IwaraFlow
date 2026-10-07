@@ -16,7 +16,7 @@ import androidx.core.view.WindowInsetsCompat
 class PageLayout(val activity: Activity, title: String) {
     val root = LinearLayout(activity).apply {
         orientation = LinearLayout.VERTICAL
-        setBackgroundColor(0xFFEEF8FE.toInt())
+        setBackgroundColor(UiPalette.resolve(context, 0xFFEEF8FE.toInt()))
     }
     val body = LinearLayout(activity).apply { orientation = LinearLayout.VERTICAL }
     fun dp(n: Int) = (n * activity.resources.displayMetrics.density).toInt()
@@ -24,7 +24,7 @@ class PageLayout(val activity: Activity, title: String) {
         val header = LinearLayout(activity).apply {
             orientation = LinearLayout.VERTICAL
             setPadding(dp(18), dp(10), dp(18), dp(16))
-            setBackgroundColor(0xFFDDF1FC.toInt())
+            setBackgroundColor(UiPalette.resolve(context, 0xFFDDF1FC.toInt()))
             addView(text("‹  返回", 16f).apply {
                 minHeight = dp(48); gravity = Gravity.CENTER_VERTICAL
                 setOnClickListener { activity.finish() }
@@ -41,12 +41,12 @@ class PageLayout(val activity: Activity, title: String) {
         activity.setContentView(root)
     }
     fun text(value: String, size: Float = 15f) = TextView(activity).apply {
-        text = value; textSize = size; setTextColor(0xFF17324A.toInt())
+        text = value; textSize = size; setTextColor(UiPalette.resolve(context, 0xFF17324A.toInt()))
     }
     fun card(): LinearLayout = LinearLayout(activity).apply {
         orientation = LinearLayout.VERTICAL; setPadding(dp(16), dp(12), dp(16), dp(12))
         background = GradientDrawable().apply {
-            setColor(Color.WHITE); cornerRadius = dp(18).toFloat(); setStroke(dp(1), 0xFFD7E9F4.toInt())
+            setColor(UiPalette.resolve(activity, Color.WHITE)); cornerRadius = dp(18).toFloat(); setStroke(dp(1), UiPalette.resolve(activity, 0xFFD7E9F4.toInt()))
         }
         layoutParams = LinearLayout.LayoutParams(-1, -2).apply { setMargins(dp(14), dp(8), dp(14), dp(8)) }
     }
@@ -71,7 +71,7 @@ class PageLayout(val activity: Activity, title: String) {
                         orientation = LinearLayout.VERTICAL
                         setPadding((14 * dp).toInt(), (6 * dp).toInt(), (14 * dp).toInt(), (12 * dp).toInt())
                         background = GradientDrawable().apply {
-                            setColor(Color.WHITE); cornerRadius = 18 * dp; setStroke(dp.toInt().coerceAtLeast(1), 0xFFD7E9F4.toInt())
+                            setColor(UiPalette.resolve(panel.context, Color.WHITE)); cornerRadius = 18 * dp; setStroke(dp.toInt().coerceAtLeast(1), UiPalette.resolve(panel.context, 0xFFD7E9F4.toInt()))
                         }
                         panel.addView(this, LinearLayout.LayoutParams(-1, -2).apply { bottomMargin = (12 * dp).toInt() })
                     }

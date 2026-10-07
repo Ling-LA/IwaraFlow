@@ -1,10 +1,12 @@
 <?xml version="1.0" encoding="utf-8"?>
-<!--
-  Android 11 及以下的自动备份规则，和 data_extraction_rules.xml 一个口径：
-  登录凭证、密钥和浏览记录数据库都不进备份。
--->
+<!-- Credentials, account-scoped interests and local diagnostics never enter OS backups. Use explicit data export. -->
 <full-backup-content>
     <exclude domain="sharedpref" path="iwara_flow_secure_session.xml" />
     <exclude domain="sharedpref" path="iwara_flow_session_fallback.xml" />
-    <exclude domain="database" path="iwaraflow.db" />
+    <exclude domain="database" path="." />
+        <exclude domain="file" path="navigation-lifecycle.txt" />
+        <exclude domain="file" path="last-navigation-crash.txt" />
+        <exclude domain="sharedpref" path="." />
+        <exclude domain="sharedpref" path="interest_metadata.xml" />
+        <exclude domain="sharedpref" path="upload_draft.xml" />
 </full-backup-content>

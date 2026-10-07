@@ -126,10 +126,11 @@ object Translator {
         if (next == config) return
         config = next
         synchronized(cache) { cache.clear() }
+        QueryTranslator.clearCache()
     }
 
     private val client: OkHttpClient by lazy {
-        OkHttpClient.Builder()
+        OkHttpClient.Builder().addInterceptor(RequestScheduler)
             .connectTimeout(10, TimeUnit.SECONDS)
             .readTimeout(15, TimeUnit.SECONDS)
             .build()

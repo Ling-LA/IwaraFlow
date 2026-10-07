@@ -5,7 +5,9 @@ import android.net.Uri
 import android.os.ParcelFileDescriptor
 import android.os.SystemClock
 import android.widget.FrameLayout
-import android.widget.TextView
+import android.widget.ImageButton
+import android.view.View
+import androidx.media3.ui.PlayerView
 import androidx.media3.exoplayer.ExoPlayer
 import androidx.test.ext.junit.runners.AndroidJUnit4
 import androidx.test.platform.app.InstrumentationRegistry
@@ -26,6 +28,17 @@ class FloatingPlayerDeviceTest {
         .apply { isAccessible = true }.get(null) as? FloatingVideoService
     private fun field(service: FloatingVideoService, name: String): Any? = service.javaClass.getDeclaredField(name)
         .apply { isAccessible = true }.get(service)
+
+    private fun screenshot(name: String) {
+        instrumentation.waitForIdleSync()
+        val bitmap = instrumentation.uiAutomation.takeScreenshot()
+        assertNotNull(bitmap)
+        val file = File(instrumentation.targetContext.getExternalFilesDir(null), "$name.png")
+        file.outputStream().use { bitmap.compress(android.graphics.Bitmap.CompressFormat.PNG, 100, it) }
+        bitmap.recycle()
+        shell("mkdir -p /sdcard/Download/IwaraFlow-ui-checks")
+        shell("cp ${file.absolutePath} /sdcard/Download/IwaraFlow-ui-checks/$name.png")
+    }
 
     @Test fun customWindowHasOnlyReturnCloseAndPlayControlsAndStopsOnClose() {
         val context = instrumentation.targetContext
@@ -49,7 +62,7 @@ class FloatingPlayerDeviceTest {
             main {
                 val service = instance()!!
                 val root = field(service, "window") as FrameLayout
-                val controls = (0 until root.childCount).map { root.getChildAt(it) }.filterIsInstance<TextView>()
+                val controls = (0 until root.childCount).map { root.getChildAt(it) }.filterIsInstance<ImageButton>()
                 assertEquals(3, controls.size)
                 val back = controls.single { it.contentDescription == "返回软件" }
                 val close = controls.single { it.contentDescription == "关闭小窗" }
@@ -57,9 +70,31 @@ class FloatingPlayerDeviceTest {
                 assertTrue(back.left < close.left)
                 assertTrue(toggle.top > close.top)
                 val player = field(service, "player") as ExoPlayer
+                assertTrue(root.clipToOutline)
+                assertTrue((root.getChildAt(0) as PlayerView).videoSurfaceView is android.view.TextureView)
+                assertTrue(controls.all { it.background is android.graphics.drawable.RippleDrawable })
+                player.repeatMode = androidx.media3.common.Player.REPEAT_MODE_ONE
                 assertTrue(player.playWhenReady)
                 toggle.performClick(); assertFalse(player.playWhenReady)
                 toggle.performClick(); assertTrue(player.playWhenReady)
+            }
+            screenshot("floating-controls-visible")
+            SystemClock.sleep(3400)
+            main {
+                val service = instance()!!
+                val root = field(service, "window") as FrameLayout
+                val controls = (0 until root.childCount).map { root.getChildAt(it) }.filterIsInstance<ImageButton>()
+                assertTrue(controls.all { it.visibility == View.INVISIBLE })
+                assertTrue((field(service, "player") as ExoPlayer).playWhenReady)
+            }
+            screenshot("floating-controls-hidden")
+            main {
+                val service = instance()!!
+                val root = field(service, "window") as FrameLayout
+                (root.getChildAt(0) as PlayerView).performClick()
+                val controls = (0 until root.childCount).map { root.getChildAt(it) }.filterIsInstance<ImageButton>()
+                assertTrue(controls.all { it.visibility == View.VISIBLE })
+                val close = controls.single { it.contentDescription == "关闭小窗" }
                 close.performClick()
                 assertNull(field(service, "player"))
                 assertNull(instance())

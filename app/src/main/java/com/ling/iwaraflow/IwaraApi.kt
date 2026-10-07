@@ -19,12 +19,16 @@ class IwaraApi(context: Context, private val apiRoot: String = DEFAULT_API_ROOT)
     private val siteRoot = "https://www.iwara.tv"
     private val imageRoot = "https://i.iwara.tv"
     private val session = SecureSessionStore(context.applicationContext)
-    private val io = Executors.newCachedThreadPool()
+    private val io = Executors.newFixedThreadPool(6)
+    private val playbackIo = Executors.newFixedThreadPool(2)
+    private val requestPriority = ThreadLocal<RequestScheduler.Priority>()
     private val lifecycleLock = Any()
+    private val requestEpoch = java.util.concurrent.atomic.AtomicInteger()
+    fun cancelPendingRequests() { requestEpoch.incrementAndGet(); client.dispatcher.cancelAll() }
     @Volatile private var closed = false
     private val jsonType = "application/json; charset=utf-8".toMediaType()
 
-    private val client = OkHttpClient.Builder()
+    private val client = OkHttpClient.Builder().addInterceptor(RequestScheduler)
         .connectTimeout(15, TimeUnit.SECONDS)
         .readTimeout(35, TimeUnit.SECONDS)
         .writeTimeout(20, TimeUnit.SECONDS)
@@ -44,7 +48,7 @@ class IwaraApi(context: Context, private val apiRoot: String = DEFAULT_API_ROOT)
     }
 
     fun isLoggedIn(): Boolean = !session.refreshToken.isNullOrBlank()
-    fun logout() = session.clear()
+    fun logout() = session.clearAuthentication()
 
     internal fun uploadAccessToken(): String {
         if (closed || !isLoggedIn()) throw IOException("请先登录 Iwara")
@@ -60,6 +64,7 @@ class IwaraApi(context: Context, private val apiRoot: String = DEFAULT_API_ROOT)
             .header("X-Site", "www.iwara.tv")
             .header("Accept", "application/json")
             .header("User-Agent", "Mozilla/5.0 (Linux; Android 14) AppleWebKit/537.36 Chrome/152 Mobile Safari/537.36")
+        requestPriority.get()?.let { builder.tag(RequestScheduler.Priority::class.java, it) }
         if (authenticated) {
             ensureAccessTokenBlocking()?.let { builder.header("Authorization", "Bearer $it") }
         } else {
@@ -78,15 +83,32 @@ class IwaraApi(context: Context, private val apiRoot: String = DEFAULT_API_ROOT)
             // Page callbacks can schedule follow-up requests while the Activity is closing.
             // Serialize submission with shutdown so that this cannot reject a late request.
             if (closed) return
+            val epoch = requestEpoch.get()
             io.execute {
-                if (closed) return@execute
+                if (closed || epoch != requestEpoch.get()) return@execute
                 val result = request()
-                if (!closed) callback(result)
+                if (!closed && epoch == requestEpoch.get()) callback(result)
+            }
+        }
+    }
+
+    private fun <T> enqueuePlayback(callback: (T) -> Unit, request: () -> T) {
+        synchronized(lifecycleLock) {
+            if (closed) return
+            val epoch = requestEpoch.get()
+            playbackIo.execute {
+                if (closed || epoch != requestEpoch.get()) return@execute
+                requestPriority.set(RequestScheduler.Priority.PLAYBACK)
+                try {
+                    val result = request()
+                    if (!closed && epoch == requestEpoch.get()) callback(result)
+                } finally { requestPriority.remove() }
             }
         }
     }
 
     private fun loginBlocking(email: String, password: String): LoginResult {
+        val startedAt = SecureSessionStore.accountRevision
         if (email.isBlank() || password.isBlank()) return LoginResult(false, "邮箱和密码不能为空")
         return try {
             val body = JSONObject().put("email", email).put("password", password).toString().toRequestBody(jsonType)
@@ -95,11 +117,18 @@ class IwaraApi(context: Context, private val apiRoot: String = DEFAULT_API_ROOT)
                 if (!response.isSuccessful) return LoginResult(false, extractMessage(raw, "登录失败（HTTP ${response.code}）"))
                 val refresh = JSONObject(raw).optString("token")
                 if (refresh.isBlank()) return LoginResult(false, "登录成功但服务器未返回 refresh token")
-                session.refreshToken = refresh
-                session.accessToken = null
+                synchronized(SecureSessionStore.accountLock) {
+                    if (closed || SecureSessionStore.accountRevision != startedAt) return LoginResult(false, "登录已取消")
+                    SecureSessionStore.accountRevision++
+                    session.refreshToken = refresh
+                    session.accessToken = null
+                }
                 val access = refreshAccessTokenBlocking(refresh)
                 if (access.isNullOrBlank()) {
-                    session.clear(); LoginResult(false, "登录后获取 access token 失败")
+                    synchronized(SecureSessionStore.accountLock) {
+                        if (session.refreshToken == refresh) session.clearAuthentication()
+                    }
+                    LoginResult(false, "登录后获取 access token 失败")
                 } else LoginResult(true, "登录成功")
             }
         } catch (e: Exception) {
@@ -107,29 +136,38 @@ class IwaraApi(context: Context, private val apiRoot: String = DEFAULT_API_ROOT)
         }
     }
 
-    private fun ensureAccessTokenBlocking(): String? {
+    private fun ensureAccessTokenBlocking(): String? = synchronized(SecureSessionStore.refreshLock) {
         val current = session.accessToken
-        if (!current.isNullOrBlank() && tokenIsUsable(current, 120)) return current
-        val refresh = session.refreshToken ?: return null
-        if (!tokenIsUsable(refresh, 0)) { session.clear(); return null }
-        return refreshAccessTokenBlocking(refresh)
+        if (!current.isNullOrBlank() && tokenIsUsable(current, 120)) return@synchronized current
+        val refresh = session.refreshToken ?: return@synchronized null
+        if (!tokenIsUsable(refresh, 0)) {
+            synchronized(SecureSessionStore.accountLock) { if (session.refreshToken == refresh) session.clearAuthentication() }
+            return@synchronized null
+        }
+        refreshAccessTokenBlocking(refresh)
     }
 
-    private fun refreshAccessTokenBlocking(refreshToken: String): String? {
-        return try {
+    private fun refreshAccessTokenBlocking(refreshToken: String): String? = synchronized(SecureSessionStore.refreshLock) {
+        val revision = SecureSessionStore.accountRevision
+        if (session.refreshToken != refreshToken) return@synchronized null
+        session.accessToken?.takeIf { tokenIsUsable(it, 120) }?.let { return@synchronized it }
+        try {
             val req = baseRequest("$apiRoot/user/token")
                 .header("Authorization", "Bearer $refreshToken")
                 .post(ByteArray(0).toRequestBody(null)).build()
             client.newCall(req).execute().use { response ->
                 val raw = response.body?.string().orEmpty()
-                if (!response.isSuccessful) {
-                    if (response.code == 401 || response.code == 403) session.clear()
-                    return null
+                synchronized(SecureSessionStore.accountLock) {
+                    if (closed || revision != SecureSessionStore.accountRevision || session.refreshToken != refreshToken) return@use null
+                    if (!response.isSuccessful) {
+                        if (response.code == 401 || response.code == 403) session.clearAuthentication()
+                        return@use null
+                    }
+                    val token = JSONObject(raw).optString("accessToken")
+                    if (token.isBlank() || token == "null") return@use null
+                    session.accessToken = token
+                    token
                 }
-                val token = JSONObject(raw).optString("accessToken")
-                if (token.isBlank()) return null
-                session.accessToken = token
-                token
             }
         } catch (_: Exception) { null }
     }
@@ -468,6 +506,9 @@ class IwaraApi(context: Context, private val apiRoot: String = DEFAULT_API_ROOT)
     }
 
     fun resolveSources(videoId: String, callback: (Result<List<VideoSource>>) -> Unit) {
+        enqueuePlayback(callback) { runCatching { resolveSourcesBlocking(videoId) } }
+    }
+    fun resolvePreloadSources(videoId: String, callback: (Result<List<VideoSource>>) -> Unit) {
         enqueue(callback) { runCatching { resolveSourcesBlocking(videoId) } }
     }
 
@@ -486,7 +527,7 @@ class IwaraApi(context: Context, private val apiRoot: String = DEFAULT_API_ROOT)
     }
 
     fun resolveStream(videoId: String, quality: String = "highest", callback: (Result<String>) -> Unit) {
-        enqueue(callback) { runCatching {
+        enqueuePlayback(callback) { runCatching {
             val sources = resolveSourcesBlocking(videoId)
             chooseSource(sources, quality)?.url ?: throw IOException("没有可播放清晰度")
         } }
@@ -662,7 +703,7 @@ class IwaraApi(context: Context, private val apiRoot: String = DEFAULT_API_ROOT)
         synchronized(lifecycleLock) {
             if (closed) return
             closed = true
-            io.shutdownNow()
+            io.shutdownNow(); playbackIo.shutdownNow()
         }
         HttpClientCleanup.close(client)
     }

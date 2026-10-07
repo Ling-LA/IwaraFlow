@@ -90,6 +90,7 @@ class FloatingVideoService : Service() {
             }
             controls?.show()
         }
+        toggle.setImageResource(if (intent.getBooleanExtra("playWhenReady", true)) R.drawable.ic_pause else R.drawable.ic_play)
         controls = FloatingControls(buttons)
         p.addListener(object : Player.Listener {
             override fun onPlayWhenReadyChanged(ready: Boolean, reason: Int) {
@@ -126,11 +127,15 @@ class FloatingVideoService : Service() {
             controls?.show()
             p.setMediaSource(cache!!.createMediaSource(url)); p.seekTo(intent.getLongExtra("position", 0))
             p.setAudioAttributes(androidx.media3.common.AudioAttributes.DEFAULT, true)
-            p.prepare(); p.play(); cache?.prefetchFull(url)
+            p.playWhenReady = intent.getBooleanExtra("playWhenReady", true)
+            p.prepare(); cache?.prefetchFull(url)
         } catch (_: Exception) { releaseWindow(); stopSelf() }
         return START_NOT_STICKY
     }
-    private fun savePosition() { if (videoId.isNotBlank()) lastPosition = videoId to (player?.currentPosition ?: 0L) }
+    private fun savePosition() {
+        val p = player ?: return
+        if (videoId.isNotBlank()) lastPlayback = PlaybackState(videoId, p.currentPosition.coerceAtLeast(0L), p.playWhenReady)
+    }
     private fun releaseWindow() {
         closed = true
         controls?.close(); controls = null
@@ -140,15 +145,17 @@ class FloatingVideoService : Service() {
         if (instance === this) instance = null
     }
     override fun onDestroy() { if (!closed) savePosition(); releaseWindow(); super.onDestroy() }
+    data class PlaybackState(val videoId: String, val positionMs: Long, val playWhenReady: Boolean)
+
     companion object {
         private const val CHANNEL = "floating_video"
         private var instance: FloatingVideoService? = null
-        private var lastPosition: Pair<String, Long>? = null
-        fun restorePosition(videoId: String?): Long? {
+        private var lastPlayback: PlaybackState? = null
+        fun restorePlayback(videoId: String?): PlaybackState? {
             instance?.let { it.savePosition(); it.releaseWindow(); it.stopSelf() }
-            return lastPosition?.takeIf { it.first == videoId }?.second.also {
-                if (it != null) lastPosition = null
-            }
+            val saved = lastPlayback?.takeIf { it.videoId == videoId }
+            if (saved != null) lastPlayback = null
+            return saved
         }
         fun open(activity: Activity, adapter: VideoAdapter): Boolean {
             if (!Settings.canDrawOverlays(activity)) return false
@@ -157,6 +164,7 @@ class FloatingVideoService : Service() {
             val url = item.streamUrl ?: return false
             val intent = Intent(activity, FloatingVideoService::class.java)
                 .putExtra("url", url).putExtra("id", item.id).putExtra("title", item.title).putExtra("position", item.resumePositionMs)
+                .putExtra("playWhenReady", item.resumePlayWhenReady)
                 .putExtra("return", Intent(activity.intent).setClass(activity, activity.javaClass))
             return runCatching {
                 activity.startForegroundService(intent)

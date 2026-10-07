@@ -155,10 +155,13 @@ class VideoAdapter(
 
     fun resumeActive() {
         if (released) return
-        val restored = FloatingVideoService.restorePosition(activeItem()?.id)
+        val restored = FloatingVideoService.restorePlayback(activeItem()?.id)
         if (restored != null) {
-            activeItem()?.resumePositionMs = restored
-            holders.toList().forEach { if (it.bindingAdapterPosition == activePosition) it.restorePosition(restored) }
+            activeItem()?.apply {
+                resumePositionMs = restored.positionMs
+                resumePlayWhenReady = restored.playWhenReady
+            }
+            holders.toList().forEach { if (it.bindingAdapterPosition == activePosition) it.restorePosition(restored.positionMs) }
         }
         playbackEnabled = true
         applyDisplayPrefs()
@@ -386,7 +389,8 @@ class VideoAdapter(
         private var resumeAfterGuide = false
         fun setGuideVisible(visible: Boolean) {
             if (visible) {
-                resumeAfterGuide = player?.playWhenReady ?: active
+                resumeAfterGuide = if (active) player?.playWhenReady ?: (bound?.resumePlayWhenReady == true)
+                    else bound?.resumePlayWhenReady == true
                 cancelSurfaceGesture()
                 player?.pause()
             } else {
@@ -410,6 +414,7 @@ class VideoAdapter(
         private var stalledChecks = 0
         private var pendingSingleTap: Runnable? = null
         private var lastTap = 0L
+        private var surfaceDownAt = 0L
         /** 播放控件是被点出来的（没暂停也显示）。 */
         private var controlsPinned = false
         private var pausedControlsHidden = false
@@ -496,6 +501,7 @@ class VideoAdapter(
         private val holdToSpeed = Runnable {
             if (!active || touchMoved || pipMode) return@Runnable
             if (downAction == FullscreenGesture.Action.DOUBLE_REACTION) {
+                screenReactionHold.start(downX, downY, android.os.SystemClock.uptimeMillis() - surfaceDownAt)
                 touchMoved = true // 已经长按，松手不再当作单击。
                 pendingSingleTap?.let { tapHandler.removeCallbacks(it) }; pendingSingleTap = null; lastTap = 0L
                 itemView.parent?.requestDisallowInterceptTouchEvent(true)
@@ -679,14 +685,16 @@ class VideoAdapter(
                     MotionEvent.ACTION_DOWN -> {
                         downX = event.x
                         downY = event.y
+                        surfaceDownAt = android.os.SystemClock.uptimeMillis()
                         touchMoved = false
                         screenReactionHold.cancel()
                         downAction = FullscreenGesture.action(downX, downY, itemView.width, itemView.height,
                             fullscreenMode && (if (aspect > 0f) landscape else itemView.width > itemView.height))
                         tapHandler.removeCallbacks(holdToSpeed)
                         if (!pipMode && active) {
-                            if (downAction == FullscreenGesture.Action.DOUBLE_REACTION) screenReactionHold.start(downX, downY)
-                            tapHandler.postDelayed(holdToSpeed, 450L)
+                            val delay = if (downAction == FullscreenGesture.Action.DOUBLE_REACTION)
+                                ViewConfiguration.getLongPressTimeout().toLong().coerceAtLeast(450L) else 450L
+                            tapHandler.postDelayed(holdToSpeed, delay)
                         }
                         true
                     }
@@ -820,6 +828,10 @@ class VideoAdapter(
                     }
 
                     override fun onPlayWhenReadyChanged(playWhenReady: Boolean, reason: Int) {
+                        // Lifecycle/guide pauses must not replace the user's playback intent.
+                        if (active && playbackEnabled && !guideVisible && bound?.id == item.id) {
+                            item.resumePlayWhenReady = playWhenReady
+                        }
                         // A new pause starts with transport controls; subsequent taps may hide them.
                         setPausedControlsHidden(false)
                     }
@@ -915,7 +927,7 @@ class VideoAdapter(
             } else api.chooseSource(sources, preferred)
             source ?: return
             val oldPosition = if (preservePosition) p.currentPosition else item.resumePositionMs.coerceAtLeast(0L)
-            val shouldPlay = active && (p.playWhenReady || !preservePosition)
+            val shouldPlay = active && item.resumePlayWhenReady
             item.streamUrl = source.url
             if (item.selectedQuality == null && preferred != "highest") item.selectedQuality = source.name
             quality.text = "画质\n" + (item.selectedQuality ?: if (preferred == "highest") "最高" else source.name)
@@ -937,8 +949,9 @@ class VideoAdapter(
                 if (player == null) bound?.let { start(it) }
                 else player?.apply {
                     volume = 1f
-                    if (guideVisible) { resumeAfterGuide = true; pause() }
-                    else { playWhenReady = true; play() }
+                    val shouldPlay = bound?.resumePlayWhenReady == true
+                    if (guideVisible) { resumeAfterGuide = shouldPlay; pause() }
+                    else { playWhenReady = shouldPlay; if (shouldPlay) play() else pause() }
                 }
                 bound?.let { item ->
                     val p = player
@@ -963,7 +976,7 @@ class VideoAdapter(
 
         /**
          * 暂停但留住播放器和画面。这里把 [active] 置回 false，所以恢复时
-         * [setActive] 会走到“播放器还在就直接继续播”那一支，不用重新起播。
+         * [setActive] 会复用播放器并恢复用户的播放意图，不用重新起播。
          */
         fun suspend() {
             val p = player ?: return

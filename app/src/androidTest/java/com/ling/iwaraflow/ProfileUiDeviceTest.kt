@@ -82,6 +82,8 @@ class ProfileUiDeviceTest {
             main { texts(interest.window.decorView).first { it.text.toString() == "系统兴趣" }.performClick() }
             screenshot("interest-system")
         } finally { main { interest.finish() } }
+        val search = instrumentation.startActivitySync(Intent(context, SearchActivity::class.java).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK))
+        try { screenshot("search-match-controls") } finally { main { search.finish() } }
         val upload = instrumentation.startActivitySync(Intent(context, UploadActivity::class.java).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK))
         try {
             screenshot("native-upload")
@@ -141,7 +143,7 @@ class ProfileUiDeviceTest {
         val context = instrumentation.targetContext
         main { androidx.appcompat.app.AppCompatDelegate.setDefaultNightMode(androidx.appcompat.app.AppCompatDelegate.MODE_NIGHT_YES) }
         try {
-            for ((type, name) in listOf(SettingsActivity::class.java to "settings-dark", DataManagementActivity::class.java to "data-dark", UploadTasksActivity::class.java to "upload-tasks-dark")) {
+            for ((type, name) in listOf(SettingsActivity::class.java to "settings-dark", DataManagementActivity::class.java to "data-dark", UploadTasksActivity::class.java to "upload-tasks-dark", SearchActivity::class.java to "search-dark")) {
                 val activity = instrumentation.startActivitySync(Intent(context, type).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK))
                 try {
                     screenshot(name)

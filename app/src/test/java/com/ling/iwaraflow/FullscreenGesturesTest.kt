@@ -86,6 +86,33 @@ class FullscreenGesturesTest {
         set(holder, "active", true); set(holder, "player", player)
         try { block(adapter, holder, item, player) } finally { adapter.releaseAll() }
     }
+    private fun screenHold(holder: VideoAdapter.Holder) = holder.javaClass.getDeclaredField("screenReactionHold")
+        .apply { isAccessible = true }.get(holder) as ScreenReactionHold
+    @Test fun quickMiddleTapsNeverStartTheScreenAnimation() = fixture { adapter, holder, item, _ ->
+        for (fullscreen in listOf(true, false)) {
+            adapter.setFullscreen(fullscreen)
+            touch(holder.itemView, MotionEvent.ACTION_DOWN, 450f, 220f)
+            idle(100)
+            assertFalse(screenHold(holder).running)
+            touch(holder.itemView, MotionEvent.ACTION_UP, 450f, 220f)
+            idle(600)
+            assertFalse(screenHold(holder).running); assertFalse(item.localFavorite)
+        }
+    }
+    @Test fun screenAnimationWaitsForConfirmedLongPress() = fixture { _, holder, item, _ ->
+        val delay = android.view.ViewConfiguration.getLongPressTimeout().toLong().coerceAtLeast(450L)
+        touch(holder.itemView, MotionEvent.ACTION_DOWN, 450f, 220f)
+        idle(delay - 1); assertFalse(screenHold(holder).running)
+        idle(1); assertTrue(screenHold(holder).running); assertFalse(item.localFavorite)
+        touch(holder.itemView, MotionEvent.ACTION_UP, 450f, 220f)
+        idle(2500); assertFalse(item.localFavorite)
+    }
+    @Test fun movingBeforeLongPressConfirmationPreventsTheAnimation() = fixture { _, holder, item, _ ->
+        touch(holder.itemView, MotionEvent.ACTION_DOWN, 450f, 220f); idle(100)
+        touch(holder.itemView, MotionEvent.ACTION_MOVE, 450f, 300f); idle(3000)
+        assertFalse(screenHold(holder).running); assertFalse(item.localFavorite)
+        touch(holder.itemView, MotionEvent.ACTION_UP, 450f, 300f)
+    }
     @Test fun middleHoldAddsFavoriteWithoutPausingOrTogglingAnExistingLikeOff() = fixture { _, holder, item, player ->
         touch(holder.itemView, MotionEvent.ACTION_DOWN, 450f, 180f); idle(2499)
         assertFalse(item.localFavorite); idle(1); assertTrue(item.localFavorite); assertTrue(item.liked)

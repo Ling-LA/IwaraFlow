@@ -395,6 +395,99 @@ class NavigationDeviceTest {
         }
     }
 
+    @Test fun pausedVideoSurvivesSettingsBackgroundAndFloatingWindow() {
+        val app = instrumentation.targetContext.applicationContext as Application
+        app.getSharedPreferences(AppPrefs.FILE, 0).edit()
+            .putBoolean(PlaybackGuide.key(false), true).putBoolean(PlaybackGuide.key(true), true)
+            .putBoolean(OverlayPermissionPrompt.KEY_SHOWN, true).commit()
+        val preferences = AppPrefs(app)
+        val originalAutoPip = preferences.autoPip
+        preferences.autoPip = false
+        val callbacks = object : Application.ActivityLifecycleCallbacks {
+            override fun onActivityResumed(a: Activity) { resumed = a }
+            override fun onActivityPaused(a: Activity) { if (resumed === a) resumed = null }
+            override fun onActivityCreated(a: Activity, b: Bundle?) {}
+            override fun onActivityStarted(a: Activity) {}
+            override fun onActivityStopped(a: Activity) {}
+            override fun onActivitySaveInstanceState(a: Activity, b: Bundle) {}
+            override fun onActivityDestroyed(a: Activity) {}
+        }
+        fun shell(command: String) {
+            ParcelFileDescriptor.AutoCloseInputStream(instrumentation.uiAutomation.executeShellCommand(command)).use { it.readBytes() }
+        }
+        fun floating() = FloatingVideoService::class.java.getDeclaredField("instance")
+            .apply { isAccessible = true }.get(null) as? FloatingVideoService
+        app.registerActivityLifecycleCallbacks(callbacks)
+        val home = instrumentation.startActivitySync(Intent(app, MainActivityV3::class.java).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)) as MainActivityV3
+        var settings: Activity? = null
+        try {
+            awaitActivity(MainActivityV3::class.java)
+            val media = fixtureVideo()
+            val adapter = home.playbackGuideAdapter
+            main {
+                set(home, "requestSerial", (field(home, "requestSerial") as Int) + 1)
+                set(home, "mode", "date"); set(home, "pagingEnabled", false)
+                adapter.replace(listOf(VideoItem("pause-navigation", "Local fixture", "Fixture", emptyList(), 0,
+                    sources = listOf(VideoSource("fixture", android.net.Uri.fromFile(media).toString(), 1)))))
+                adapter.setActive(0)
+            }
+            playFixture(home, R.id.pager)
+            val initialPlayer = awaitFixturePlayer(home, R.id.pager)
+            main { initialPlayer.pause() }
+            fun assertPaused() {
+                val p = awaitFixturePlayer(home, R.id.pager)
+                main { assertFalse(p.playWhenReady); assertFalse(adapter.activeItem()!!.resumePlayWhenReady) }
+                SystemClock.sleep(600)
+                main { assertFalse(p.playWhenReady) }
+            }
+            assertPaused()
+            main {
+                adapter.suspendPlayback()
+                home.startActivity(Intent(home, SettingsActivity::class.java))
+            }
+            settings = awaitActivity(SettingsActivity::class.java)
+            main { settings!!.finish() }
+            settings = null
+            assertSame(home, awaitActivity(MainActivityV3::class.java)); assertPaused()
+            shell("input keyevent KEYCODE_HOME")
+            SystemClock.sleep(500)
+            instrumentation.startActivitySync(Intent(app, MainActivityV3::class.java).addFlags(
+                Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_REORDER_TO_FRONT or Intent.FLAG_ACTIVITY_SINGLE_TOP))
+            assertSame(home, awaitActivity(MainActivityV3::class.java)); assertPaused()
+
+            shell("appops set ${app.packageName} SYSTEM_ALERT_WINDOW allow")
+            // Paused -> paused, play in the window -> playing, pause in the window -> paused.
+            for (toggle in listOf(false, true, true)) {
+                main { assertTrue(FloatingVideoService.open(home, adapter)) }
+                val deadline = SystemClock.uptimeMillis() + 15_000
+                var ready = false
+                while (!ready && SystemClock.uptimeMillis() < deadline) {
+                    main { floating()?.let { ready = (field(it, "player") as? ExoPlayer)?.playbackState == androidx.media3.common.Player.STATE_READY } }
+                    if (!ready) SystemClock.sleep(50)
+                }
+                assertTrue("Floating fixture should be ready", ready)
+                var expectedPlaying = false
+                main {
+                    val service = floating()!!
+                    val p = field(service, "player") as ExoPlayer
+                    assertEquals(adapter.activeItem()!!.resumePlayWhenReady, p.playWhenReady)
+                    val root = field(service, "window") as android.widget.FrameLayout
+                    val controls = (0 until root.childCount).map(root::getChildAt).filterIsInstance<android.widget.ImageButton>()
+                    if (toggle) controls.single { it.contentDescription == "播放或暂停" }.performClick()
+                    expectedPlaying = p.playWhenReady
+                    controls.single { it.contentDescription == "返回软件" }.performClick()
+                }
+                assertSame(home, awaitActivity(MainActivityV3::class.java))
+                val p = awaitFixturePlayer(home, R.id.pager)
+                main { assertEquals(expectedPlaying, p.playWhenReady); assertEquals(expectedPlaying, adapter.activeItem()!!.resumePlayWhenReady) }
+                if (!expectedPlaying) assertPaused()
+            }
+        } finally {
+            main { preferences.autoPip = originalAutoPip; settings?.finish(); app.stopService(Intent(app, FloatingVideoService::class.java)); home.finish() }
+            app.unregisterActivityLifecycleCallbacks(callbacks)
+        }
+    }
+
     private fun fixtureVideo(): File {
         return File.createTempFile("navigation-fixture-", ".mp4", instrumentation.targetContext.cacheDir).apply {
             instrumentation.context.assets.open("navigation-fixture.mp4").use { input ->

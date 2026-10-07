@@ -133,7 +133,9 @@ data class VideoItem(
     var playbackIssue: String? = null,
     var resumePositionMs: Long = 0L,
     /** 作者写的简介（Iwara 的 `body`）；列表接口就带，本地表里存的视频为空，看时再补拉。 */
-    var description: String = ""
+    var description: String = "",
+    /** Playback intent survives temporary page suspension and player recreation. */
+    var resumePlayWhenReady: Boolean = true
 )
 
 data class LoginResult(

@@ -13,7 +13,7 @@ internal object FeedSessionCodec {
                 JSONObject().put("id", v.id).put("title", v.title.take(300)).put("author", v.author.take(120))
                     .put("authorId", v.authorId).put("username", v.authorUsername).put("tags", JSONArray(v.tags.take(30)))
                     .put("likes", v.likes).put("views", v.views).put("created", v.createdAt).put("liked", v.liked)
-                    .put("favorite", v.localFavorite).put("position", v.resumePositionMs).put("quality", v.selectedQuality)
+                    .put("favorite", v.localFavorite).put("position", v.resumePositionMs).put("playWhenReady", v.resumePlayWhenReady).put("quality", v.selectedQuality)
             })).toString()
     }
     fun decode(text: String): FeedSessionStore.Session? = runCatching {
@@ -26,6 +26,7 @@ internal object FeedSessionCodec {
                 createdAt = row.optLong("created"), liked = row.optBoolean("liked"), localFavorite = row.optBoolean("favorite"),
                 authorId = row.optString("authorId"), authorUsername = row.optString("username"),
                 resumePositionMs = row.optLong("position").coerceAtLeast(0),
+                resumePlayWhenReady = row.optBoolean("playWhenReady", true),
                 selectedQuality = row.optString("quality").takeUnless { it.isBlank() || it == "null" })
         }
         FeedSessionStore.Session(items, root.optInt("index").coerceIn(items.indices), root.optInt("page").coerceAtLeast(0), root.optBoolean("paging", true))

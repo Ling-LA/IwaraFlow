@@ -37,6 +37,8 @@ class SearchActivity : AppCompatActivity(), PlaybackGuideHost {
      */
     private class Variant(val query: String) {
         var page = 0
+        var attempted = false
+        var failure: String? = null
         var loading = false
         var noMore = false
     }
@@ -56,6 +58,11 @@ class SearchActivity : AppCompatActivity(), PlaybackGuideHost {
         /** 轮到的下一条还能翻页的写法；都在翻或都翻完了返回 null。 */
         fun nextVariant(): Variant? {
             if (variants.isEmpty() || variants.any { it.loading }) return null
+            // Fetch every selected spelling once before paging any single spelling again.
+            variants.indexOfFirst { !it.attempted && !it.noMore }.takeIf { it >= 0 }?.let { index ->
+                cursor = (index + 1) % variants.size
+                return variants[index]
+            }
             for (i in variants.indices) {
                 val index = (cursor + i) % variants.size
                 val variant = variants[index]
@@ -129,6 +136,7 @@ class SearchActivity : AppCompatActivity(), PlaybackGuideHost {
     /** 这次搜索实际在用的几种写法：原词 + 中英日韩里另外三种的译法。 */
     private var queries = listOf<String>()
     private var searchPlan = SearchQuery(emptyList())
+    private var availablePlan = SearchQuery(emptyList())
     private var authorPlan = SearchQuery(emptyList())
     private var querySerial = 0
     private var expansionSerial = 0
@@ -280,6 +288,7 @@ class SearchActivity : AppCompatActivity(), PlaybackGuideHost {
         // 已经翻过的词直接用四种写法开搜；没翻过的先按原词搜着，译文回来再补进去。
         // 作者名只按输入的原词搜：作者的用户名就是他自己起的那一个，翻成别的语言反而搜偏。
         searchPlan = if (originalOnly) SearchQuery.literal(trimmed) else SearchQuery.local(trimmed)
+        availablePlan = searchPlan
         authorPlan = SearchQuery.literal(trimmed)
         val start = searchPlan.seeds
         queries = start
@@ -308,6 +317,7 @@ class SearchActivity : AppCompatActivity(), PlaybackGuideHost {
                 if (remaining != 0) return@expand
                 val updated = SearchQuery(groups.toList())
                 if (updated == searchPlan) return@expand
+                availablePlan = updated
                 searchPlan = updated
                 queries = updated.seeds
                 listOf(Tab.VIDEOS, Tab.TAGS).forEach { tab ->
@@ -324,22 +334,34 @@ class SearchActivity : AppCompatActivity(), PlaybackGuideHost {
     private fun showMatchOptions() {
         if (query.isBlank()) return
         val terms = SearchQuery.terms(query)
-        val entries = searchPlan.groups.flatMapIndexed { index, aliases -> aliases.drop(1).map { index to it } }
-        val checked = BooleanArray(entries.size) { true }
+        val optionPlan = availablePlan
+        val entries = optionPlan.groups.flatMapIndexed { index, aliases -> aliases.drop(1).map { index to it } }
+        val checked = BooleanArray(entries.size) { i ->
+            val (group, word) = entries[i]
+            word in searchPlan.groups[group]
+        }
         androidx.appcompat.app.AlertDialog.Builder(this).setTitle("匹配词：同组任一，不同关键词全部匹配")
             .setMultiChoiceItems(entries.map { (index, word) -> "${terms[index]} → $word" }.toTypedArray(), checked) { _, which, enabled -> checked[which] = enabled }
             .setNeutralButton(if (originalOnly) "启用多语言" else "仅使用原词") { _, _ -> originalOnly = !originalOnly; runSearch(query) }
             .setNegativeButton("取消", null).setPositiveButton("应用") { _, _ ->
                 expansionSerial++; translationTasks.forEach { it.cancel() }; translationTasks.clear()
                 val removed = entries.filterIndexed { index, _ -> !checked[index] }.toSet()
-                searchPlan = SearchQuery(searchPlan.groups.mapIndexed { index, aliases -> aliases.filterIndexed { aliasIndex, word -> aliasIndex == 0 || (index to word) !in removed } })
+                querySerial++; api.cancelPendingRequests()
+                authorTab.variants.forEach { it.loading = false }
+                searchPlan = SearchQuery(optionPlan.groups.mapIndexed { index, aliases -> aliases.filterIndexed { aliasIndex, word -> aliasIndex == 0 || (index to word) !in removed } })
                 queries = searchPlan.seeds
                 listOf(Tab.VIDEOS, Tab.TAGS).forEach { tab -> videoState(tab)?.let { state ->
                     // Keep successful cursor positions, but stop querying disabled aliases.
+                    state.variants.forEach {
+                        if (it.loading && it.page == 0) it.attempted = false
+                        it.loading = false
+                    }
                     state.variants.removeAll { it.query !in queries }
                     queries.filter { q -> state.variants.none { it.query == q } }.forEach { state.variants += Variant(it) }
-                    state.cursor = 0; revalidateCandidates(tab, state)
+                    state.failure = state.variants.firstNotNullOfOrNull { it.failure }
+                    state.cursor = 0; state.chain = 0; revalidateCandidates(tab, state)
                 } }
+                loadNextPage(currentTab)
                 updateStatus()
             }.show()
     }
@@ -472,8 +494,10 @@ class SearchActivity : AppCompatActivity(), PlaybackGuideHost {
         val variant = state.nextVariant() ?: return
         val tagQuery = SearchQuery.tagKey(variant.query)
         variant.loading = true
+        variant.attempted = true
+        variant.failure = null
         state.started = true
-        state.failure = null
+        state.failure = state.variants.firstNotNullOfOrNull { it.failure }
         val serial = querySerial
         val handler: (Result<List<VideoItem>>) -> Unit = { result ->
             if (!isStale(serial)) result.onSuccess { raw ->
@@ -512,7 +536,8 @@ class SearchActivity : AppCompatActivity(), PlaybackGuideHost {
                             updateStatus()
                             // 这一页全是别的写法搜过的重复结果：接着翻，别让列表停在原地。
                             state.chain = if (fresh.isEmpty()) state.chain + 1 else 0
-                            if (fresh.isEmpty() && !state.noMore && state.chain <= MAX_CHAINED_PAGES) loadVideoPage(tab)
+                            if (state.variants.any { !it.attempted } ||
+                                (fresh.isEmpty() && !state.noMore && state.chain <= MAX_CHAINED_PAGES)) loadVideoPage(tab)
                         }
                     }
                 }
@@ -521,8 +546,11 @@ class SearchActivity : AppCompatActivity(), PlaybackGuideHost {
                     if (isStale(serial)) return@runOnUiThread
                     variant.loading = false
                     // 状态栏里写原因，不是 errors.serverError 这种码。
-                    state.failure = IwaraApi.explainError(e)
+                    variant.failure = "${variant.query}：${IwaraApi.explainError(e)}"
+                    state.failure = state.variants.firstNotNullOfOrNull { it.failure }
                     updateStatus()
+                    // A failed spelling must not prevent the other selected languages being searched.
+                    if (state.variants.any { !it.attempted }) loadVideoPage(tab)
                 }
             }
         }
@@ -535,6 +563,7 @@ class SearchActivity : AppCompatActivity(), PlaybackGuideHost {
         val state = authorTab
         val variant = state.nextVariant() ?: return
         variant.loading = true
+        variant.attempted = true
         state.started = true
         state.failure = null
         val serial = querySerial

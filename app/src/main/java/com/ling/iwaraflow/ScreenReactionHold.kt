@@ -10,11 +10,12 @@ import android.os.Looper
 import android.os.SystemClock
 import android.view.View
 
-/** 2.5 seconds from touch down. The owner handles movement, UP and lifecycle cancellation. */
+/** Shown only after long-press confirmation; the full press still completes after 2.5 seconds. */
 internal class ScreenReactionHold(private val view: View, private val complete: () -> Unit) {
     private val handler = Handler(Looper.getMainLooper())
     private val density = view.resources.displayMetrics.density
     private var startedAt = 0L
+    private var animationDuration = HoldReaction.DURATION_MS
     var running = false
         private set
     private val ring = object : Drawable() {
@@ -44,13 +45,14 @@ internal class ScreenReactionHold(private val view: View, private val complete: 
         override fun run() {
             if (!running) return
             val elapsed = SystemClock.uptimeMillis() - startedAt
-            ring.progress = (elapsed / HoldReaction.DURATION_MS.toFloat()).coerceIn(0f, 1f); ring.invalidateSelf()
-            if (elapsed >= HoldReaction.DURATION_MS) { running = false; complete() }
-            else handler.postDelayed(this, minOf(16L, HoldReaction.DURATION_MS - elapsed))
+            ring.progress = (elapsed / animationDuration.toFloat()).coerceIn(0f, 1f); ring.invalidateSelf()
+            if (elapsed >= animationDuration) { running = false; complete() }
+            else handler.postDelayed(this, minOf(16L, animationDuration - elapsed))
         }
     }
-    fun start(x: Float, y: Float) {
+    fun start(x: Float, y: Float, alreadyHeldMs: Long = 0L) {
         cancel(); running = true; startedAt = SystemClock.uptimeMillis()
+        animationDuration = (HoldReaction.DURATION_MS - alreadyHeldMs.coerceAtLeast(0L)).coerceAtLeast(1L)
         val margin = 8*density
         val radius = minOf(52*density, (view.width-56*density)/4f, (view.height-64*density)/2f).coerceAtLeast(8*density)
         val width = 4*radius+40*density; val height = 2*radius+40*density

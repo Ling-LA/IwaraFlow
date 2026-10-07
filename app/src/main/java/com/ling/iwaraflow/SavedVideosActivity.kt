@@ -21,7 +21,10 @@ import androidx.viewpager2.widget.ViewPager2
  * 滑到底提示没有更多；已下载的视频直接放本地文件，其它照常在线播放。
  * 播放页和作者作品页是同一套：评论、简介、小窗、分享、下载都在。
  */
-class SavedVideosActivity : AppCompatActivity() {
+class SavedVideosActivity : AppCompatActivity(), PlaybackGuideHost {
+    override val playbackGuideAdapter: VideoAdapter get() = feedAdapter
+    override fun setPlaybackGuideFullscreen(enabled: Boolean) = setFullscreen(enabled)
+
     private lateinit var api: IwaraApi
     private lateinit var history: HistoryStore
     private lateinit var prefs: AppPrefs

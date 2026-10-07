@@ -24,7 +24,7 @@ class ProfileUiDeviceTest {
         if (view is TextView) add(view)
         if (view is ViewGroup) repeat(view.childCount) { addAll(texts(view.getChildAt(it))) }
     }
-    private fun screenshot(name: String) {
+    internal fun screenshot(name: String) {
         instrumentation.waitForIdleSync()
         android.os.SystemClock.sleep(300)
         val bitmap = instrumentation.uiAutomation.takeScreenshot()

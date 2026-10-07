@@ -20,7 +20,10 @@ import androidx.viewpager2.widget.ViewPager2
 import coil.load
 import coil.transform.CircleCropTransformation
 
-class AuthorActivity : AppCompatActivity() {
+class AuthorActivity : AppCompatActivity(), PlaybackGuideHost {
+    override val playbackGuideAdapter: VideoAdapter get() = feedAdapter
+    override fun setPlaybackGuideFullscreen(enabled: Boolean) = setFullscreen(enabled)
+
     private lateinit var api: IwaraApi
     private lateinit var history: HistoryStore
     private lateinit var prefs: AppPrefs

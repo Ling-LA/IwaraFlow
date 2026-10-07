@@ -63,6 +63,16 @@ class VideoAdapter(
     @Volatile private var released = false
     // Selecting/binding a card is independent from granting a visible page playback.
     @Volatile private var playbackEnabled = false
+    private var guideVisible = false
+
+    /** Keep the current frame during the guide, including sources that finish loading after it opens. */
+    fun setGuideVisible(visible: Boolean) {
+        if (guideVisible == visible) return
+        guideVisible = visible
+        if (visible) cancelIdlePreload()
+        holders.toList().forEach { it.setGuideVisible(visible) }
+        if (!visible) scheduleIdlePreload(activePosition)
+    }
 
     /**
      * 这批卡片属于哪一轮曝光会话，页面写进来（见 [HistoryStore.recordImpression]）。
@@ -230,7 +240,7 @@ class VideoAdapter(
      * 全屏：卡片上的信息栏和操作栏全部收起，画面铺满（横屏视频不再上移）。
      * 暂停时进度条那一套照常出现，见 [PauseSeekBar]。
      */
-    fun setFullscreen(enabled: Boolean) {
+    fun setFullscreen(enabled: Boolean, resumeOnExit: Boolean = true) {
         if (fullscreenMode == enabled) return
         fullscreenMode = enabled
         holders.toList().forEach {
@@ -242,7 +252,7 @@ class VideoAdapter(
         }
         // 退出全屏时接着播：退出按钮只有暂停时才露出来，用户是为了够到它才按的暂停。
         // 不接着播的话会停在“只有进度条、没有信息栏”的样子，像是卡住了。
-        if (!enabled) holders.toList().forEach { holder ->
+        if (!enabled && resumeOnExit) holders.toList().forEach { holder ->
             if (holder.bindingAdapterPosition == activePosition) holder.resumePlayback()
         }
     }
@@ -257,10 +267,10 @@ class VideoAdapter(
 
     private fun scheduleIdlePreload(position: Int) {
         preloadTask?.let { preloadHandler.removeCallbacks(it) }
-        if (!playbackEnabled || released || position !in items.indices) return
+        if (!playbackEnabled || guideVisible || released || position !in items.indices) return
         val task = object : Runnable {
             override fun run() {
-                if (!playbackEnabled || released || position != activePosition) return
+                if (!playbackEnabled || guideVisible || released || position != activePosition) return
                 val current = items.getOrNull(position) ?: return
                 val currentUrl = current.streamUrl
                 val allowed = linkedSetOf<String>()
@@ -373,6 +383,18 @@ class VideoAdapter(
         private var stableSince = 0L
         private var danmakuLoaded = false
         private var player: ExoPlayer? = null
+        private var resumeAfterGuide = false
+        fun setGuideVisible(visible: Boolean) {
+            if (visible) {
+                resumeAfterGuide = player?.playWhenReady ?: active
+                cancelSurfaceGesture()
+                player?.pause()
+            } else {
+                val resume = resumeAfterGuide
+                resumeAfterGuide = false
+                if (resume && playbackEnabled) resumePlayback()
+            }
+        }
         private var bound: VideoItem? = null
         /** 当前视频是横屏的吗。播放器解出画面尺寸后才知道，绑定时先当成不是。 */
         private var landscape = false
@@ -844,7 +866,7 @@ class VideoAdapter(
                             persistHistory(completed = true)
                             // 播完不再单记一笔固定分：离开这条时按连续兴趣值统一记（播完有加成），
                             // 免得出现“播完 +0.7 反而比看满 45 秒 +0.8 低”。
-                            if (prefs.autoNext) {
+                            if (prefs.autoNext && !guideVisible) {
                                 val position = bindingAdapterPosition
                                 if (position != RecyclerView.NO_POSITION) onEnded(position)
                             }
@@ -890,8 +912,9 @@ class VideoAdapter(
             if (oldPosition > 0L) p.seekTo(oldPosition)
             p.prepare()
             p.volume = if (active) 1f else 0f
-            p.playWhenReady = active && shouldPlay
-            if (active && shouldPlay) p.play()
+            if (guideVisible) resumeAfterGuide = shouldPlay
+            p.playWhenReady = active && shouldPlay && !guideVisible
+            if (active && shouldPlay && !guideVisible) p.play()
             scheduleIdlePreload(activePosition)
         }
 
@@ -901,7 +924,11 @@ class VideoAdapter(
                 if (active && player != null) return
                 active = true
                 if (player == null) bound?.let { start(it) }
-                else player?.apply { volume = 1f; playWhenReady = true; play() }
+                else player?.apply {
+                    volume = 1f
+                    if (guideVisible) { resumeAfterGuide = true; pause() }
+                    else { playWhenReady = true; play() }
+                }
                 bound?.let { item ->
                     val p = player
                     history.recordWatchAsync(item, p?.currentPosition ?: item.resumePositionMs, (p?.duration ?: 0L).coerceAtLeast(0L), false)

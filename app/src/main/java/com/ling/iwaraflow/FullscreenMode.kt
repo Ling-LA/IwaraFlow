@@ -17,7 +17,7 @@ object FullscreenMode {
      * 返回实际是否处于全屏，页面据此记状态。
      */
     fun apply(activity: Activity, adapter: VideoAdapter, chrome: List<View?>, enabled: Boolean): Boolean {
-        adapter.setFullscreen(enabled)
+        adapter.setFullscreen(enabled, resumeOnExit = !PlaybackGuide.isActive(activity))
         chrome.forEach { it?.visibility = if (enabled) View.GONE else View.VISIBLE }
         val landscapeVideo = (adapter.activeVideoAspect() ?: 0f) > 1f
         activity.requestedOrientation = if (enabled && landscapeVideo) {
@@ -25,8 +25,9 @@ object FullscreenMode {
         } else {
             ActivityInfo.SCREEN_ORIENTATION_PORTRAIT
         }
+        if (PlaybackGuide.isActive(activity)) return enabled
         if (enabled && landscapeVideo) activity.window.decorView.post {
-            if (adapter.isFullscreen && !activity.isFinishing && !activity.isDestroyed) PlaybackGuide.showOnce(activity, landscapeVideo)
+            if (adapter.isFullscreen && !PlaybackGuide.isActive(activity) && !activity.isFinishing && !activity.isDestroyed) PlaybackGuide.showOnce(activity, landscapeVideo)
         } else PlaybackGuide.dismiss(activity)
         return enabled
     }

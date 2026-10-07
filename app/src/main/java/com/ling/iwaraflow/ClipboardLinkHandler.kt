@@ -33,7 +33,7 @@ class ClipboardLinkHandler : Application.ActivityLifecycleCallbacks {
     }
 
     internal fun check(activity: Activity, attempt: Int = 0) {
-        if (activity.isFinishing || activity.isDestroyed) return
+        if (activity.isFinishing || activity.isDestroyed || PlaybackGuide.isActive(activity)) return
         val prefs = AppPrefs(activity)
         if (!prefs.autoOpenClipboardLinks) return
         val clipboard = activity.getSystemService(Context.CLIPBOARD_SERVICE) as? ClipboardManager ?: return

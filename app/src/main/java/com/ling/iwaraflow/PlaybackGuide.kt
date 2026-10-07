@@ -19,25 +19,68 @@ import android.widget.TextView
 object PlaybackGuide {
     private const val TAG = "playback_gesture_guide"
     internal fun key(horizontal: Boolean) = if (horizontal) "fullscreen_guide_v1_landscape" else "playback_guide_v2_portrait"
+    fun isActive(activity: Activity) = sessions.containsKey(activity)
+    private val sessions = java.util.IdentityHashMap<Activity, Session>()
+
     fun showOnce(activity: Activity, horizontal: Boolean, onDismiss: () -> Unit = {}) {
+        if (isActive(activity)) return
         val prefs = activity.getSharedPreferences(AppPrefs.FILE, 0)
         if (prefs.getBoolean(key(horizontal), false)) { onDismiss(); return }
         if (activity.isFinishing || activity.isDestroyed) return
         prefs.edit().putBoolean(key(horizontal), true).apply()
         show(activity, horizontal, onDismiss)
     }
-    fun dismiss(activity: Activity) {
-        val root = activity.window.decorView as? ViewGroup ?: return
-        root.findViewWithTag<View>(TAG)?.let { root.removeView(it) }
-    }
+    fun dismiss(activity: Activity) { sessions[activity]?.finish(false) }
     fun show(activity: Activity, horizontal: Boolean = activity.resources.configuration.orientation == android.content.res.Configuration.ORIENTATION_LANDSCAPE, onDismiss: () -> Unit = {}) {
         if (activity.isFinishing || activity.isDestroyed) return
         dismiss(activity)
-        val root = activity.window.decorView as? ViewGroup ?: return
-        root.addView(GuideView(activity, horizontal) { dismiss(activity); onDismiss() }.apply { tag = TAG }, ViewGroup.LayoutParams(-1, -1))
+        val session = Session(activity, onDismiss)
+        sessions[activity] = session
+        session.start(horizontal)
     }
 
-    internal class GuideView(private val activity: Activity, private var horizontal: Boolean, close: () -> Unit) : FrameLayout(activity) {
+    private class Session(val activity: Activity, val onDismiss: () -> Unit) {
+        private val originalOrientation = activity.requestedOrientation
+        private val host = activity as? PlaybackGuideHost
+        private val originalFullscreen = host?.playbackGuideAdapter?.isFullscreen ?: false
+        private val root = activity.window.decorView as ViewGroup
+        private lateinit var view: GuideView
+        private var finished = false
+        private val back = object : androidx.activity.OnBackPressedCallback(true) {
+            override fun handleOnBackPressed() = finish(true)
+        }
+        fun start(horizontal: Boolean) {
+            view = GuideView(activity, horizontal, { setMode(it) }) { finish(true) }.apply { tag = TAG }
+            root.addView(view, ViewGroup.LayoutParams(-1, -1))
+            (activity as? androidx.activity.ComponentActivity)?.onBackPressedDispatcher?.addCallback(back)
+            host?.playbackGuideAdapter?.setGuideVisible(true)
+            setMode(horizontal)
+        }
+        private fun setMode(horizontal: Boolean) {
+            if (finished) return
+            host?.setPlaybackGuideFullscreen(horizontal)
+            activity.requestedOrientation = if (horizontal) android.content.pm.ActivityInfo.SCREEN_ORIENTATION_SENSOR_LANDSCAPE
+                else android.content.pm.ActivityInfo.SCREEN_ORIENTATION_PORTRAIT
+            view.requestLayout()
+        }
+        fun finish(notify: Boolean) {
+            if (finished) return
+            finished = true
+            back.remove()
+            root.removeView(view)
+            // Keep the session registered during restoration to suppress automatic guides and autoplay.
+            if (!activity.isDestroyed && !activity.isFinishing) {
+                host?.setPlaybackGuideFullscreen(originalFullscreen)
+                activity.requestedOrientation = originalOrientation
+                host?.playbackGuideAdapter?.setGuideVisible(false)
+            }
+            sessions.remove(activity)
+            if (notify) onDismiss()
+        }
+    }
+
+    internal class GuideView(private val activity: Activity, private var horizontal: Boolean,
+        switchOrientation: (Boolean) -> Unit, close: () -> Unit) : FrameLayout(activity) {
         private val density = resources.displayMetrics.density
         private fun dp(value: Int) = (value*density).toInt()
         private val pen = Paint(Paint.ANTI_ALIAS_FLAG).apply {
@@ -101,7 +144,7 @@ object PlaybackGuide {
             }
             collect(decor)
             val item = items.maxByOrNull { v -> Rect().let { if (v.getGlobalVisibleRect(it)) it.width().toLong()*it.height() else 0L } }
-            val nav = listOf(R.id.topBar, R.id.feedBack, R.id.searchFeedBack).mapNotNull { bounds(decor.findViewById(it)) }.maxByOrNull { it.bottom }
+            val nav = listOf(R.id.topBar, R.id.feedBack, R.id.searchFeedBack, R.id.savedFeedBack).mapNotNull { bounds(decor.findViewById(it)) }.maxByOrNull { it.bottom }
             val controls = listOf(R.id.pauseControls, R.id.pauseTopRow, R.id.pauseSeekBar).mapNotNull { bounds(item?.findViewById(it)) }
             return Chrome(bounds(item), nav, bounds(item?.findViewById(R.id.actionPanel)), bounds(item?.findViewById(R.id.infoPanel)),
                 controls, item?.getTag(R.id.chrome_mode) != PauseSeekBar.MODE_FULLSCREEN)
@@ -121,7 +164,7 @@ object PlaybackGuide {
                 setOnClickListener { close() }
             }, LinearLayout.LayoutParams(dp(100), dp(44)))
             footer.addView(actions); addView(footer)
-            switch.setOnClickListener { horizontal = !horizontal; updateLabels(); requestLayout(); invalidate() }
+            switch.setOnClickListener { switchOrientation(!horizontal) }
             updateLabels()
         }
         private fun updateLabels() {
@@ -134,6 +177,9 @@ object PlaybackGuide {
         override fun onMeasure(widthMeasureSpec: Int, heightMeasureSpec: Int) {
             val w = MeasureSpec.getSize(widthMeasureSpec); val h = MeasureSpec.getSize(heightMeasureSpec)
             setMeasuredDimension(w, h)
+            // Orientation requests are asynchronous (and may be ignored in multi-window).
+            // Always render the gesture map for the actual window, never a landscape map in portrait.
+            if (horizontal != (w > h)) { horizontal = w > h; updateLabels() }
             val insets = androidx.core.view.ViewCompat.getRootWindowInsets(this)?.getInsets(
                 androidx.core.view.WindowInsetsCompat.Type.systemBars() or androidx.core.view.WindowInsetsCompat.Type.displayCutout())
             topInset = insets?.top ?: 0; bottomInset = insets?.bottom ?: 0

@@ -264,6 +264,128 @@ class NavigationDeviceTest {
         }
     }
 
+    @Test fun settingsGuideReturnsToSamePlayerAndRotatesTheActualWindow() {
+        val app = instrumentation.targetContext.applicationContext as Application
+        val prefs = app.getSharedPreferences(AppPrefs.FILE, 0)
+        prefs.edit().putBoolean(PlaybackGuide.key(false), true).remove(PlaybackGuide.key(true))
+            .putBoolean(OverlayPermissionPrompt.KEY_SHOWN, true).commit()
+        val callbacks = object : Application.ActivityLifecycleCallbacks {
+            override fun onActivityResumed(activity: Activity) { resumed = activity }
+            override fun onActivityPaused(activity: Activity) { if (resumed === activity) resumed = null }
+            override fun onActivityCreated(a: Activity, b: Bundle?) {}
+            override fun onActivityStarted(a: Activity) {}
+            override fun onActivityStopped(a: Activity) {}
+            override fun onActivitySaveInstanceState(a: Activity, b: Bundle) {}
+            override fun onActivityDestroyed(a: Activity) {}
+        }
+        fun descendants(view: View): List<View> = buildList {
+            add(view)
+            if (view is android.view.ViewGroup) repeat(view.childCount) { addAll(descendants(view.getChildAt(it))) }
+        }
+        fun text(activity: Activity, value: String) = descendants(activity.window.decorView)
+            .filterIsInstance<android.widget.TextView>().first { it.text.toString() == value }
+        fun awaitLayout(activity: Activity, horizontal: Boolean) {
+            val deadline = SystemClock.uptimeMillis() + 8_000
+            while (SystemClock.uptimeMillis() < deadline) {
+                var ready = false
+                main {
+                    val root = activity.window.decorView
+                    val guide = root.findViewWithTag<View>("playback_gesture_guide")
+                    ready = guide != null && (root.width > root.height) == horizontal &&
+                        activity.resources.configuration.orientation == if (horizontal)
+                            android.content.res.Configuration.ORIENTATION_LANDSCAPE else android.content.res.Configuration.ORIENTATION_PORTRAIT
+                }
+                if (ready) { instrumentation.waitForIdleSync(); return }
+                SystemClock.sleep(50)
+            }
+            throw AssertionError("Guide did not rotate its actual window; horizontal=$horizontal")
+        }
+        app.registerActivityLifecycleCallbacks(callbacks)
+        val home = instrumentation.startActivitySync(Intent(app, MainActivityV3::class.java).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)) as MainActivityV3
+        var author: AuthorActivity? = null
+        var settings: Activity? = null
+        try {
+            awaitActivity(MainActivityV3::class.java)
+            val mediaFile = fixtureVideo()
+            lateinit var homeVideo: VideoItem
+            main {
+                set(home, "requestSerial", (field(home, "requestSerial") as Int) + 1)
+                set(home, "mode", "date"); set(home, "pagingEnabled", false)
+                homeVideo = VideoItem("guide-home", "示例播放画面", "示例作者", listOf("animation"), 60,
+                    sources = listOf(VideoSource("fixture", android.net.Uri.fromFile(mediaFile).toString(), 1)))
+                home.playbackGuideAdapter.replace(listOf(homeVideo)); home.playbackGuideAdapter.setActive(0)
+            }
+            for (fromAuthor in listOf(false, true)) {
+                val playerActivity: Activity
+                val pagerId: Int
+                if (fromAuthor) {
+                    main { home.startActivity(Intent(home, AuthorActivity::class.java).putExtra(AuthorActivity.EXTRA_ID, "fixture")) }
+                    author = awaitActivity(AuthorActivity::class.java) as AuthorActivity
+                    main { (field(author!!, "api") as IwaraApi).close(); set(author!!, "noMore", true) }
+                    playAuthorFixture(author!!, mediaFile)
+                    main {
+                        val item = author!!.playbackGuideAdapter.activeItem()!!
+                        item.sources = listOf(VideoSource("fixture", android.net.Uri.fromFile(mediaFile).toString(), 1))
+                        item.streamUrl = item.sources!!.first().url
+                    }
+                    playerActivity = author!!; pagerId = R.id.authorPager
+                } else { playerActivity = home; pagerId = R.id.pager }
+                playFixture(playerActivity, pagerId, mediaFile)
+                val adapter = (playerActivity as PlaybackGuideHost).playbackGuideAdapter
+                val current = adapter.activeItem()
+                main { playerActivity.startActivity(Intent(playerActivity, SettingsActivity::class.java)) }
+                settings = awaitActivity(SettingsActivity::class.java)
+                val originalSettings = settings!!
+                lateinit var checkbox: android.widget.CheckBox
+                lateinit var scroll: android.widget.ScrollView
+                main {
+                    checkbox = descendants(originalSettings.window.decorView).filterIsInstance<android.widget.CheckBox>().first()
+                    checkbox.isChecked = !checkbox.isChecked // Unsaved form must survive the preview.
+                    scroll = descendants(originalSettings.window.decorView).filterIsInstance<android.widget.ScrollView>().first()
+                    scroll.fullScroll(View.FOCUS_DOWN)
+                }
+                instrumentation.waitForIdleSync()
+                val checked = checkbox.isChecked; val scrollY = scroll.scrollY
+                main { (text(originalSettings, "操作引导").parent as View).performClick() }
+                assertSame(playerActivity, awaitActivity(playerActivity.javaClass))
+                awaitLayout(playerActivity, false)
+                main {
+                    assertSame(current, adapter.activeItem())
+                    assertTrue(playerActivity.findViewById<View>(R.id.playerView).isShown)
+                    assertFalse(adapter.isActivePlaying())
+                    assertNull(originalSettings.window.decorView.findViewWithTag<View>("playback_gesture_guide"))
+                    text(playerActivity, "查看横屏操作").performClick()
+                }
+                awaitLayout(playerActivity, true)
+                main { assertTrue(adapter.isFullscreen) }
+                ProfileUiDeviceTest().screenshot(if (fromAuthor) "settings-guide-author-landscape" else "settings-guide-home-landscape")
+                main { text(playerActivity, "查看竖屏操作").performClick() }
+                awaitLayout(playerActivity, false)
+                ProfileUiDeviceTest().screenshot(if (fromAuthor) "settings-guide-author-portrait" else "settings-guide-home-portrait")
+                main { text(playerActivity, "查看横屏操作").performClick() }
+                awaitLayout(playerActivity, true)
+                if (InstrumentationRegistry.getArguments().getString("backMode") == "key")
+                    instrumentation.sendKeyDownUpSync(KeyEvent.KEYCODE_BACK)
+                else main { text(playerActivity, "知道了").performClick() }
+                assertSame(originalSettings, awaitActivity(SettingsActivity::class.java))
+                main {
+                    assertEquals(checked, checkbox.isChecked); assertEquals(scrollY, scroll.scrollY)
+                    assertFalse(adapter.isFullscreen); assertSame(current, adapter.activeItem())
+                    assertTrue("Playback position was reset", current!!.resumePositionMs >= 1500)
+                    assertFalse(PlaybackGuide.isActive(playerActivity))
+                    assertFalse(prefs.getBoolean(PlaybackGuide.key(true), false))
+                    originalSettings.finish()
+                }
+                settings = null
+                assertSame(playerActivity, awaitActivity(playerActivity.javaClass))
+                main { assertSame(current, adapter.activeItem()); assertEquals(android.content.res.Configuration.ORIENTATION_PORTRAIT, playerActivity.resources.configuration.orientation) }
+            }
+        } finally {
+            main { settings?.finish(); author?.let { PlaybackGuide.dismiss(it); it.finish() }; PlaybackGuide.dismiss(home); home.finish() }
+            app.unregisterActivityLifecycleCallbacks(callbacks)
+        }
+    }
+
     private fun fixtureVideo(): File {
         return File(instrumentation.targetContext.cacheDir, "navigation-fixture.mp4").apply {
             instrumentation.context.assets.open("navigation-fixture.mp4").use { input ->

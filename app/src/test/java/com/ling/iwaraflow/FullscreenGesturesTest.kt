@@ -29,6 +29,28 @@ class FullscreenGesturesTest {
     }
     private fun set(owner: Any, key: String, value: Any) = owner.javaClass.getDeclaredField(key).apply { isAccessible = true }.set(owner, value)
 
+    @Test fun guideRestoresPlayingVideoAfterTemporaryRotation() {
+        fixture { adapter, _, _, player ->
+            `when`(player.playWhenReady).thenReturn(true)
+            set(adapter, "playbackEnabled", true)
+            adapter.setGuideVisible(true)
+            verify(player).pause()
+            adapter.setFullscreen(false, resumeOnExit = false)
+            verify(player, never()).play()
+            adapter.setGuideVisible(false)
+            verify(player).play()
+        }
+    }
+    @Test fun guideDoesNotResumeUserPausedVideo() {
+        fixture { adapter, _, _, player ->
+            `when`(player.playWhenReady).thenReturn(false)
+            set(adapter, "playbackEnabled", true)
+            adapter.setGuideVisible(true)
+            adapter.setFullscreen(false, resumeOnExit = false)
+            adapter.setGuideVisible(false)
+            verify(player, never()).play()
+        }
+    }
     @Test fun horizontalAndVerticalVideosUseTheirOwnThreeZones() {
         val expected = FullscreenGesture.Action.entries
         assertEquals(expected, listOf(100f, 450f, 800f).map { FullscreenGesture.action(it, 200f, 900, 450, true) })

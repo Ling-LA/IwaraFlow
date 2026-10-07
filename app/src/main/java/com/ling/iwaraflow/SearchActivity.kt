@@ -25,7 +25,10 @@ import androidx.viewpager2.widget.ViewPager2
  * 搜索结果页。搜索不再直接把首页视频流换成搜索结果（那样只能看到一个视频），
  * 而是用和作者主页一样的浅蓝卡片列表分别展示视频名、标签和作者名的结果。
  */
-class SearchActivity : AppCompatActivity() {
+class SearchActivity : AppCompatActivity(), PlaybackGuideHost {
+    override val playbackGuideAdapter: VideoAdapter get() = feedAdapter
+    override fun setPlaybackGuideFullscreen(enabled: Boolean) = setFullscreen(enabled)
+
     private enum class Tab { VIDEOS, TAGS, AUTHORS }
 
     /**

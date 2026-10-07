@@ -33,7 +33,10 @@ import androidx.core.content.ContextCompat
 import androidx.lifecycle.Lifecycle
 import androidx.viewpager2.widget.ViewPager2
 
-class MainActivityV3 : AppCompatActivity() {
+class MainActivityV3 : AppCompatActivity(), PlaybackGuideHost {
+    override val playbackGuideAdapter: VideoAdapter get() = adapter
+    override fun setPlaybackGuideFullscreen(enabled: Boolean) = setFullscreen(enabled)
+
     private lateinit var api: IwaraApi
     private lateinit var history: HistoryStore
     private lateinit var prefs: AppPrefs

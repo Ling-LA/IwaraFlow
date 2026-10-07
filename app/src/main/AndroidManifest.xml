@@ -91,7 +91,8 @@
             android:exported="false" />
         <activity android:name=".UploadTasksActivity" android:exported="false" />
         <activity android:name=".DataManagementActivity" android:exported="false" />
-        <activity android:name=".SettingsActivity" android:exported="false" />
+        <activity android:name=".SettingsActivity" android:screenOrientation="portrait"
+            android:configChanges="screenSize|smallestScreenSize|screenLayout|orientation" android:exported="false" />
         <activity android:name=".InterestActivity" android:exported="false" />
         <activity android:name=".MyActivity" android:exported="false" />
         <activity android:name=".UploadActivity" android:exported="false" />

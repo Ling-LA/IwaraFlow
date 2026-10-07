@@ -8,7 +8,6 @@ import android.os.SystemClock
 import android.os.ParcelFileDescriptor
 import android.view.KeyEvent
 import android.view.View
-import androidx.media3.common.MediaItem
 import androidx.media3.common.Player
 import androidx.media3.exoplayer.ExoPlayer
 import androidx.recyclerview.widget.RecyclerView
@@ -75,7 +74,7 @@ class NavigationDeviceTest {
     private fun playAuthorFixture(author: AuthorActivity, mediaFile: File) {
         main {
             val video = VideoItem("author-navigation", "Author fixture", "Fixture author", emptyList(), 0,
-                sources = listOf(VideoSource("fixture", "https://127.0.0.1:1/fixture", 1)))
+                sources = listOf(VideoSource("fixture", android.net.Uri.fromFile(mediaFile).toString(), 1)))
             // 作者页现在只留一份作品列表，"能播的" 是从它里面筛出来的（playbackIssue 为空），
             // 所以夹具直接进 works 就行。
             @Suppress("UNCHECKED_CAST")
@@ -83,7 +82,7 @@ class NavigationDeviceTest {
             invoke(author, "openWork", video)
         }
         instrumentation.waitForIdleSync()
-        playFixture(author, R.id.authorPager, mediaFile)
+        playFixture(author, R.id.authorPager)
     }
 
     /** ViewPager2 binds the first card on a later frame, so idle alone does not guarantee a holder. */
@@ -102,42 +101,33 @@ class NavigationDeviceTest {
         throw AssertionError("Fixture card never bound a player")
     }
 
-    private fun playFixture(activity: Activity, pagerId: Int, mediaFile: File) {
-        // The card's player is owned by the app: a rebind releases it and the stall watchdog
-        // rebuilds it, and either leaves the instance this test grabbed sitting in IDLE forever.
-        // So re-take the card's current player and re-arm whenever that happens.
-        var player = awaitFixturePlayer(activity, pagerId)
-        var armedAt = 0L
-        fun arm() {
-            main {
-                player.setMediaItem(MediaItem.fromUri(android.net.Uri.fromFile(mediaFile)))
-                player.prepare()
-                player.seekTo(1_500)
-                player.play()
-            }
-            armedAt = SystemClock.uptimeMillis()
-        }
-        arm()
-        // The emulator decodes h264 in software. Playback is real once the timeline actually
-        // advances past the seek; waiting for the decoder to also report a frame size on top of
-        // that is what times out on a loaded runner, and it proves nothing extra about playback.
+    private fun playFixture(activity: Activity, pagerId: Int) {
+        // Use the app's actual local source and its current bound player. A ViewPager rebind can
+        // replace that player between frames; looking it up and seeking in the same main-thread
+        // turn avoids sending commands to an instance that has already been released.
+        var armedPlayer: ExoPlayer? = null
         val deadline = SystemClock.uptimeMillis() + 45_000
-        var lastState = ""
+        var lastState = "No bound player"
         while (SystemClock.uptimeMillis() < deadline) {
             var ready = false
-            var idle = false
             main {
-                ready = (player.isPlaying || player.playbackState == Player.STATE_READY) &&
-                    (player.videoSize.width > 0 || player.currentPosition > 1_700)
-                idle = player.playbackState == Player.STATE_IDLE
-                lastState = "playing=${player.isPlaying} state=${player.playbackState} " +
-                    "position=${player.currentPosition} size=${player.videoSize.width}"
+                val recycler = activity.findViewById<ViewPager2>(pagerId).getChildAt(0) as RecyclerView
+                val holder = recycler.findViewHolderForAdapterPosition(0)
+                val player = holder?.let { field(it, "player") as? ExoPlayer }
+                if (player != null) {
+                    if (player !== armedPlayer) {
+                        player.seekTo(1_500)
+                        player.play()
+                        armedPlayer = player
+                    }
+                    ready = (player.isPlaying || player.playbackState == Player.STATE_READY) &&
+                        (player.videoSize.width > 0 || player.currentPosition > 1_700)
+                    lastState = "playing=${player.isPlaying} state=${player.playbackState} " +
+                        "position=${player.currentPosition} size=${player.videoSize.width} " +
+                        "error=${player.playerError?.errorCodeName}"
+                } else lastState = "No bound player"
             }
             if (ready) return
-            if (idle && SystemClock.uptimeMillis() - armedAt > 2_000) {
-                player = awaitFixturePlayer(activity, pagerId)
-                arm()
-            }
             SystemClock.sleep(30)
         }
         throw AssertionError("Fixture video did not reach actual video playback: $lastState")
@@ -193,14 +183,14 @@ class NavigationDeviceTest {
                     set(home, "mode", mode)
                     set(home, "pagingEnabled", false)
                     item = VideoItem("navigation-$mode", "Navigation fixture", "Fixture author", emptyList(), 0,
-                        authorId = "fixture-author", sources = listOf(VideoSource("fixture", "https://127.0.0.1:1/fixture", 1)))
+                        authorId = "fixture-author", sources = listOf(VideoSource("fixture", android.net.Uri.fromFile(mediaFile).toString(), 1)))
                     val adapter = field(home, "adapter") as VideoAdapter
                     adapter.replace(listOf(item))
                     adapter.setActive(0)
                 }
                 instrumentation.waitForIdleSync()
                 for (kind in listOf(SavedVideosActivity.KIND_HISTORY, SavedVideosActivity.KIND_FAVORITES)) {
-                    playFixture(home, R.id.pager, mediaFile)
+                    playFixture(home, R.id.pager)
                     main { invoke(home, "openSavedVideos", kind) }
                     val saved = awaitActivity(SavedVideosActivity::class.java)
                     assertFalse(home.isFinishing)
@@ -213,7 +203,7 @@ class NavigationDeviceTest {
                     assertFalse(home.isFinishing)
                 }
 
-                playFixture(home, R.id.pager, mediaFile)
+                playFixture(home, R.id.pager)
                 main { invoke(home, "openAuthor", "fixture-author", "Fixture author", "") }
                 var author = awaitActivity(AuthorActivity::class.java) as AuthorActivity
                 playAuthorFixture(author, mediaFile)
@@ -223,7 +213,7 @@ class NavigationDeviceTest {
                 back(author, R.id.authorBack)
                 assertSame(home, awaitActivity(MainActivityV3::class.java))
 
-                playFixture(home, R.id.pager, mediaFile)
+                playFixture(home, R.id.pager)
                 main {
                     // A synthetic local session satisfies the UI guard; no real credentials are used.
                     SecureSessionStore(app).refreshToken = "navigation-test-only"
@@ -244,7 +234,7 @@ class NavigationDeviceTest {
                 if (item.resumePositionMs < 1_500) positionFailures += "$mode/following: ${item.resumePositionMs} ms"
             }
             // 搜索结果页和其它子页面走同一条返回路径，并且同样要拿走首页的播放权。
-            playFixture(home, R.id.pager, mediaFile)
+            playFixture(home, R.id.pager)
             main { invoke(home, "openSearchPage", "") }
             val search = awaitActivity(SearchActivity::class.java)
             main { assertFalse((field(home, "adapter") as VideoAdapter).isActivePlaying()) }
@@ -316,7 +306,7 @@ class NavigationDeviceTest {
                 home.playbackGuideAdapter.replace(listOf(homeVideo)); home.playbackGuideAdapter.setActive(0)
             }
             // The disabled tap-to-pause option toggles chrome without resuming a paused video.
-            playFixture(home, R.id.pager, mediaFile)
+            playFixture(home, R.id.pager)
             val fixturePlayer = awaitFixturePlayer(home, R.id.pager)
             main {
                 AppPrefs(app).tapToPause = false
@@ -350,14 +340,9 @@ class NavigationDeviceTest {
                     author = awaitActivity(AuthorActivity::class.java) as AuthorActivity
                     main { (field(author!!, "api") as IwaraApi).close(); set(author!!, "noMore", true) }
                     playAuthorFixture(author!!, mediaFile)
-                    main {
-                        val item = author!!.playbackGuideAdapter.activeItem()!!
-                        item.sources = listOf(VideoSource("fixture", android.net.Uri.fromFile(mediaFile).toString(), 1))
-                        item.streamUrl = item.sources!!.first().url
-                    }
                     playerActivity = author!!; pagerId = R.id.authorPager
                 } else { playerActivity = home; pagerId = R.id.pager }
-                playFixture(playerActivity, pagerId, mediaFile)
+                playFixture(playerActivity, pagerId)
                 val adapter = (playerActivity as PlaybackGuideHost).playbackGuideAdapter
                 val current = adapter.activeItem()
                 main { playerActivity.startActivity(Intent(playerActivity, SettingsActivity::class.java)) }

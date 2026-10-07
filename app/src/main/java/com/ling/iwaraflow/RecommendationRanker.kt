@@ -97,13 +97,16 @@ class RecommendationRanker(private val random: Random = Random()) {
      */
     fun rerank(items: List<VideoItem>, taste: PreferenceProfile, now: Long): List<VideoItem> =
         balanceManualInterests(
-            diversify(spreadAuthors(hardMuteFilter(items, taste).sortedByDescending { scoreOf(it, taste, now) })), taste)
+            diversify(spreadAuthors(weightedOrder(hardMuteFilter(items, taste), taste, now))), taste)
 
     /** Exponential race: every eligible candidate has a strictly positive probability.
      * Tempering and a bounded score prevent a saturated interest from monopolizing the feed. */
     internal fun weightedOrder(items: List<VideoItem>, taste: PreferenceProfile, now: Long): List<VideoItem> =
+        weightedOrderBy(items) { scoreOf(it, taste, now) }
+
+    private fun weightedOrderBy(items: List<VideoItem>, score: (VideoItem) -> Double): List<VideoItem> =
         items.map { item ->
-            val weight = kotlin.math.exp((scoreOf(item, taste, now) / 3.0).coerceIn(-3.0, 3.0))
+            val weight = kotlin.math.exp((score(item) / 3.0).coerceIn(-3.0, 3.0))
             item to (kotlin.math.ln(random.nextDouble().coerceAtLeast(1e-12)) / weight)
         }.sortedByDescending { it.second }.map { it.first }
 
@@ -236,9 +239,8 @@ class RecommendationRanker(private val random: Random = Random()) {
      * 排完同样做一次多样性重排，免得穿插位连着几条都是同一类内容。
      */
     fun rankClassics(items: List<VideoItem>): List<VideoItem> {
-        if (items.size <= 1) return items
         val taste = profile
-        return diversify(hardMuteFilter(items, taste).sortedByDescending { item ->
+        return diversify(weightedOrderBy(hardMuteFilter(items, taste)) { item ->
             qualityScore(item.likes, item.views) + taste.rankingScore(item) * CLASSIC_TASTE_WEIGHT
         })
     }

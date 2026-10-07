@@ -86,8 +86,18 @@ class RecommendationQualityTest {
             VideoItem("good", "t", "Good", listOf("x"), 50, views = 1000, createdAt = now)
         )
         val taste = PreferenceProfile(mapOf("good" to 6.0, "bad" to -6.0), emptyMap())
-        val out = engine().rerankBlocking(items, taste, now)
-        assertEquals(listOf("good", "meh", "bad"), out.map { it.id })
+        val e = engine()
+        val firstCounts = mutableMapOf<String, Int>()
+        try {
+            repeat(1000) {
+                val out = e.rerankBlocking(items, taste, now)
+                assertEquals(items.map { it.id }.toSet(), out.map { it.id }.toSet())
+                firstCounts.merge(out.first().id, 1, Int::plus)
+            }
+            assertTrue(firstCounts.getValue("good") > firstCounts.getValue("meh"))
+            assertTrue(firstCounts.getValue("meh") > firstCounts.getValue("bad"))
+            assertTrue(firstCounts.getValue("bad") > 0)
+        } finally { e.close() }
     }
 
     @Test fun roundZeroAsksForTheMonthlyTopCharts() {

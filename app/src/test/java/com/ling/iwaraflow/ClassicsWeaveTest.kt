@@ -100,7 +100,11 @@ class ClassicsWeaveTest {
             assertEquals("第 $index 组只能有一条老片：${group.map { it.id }}", 1, group.count(::isClassic))
         }
         assertEquals("近期视频一条不少、顺序不变", (0 until 48).map { "new-$it" }, out.filter { !isClassic(it) }.map { it.id })
-        assertEquals("专门抓的老片排在候选里分流出来的老片前面", listOf("old-0", "old-1", "old-2", "old-aged-0"), out.filter(::isClassic).take(4).map { it.id })
+        val eligibleClassicIds = (ranked.filter(::isClassic) + classics(3)).map { it.id }.toSet()
+        val shownClassicIds = out.filter(::isClassic).map { it.id }
+        assertEquals(4, shownClassicIds.size)
+        assertEquals(shownClassicIds.size, shownClassicIds.toSet().size)
+        assertTrue("老片仍来自候选池，按权重抽取而非按来源固定排队", shownClassicIds.all { it in eligibleClassicIds })
     }
 
     @Test fun withClassicsOffOldCandidatesAreDropped() {

@@ -71,7 +71,17 @@ class ManualInterestBalanceTest {
         repeat(5) {
             val result = ranker.rerank(input, taste, System.currentTimeMillis())
             assertEquals(input.map { it.id }.toSet(), result.map { it.id }.toSet())
-            result.chunked(4).forEach { block -> assertTrue(block.any { !taste.matchesManualInterest(it) }) }
+            var remainingOther = result.count { !taste.matchesManualInterest(it) }
+            var consecutive = 0
+            result.forEach { video ->
+                if (taste.matchesManualInterest(video)) {
+                    consecutive++
+                    if (remainingOther > 0) assertTrue("Available alternatives must break long interest runs", consecutive <= 3)
+                } else {
+                    consecutive = 0
+                    remainingOther--
+                }
+            }
         }
     }
 

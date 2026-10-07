@@ -103,6 +103,22 @@ class PlayerUpgradeTest {
         }
         HistoryStore(context).use { assertEquals(0.0, it.systemTagMultipliers().getValue("dance"), 0.0) }
     }
+    @Test fun liveAndClassicRankingKeepNegativeTopicsPossibleAndStillHonorMutes() {
+        val good = VideoItem("good", "", "a", listOf("music"), 0)
+        val less = good.copy(id = "less", tags = listOf("sports"))
+        val ranker = RecommendationRanker(Random(2026))
+        val profile = PreferenceProfile(emptyMap(), mapOf("music" to 8.0, "sports" to -6.0))
+        ranker.profile = profile
+        var lessLive = 0; var lessClassic = 0
+        repeat(2000) {
+            if (ranker.rerank(listOf(good, less), profile, 0L).first().id == less.id) lessLive++
+            if (ranker.rankClassics(listOf(good, less)).first().id == less.id) lessClassic++
+        }
+        assertTrue(lessLive in 1..999); assertTrue(lessClassic in 1..999)
+        ranker.profile = profile.copy(mutedTags = setOf("sports"))
+        assertTrue(ranker.rankClassics(listOf(less)).isEmpty())
+        assertTrue(ranker.rerank(listOf(less), ranker.profile, 0L).isEmpty())
+    }
     @Test fun defaultSettingsAndPublicationHostAreSafe() {
         val prefs = AppPrefs(RuntimeEnvironment.getApplication())
         assertTrue(prefs.preloadNext); assertTrue(prefs.danmakuEnabled)

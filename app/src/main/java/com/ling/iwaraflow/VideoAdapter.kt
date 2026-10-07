@@ -140,7 +140,13 @@ class VideoAdapter(
 
     fun resumeActive() {
         if (released) return
+        val restored = FloatingVideoService.restorePosition(activeItem()?.id)
+        if (restored != null) {
+            activeItem()?.resumePositionMs = restored
+            holders.toList().forEach { if (it.bindingAdapterPosition == activePosition) it.restorePosition(restored) }
+        }
         playbackEnabled = true
+        applyDisplayPrefs()
         claimPlaybackOwnership(this)
         holders.toList().forEach { holder ->
             holder.setActive(activePosition in items.indices && holder.bindingAdapterPosition == activePosition)
@@ -239,40 +245,54 @@ class VideoAdapter(
     private fun cancelIdlePreload() {
         preloadTask?.let { preloadHandler.removeCallbacks(it) }
         preloadTask = null
+        mediaCache.keepPreloads(emptySet())
     }
 
     private fun scheduleIdlePreload(position: Int) {
-        cancelIdlePreload()
+        preloadTask?.let { preloadHandler.removeCallbacks(it) }
         if (!playbackEnabled || released || position !in items.indices) return
-        val task = Runnable {
-            if (!playbackEnabled || released || position != activePosition) return@Runnable
-            val activeReady = holders.any {
-                it.bindingAdapterPosition == position && it.readyForIdlePreload()
-            }
-            if (!activeReady) return@Runnable
-            // 弱网/计量网络只预缓存下一条，别和正在播的视频抢带宽。
-            val ahead = NetworkProfile.prefetchCount(itemContext ?: return@Runnable)
-            (1..ahead).map { position + it }.forEach { index ->
-                val item = items.getOrNull(index) ?: return@forEach
-                val knownUrl = item.streamUrl
-                if (!knownUrl.isNullOrBlank()) {
-                    mediaCache.prefetch(knownUrl)
-                } else {
-                    api.resolveSources(item.id) { result ->
-                        result.onSuccess { sources ->
-                            if (released || !playbackEnabled) return@onSuccess
-                            item.sources = sources
-                            val source = api.chooseSource(sources, item.selectedQuality ?: prefs.defaultQuality)
-                            item.streamUrl = source?.url
-                            source?.url?.let(mediaCache::prefetch)
+        val task = object : Runnable {
+            override fun run() {
+                if (!playbackEnabled || released || position != activePosition) return
+                val current = items.getOrNull(position) ?: return
+                val currentUrl = current.streamUrl
+                val allowed = linkedSetOf<String>()
+                if (currentUrl != null) {
+                    allowed += currentUrl
+                    mediaCache.prefetchFull(currentUrl)
+                }
+                val holder = holders.firstOrNull { it.bindingAdapterPosition == position }
+                val progress = mediaCache.progress(currentUrl)
+                val stable = holder?.readyForIdlePreload() == true
+                val nextUrl = items.getOrNull(position + 1)?.streamUrl
+                val ahead = PreloadPolicy.ahead(prefs.preloadNext, stable, progress.fraction, mediaCache.progress(nextUrl).fraction)
+                for (offset in 1..ahead) {
+                    val item = items.getOrNull(position + offset) ?: continue
+                    val url = item.streamUrl
+                    if (url != null) {
+                        allowed += url
+                        mediaCache.prefetchFull(url, primary = progress.fraction >= 1.0 && offset == 1)
+                    } else if (resolvingPreloads.add(item.id)) {
+                        api.resolveSources(item.id) { result ->
+                            preloadHandler.post {
+                                resolvingPreloads.remove(item.id)
+                                if (!released && playbackEnabled && position == activePosition) result.onSuccess { sources ->
+                                    item.sources = sources
+                                    item.streamUrl = api.chooseSource(sources, item.selectedQuality ?: prefs.defaultQuality)?.url
+                                }
+                            }
                         }
                     }
                 }
+                mediaCache.keepPreloads(allowed)
+                preloadHandler.postDelayed(this, 1000L)
             }
         }
         preloadTask = task
-        preloadHandler.postDelayed(task, 1800L)
+        preloadHandler.post(task)
     }
+
+    private val resolvingPreloads = mutableSetOf<String>()
 
     override fun onCreateViewHolder(parent: ViewGroup, viewType: Int): Holder {
         val view = LayoutInflater.from(parent.context).inflate(R.layout.item_video, parent, false)
@@ -324,6 +344,20 @@ class VideoAdapter(
         private val skipBackLabel = view.findViewById<TextView>(R.id.skipBackLabel)
         private val skipForwardLabel = view.findViewById<TextView>(R.id.skipForwardLabel)
 
+        private val danmaku = DanmakuView(view.context).also {
+            (view as android.widget.FrameLayout).addView(it, 1, android.widget.FrameLayout.LayoutParams(-1, -1))
+        }
+        private val networkHint = TextView(view.context).apply {
+            textSize = 14f; setTextColor(-1); setBackgroundColor(0xCC285C7B.toInt())
+            setPadding(18, 12, 18, 12); visibility = View.GONE
+        }.also { (view as android.widget.FrameLayout).addView(it,
+            android.widget.FrameLayout.LayoutParams(-2, -2, android.view.Gravity.TOP or android.view.Gravity.CENTER_HORIZONTAL)
+                .apply { topMargin = (80 * view.resources.displayMetrics.density).toInt() }) }
+        private val likeHold = HoldReaction(like, 0xFFFF365D.toInt()) { doubleReaction() }
+        private val favoriteHold = HoldReaction(favorite, 0xFFFFD54F.toInt()) { doubleReaction() }
+        private var bufferingSince = 0L
+        private var stableSince = 0L
+        private var danmakuLoaded = false
         private var player: ExoPlayer? = null
         private var bound: VideoItem? = null
         /** 当前视频是横屏的吗。播放器解出画面尺寸后才知道，绑定时先当成不是。 */
@@ -490,6 +524,7 @@ class VideoAdapter(
             // 卡片被回收复用：上一条点出来的控件不要跟着带到下一条。
             setControlsPinned(false)
             bound = item
+            likeBusy = false
             recoveryAttempts = 0
             landscape = false
             aspect = 0f
@@ -648,6 +683,59 @@ class VideoAdapter(
 
         }
 
+        private var danmakuAttemptAt = 0L
+        private fun loadDanmaku() {
+            val item = bound ?: return
+            val now = android.os.SystemClock.elapsedRealtime()
+            if (!active || danmakuLoaded || !prefs.danmakuEnabled || now - danmakuAttemptAt < 15000) return
+            danmakuLoaded = true; danmakuAttemptAt = now
+            val token = generation
+            api.getComments(item.id, 0) { result -> itemView.post {
+                if (generation == token && bound?.id == item.id) {
+                    result.onSuccess { danmaku.setComments(it.comments) }.onFailure { danmakuLoaded = false }
+                }
+            } }
+        }
+
+        private fun doubleReaction() {
+            val item = bound ?: return
+            if (!active || likeBusy) return
+            if (!api.isLoggedIn()) { onNeedLogin(); return }
+            fun finishFavorite() {
+                if (!item.localFavorite) {
+                    item.localFavorite = true
+                    history.setLocalFavoriteAsync(item, true)
+                    history.recordInteractionAsync(item, "favorite", 1.4)
+                    noteReaction(item, favorited = true); onSignal?.invoke(item, "favorite")
+                }
+                if (bound?.id == item.id) {
+                    updateLikeUi(item)
+                    Toast.makeText(itemView.context, "已点赞并收藏", Toast.LENGTH_SHORT).show()
+                }
+            }
+            if (item.liked) finishFavorite() else toggleRemoteLike(item, true, onSuccess = { finishFavorite() })
+        }
+
+        private fun lowerQuality() {
+            val item = bound ?: return
+            val sources = item.sources ?: return
+            val current = sources.firstOrNull { it.url == item.streamUrl } ?: return
+            val next = sources.filter { it.score < current.score }.maxByOrNull { it.score } ?: return
+            item.selectedQuality = next.name; item.streamUrl = next.url
+            prepareChosenSource(item, sources, preservePosition = true)
+            networkHint.visibility = View.GONE
+            bufferingSince = 0L
+        }
+
+        private fun offerLowerQuality() {
+            val item = bound ?: return
+            val current = item.sources?.firstOrNull { it.url == item.streamUrl } ?: return
+            val lower = item.sources?.filter { it.score < current.score }?.maxByOrNull { it.score } ?: return
+            networkHint.text = "网络不佳 · 点击切换至 ${lower.name}"
+            networkHint.visibility = View.VISIBLE
+            networkHint.setOnClickListener { lowerQuality() }
+        }
+
         private fun start(item: VideoItem) {
             val bindGeneration = generation
             if (!active || !playbackEnabled || released || player != null) return
@@ -660,11 +748,12 @@ class VideoAdapter(
                 volume = 0f
                 addListener(object : Player.Listener {
                     override fun onIsPlayingChanged(isPlaying: Boolean) {
-                        if (bound?.id == item.id) notePlaying(isPlaying)
+                        if (bound?.id == item.id) { notePlaying(isPlaying); danmaku.invalidate() }
                     }
 
                     override fun onPlayerError(error: PlaybackException) {
                         watch.noteError()
+                        if (error.errorCode in 2000..2999) offerLowerQuality()
                         // 记进诊断：黑屏、播不出来这类反馈要靠它看出是解码、地址还是文件的问题。
                         val cause = error.cause
                         NavigationDiagnostics.note(
@@ -688,6 +777,13 @@ class VideoAdapter(
                     }
 
                     override fun onPlaybackStateChanged(playbackState: Int) {
+                        if (playbackState == Player.STATE_BUFFERING) {
+                            if (bufferingSince == 0L) bufferingSince = android.os.SystemClock.elapsedRealtime()
+                            stableSince = 0L
+                        } else if (playbackState == Player.STATE_READY) {
+                            bufferingSince = 0L
+                            if (stableSince == 0L) stableSince = android.os.SystemClock.elapsedRealtime()
+                        }
                         if (playbackState == Player.STATE_READY) { recoveryAttempts = 0; watch.noteReady() }
                         if (playbackState == Player.STATE_ENDED) watch.noteEnded()
                         if (playbackState == Player.STATE_READY && active) {
@@ -708,6 +804,9 @@ class VideoAdapter(
             }
             player = p
             playerView.player = p
+            danmaku.player = p
+            danmaku.invalidate()
+            loadDanmaku()
 
             val cachedSources = item.sources
             if (!cachedSources.isNullOrEmpty()) {
@@ -733,7 +832,7 @@ class VideoAdapter(
             } else api.chooseSource(sources, preferred)
             source ?: return
             val oldPosition = if (preservePosition) p.currentPosition else item.resumePositionMs.coerceAtLeast(0L)
-            val shouldPlay = active && (p.isPlaying || !preservePosition)
+            val shouldPlay = active && (p.playWhenReady || !preservePosition)
             item.streamUrl = source.url
             if (item.selectedQuality == null && preferred != "highest") item.selectedQuality = source.name
             quality.text = "画质\n" + (item.selectedQuality ?: if (preferred == "highest") "最高" else source.name)
@@ -743,6 +842,7 @@ class VideoAdapter(
             p.volume = if (active) 1f else 0f
             p.playWhenReady = active && shouldPlay
             if (active && shouldPlay) p.play()
+            scheduleIdlePreload(activePosition)
         }
 
         fun setActive(enabled: Boolean) {
@@ -781,6 +881,7 @@ class VideoAdapter(
             if (!active) return
             persistHistory(completed = false)
             active = false
+            likeHold.cancel(); favoriteHold.cancel()
             pendingSingleTap?.let { tapHandler.removeCallbacks(it) }
             pendingSingleTap = null
             tapHandler.removeCallbacks(holdToSpeed)
@@ -843,6 +944,7 @@ class VideoAdapter(
             // 七成屏，所以不能按“一半”硬砍——砍了画面会被居中回面板底下，反而被遮住。
             val cappedTop = top.coerceAtMost(height / 4)
             val cappedBottom = bottom.coerceAtMost((height - cappedTop - height / 6).coerceAtLeast(0))
+            danmaku.setPadding(0, cappedTop, 0, cappedBottom)
             if (playerView.paddingBottom != cappedBottom || playerView.paddingTop != cappedTop) {
                 playerView.setPadding(0, cappedTop, 0, cappedBottom)
             }
@@ -858,7 +960,12 @@ class VideoAdapter(
 
         fun videoAspect(): Float? = aspect.takeIf { it > 0f }
 
-        fun readyForIdlePreload(): Boolean = active && player?.playbackState == Player.STATE_READY
+        fun readyForIdlePreload(): Boolean {
+            val p = player ?: return false
+            return active && p.isPlaying && p.playbackState == Player.STATE_READY && stableSince > 0 &&
+                android.os.SystemClock.elapsedRealtime() - stableSince >= 6000 &&
+                (p.bufferedPosition - p.currentPosition > 15_000 || p.bufferedPercentage >= 95)
+        }
 
         fun context(): android.content.Context = itemView.context
 
@@ -885,7 +992,14 @@ class VideoAdapter(
             override fun run() {
                 val p = player
                 if (!active || p == null) return
+                loadDanmaku()
                 val position = p.currentPosition
+                pauseSeekBar.cachedFraction = mediaCache.progress(bound?.streamUrl).fraction
+                if (p.playWhenReady && bufferingSince > 0 && android.os.SystemClock.elapsedRealtime() - bufferingSince > 5000) {
+                    offerLowerQuality()
+                } else if (stableSince > 0 && android.os.SystemClock.elapsedRealtime() - stableSince > 12000) {
+                    networkHint.visibility = View.GONE
+                }
                 val shouldAdvance = p.playWhenReady && p.playbackState == Player.STATE_READY
                 if (shouldAdvance && lastWatchdogPosition >= 0 && position <= lastWatchdogPosition + 120L) stalledChecks++
                 else stalledChecks = 0
@@ -980,19 +1094,21 @@ class VideoAdapter(
         }
 
         fun savePlaybackPosition() = persistHistory(completed = false)
+        fun restorePosition(position: Long) { player?.seekTo(position) }
 
         /**
          * [onAccepted] 在请求真正发出去时调用一次——登录检查和防抖都通过了才算数，
          * 所以不会出现“动画播完却弹出登录框”。
          */
-        private fun toggleRemoteLike(item: VideoItem, desired: Boolean, onAccepted: (() -> Unit)? = null) {
+        private fun toggleRemoteLike(item: VideoItem, desired: Boolean, onSuccess: (() -> Unit)? = null, onAccepted: (() -> Unit)? = null) {
             if (likeBusy) return
             if (!api.isLoggedIn()) { onNeedLogin(); return }
             likeBusy = true
+            val requestGeneration = generation
             if (desired) onAccepted?.invoke()
             api.likeVideo(item.id, desired) { result ->
                 itemView.post {
-                    likeBusy = false
+                    if (generation == requestGeneration) likeBusy = false
                     result.onSuccess {
                         if (item.liked != desired) item.likes = (item.likes + if (desired) 1 else -1).coerceAtLeast(0)
                         item.liked = desired
@@ -1007,7 +1123,8 @@ class VideoAdapter(
                             history.recordInteractionAsync(item, "unlike", -1.2)
                             onSignal?.invoke(item, "unlike")
                         }
-                        updateLikeUi(item)
+                        if (bound?.id == item.id) updateLikeUi(item)
+                        onSuccess?.invoke()
                     }.onFailure {
                         Toast.makeText(itemView.context, it.message ?: "点赞同步失败", Toast.LENGTH_SHORT).show()
                         if (it.message?.contains("登录") == true || it.message?.contains("401") == true) onNeedLogin()
@@ -1099,6 +1216,9 @@ class VideoAdapter(
             pendingSingleTap = null
             // 卡片被回收去放别的视频了，上一条的点赞动画不能跟着漂过去。
             reactionBurst.cancelBurst()
+            likeHold.cancel(); favoriteHold.cancel()
+            danmaku.clear(); danmakuLoaded = false; danmakuAttemptAt = -15000L
+            networkHint.visibility = View.GONE
             releasePlayerOnly()
         }
 
@@ -1108,6 +1228,9 @@ class VideoAdapter(
             speedIndicator.visibility = View.GONE
             seekPreview.visibility = View.GONE
             playerView.player = null
+            danmaku.player = null
+            likeHold.cancel(); favoriteHold.cancel()
+            bufferingSince = 0L; stableSince = 0L
             player?.let { p ->
                 p.setPlaybackSpeed(1f)
                 p.playWhenReady = false

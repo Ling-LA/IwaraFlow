@@ -43,7 +43,12 @@ class RecommendationRanker(private val random: Random = Random()) {
     fun startGeneration() { generation += 1 }
 
     /** 「为什么推荐给我」：这条视频是怎么被选出来的。没记录就返回 null。 */
-    fun reasonFor(videoId: String): String? = candidates[videoId]?.reason()
+    fun reasonFor(videoId: String): String? = candidates[videoId]?.let { candidate ->
+        if (!candidate.subscribed && candidate.item.tags.any {
+            (profile.positiveTagWeights[SearchQuery.canonicalTag(it)] ?: 0.0) >= 1.0 &&
+                (profile.tagWeights[SearchQuery.canonicalTag(it)] ?: 0.0) > 0.0
+        }) "猜你喜欢 · 根据点赞、收藏、关注和完整观看分析" else candidate.reason()
+    }
 
     fun candidateFor(videoId: String): RecommendationCandidate? = candidates[videoId]
 
@@ -71,7 +76,7 @@ class RecommendationRanker(private val random: Random = Random()) {
             candidate.generation = generation
             candidates[candidate.item.id] = candidate
         }
-        return hardMuteFilter(merged.values.map { it.item }, taste).sortedByDescending { scoreOf(it, taste, now) }
+        return weightedOrder(hardMuteFilter(merged.values.map { it.item }, taste), taste, now)
     }
 
     /**
@@ -93,6 +98,14 @@ class RecommendationRanker(private val random: Random = Random()) {
     fun rerank(items: List<VideoItem>, taste: PreferenceProfile, now: Long): List<VideoItem> =
         balanceManualInterests(
             diversify(spreadAuthors(hardMuteFilter(items, taste).sortedByDescending { scoreOf(it, taste, now) })), taste)
+
+    /** Exponential race: every eligible candidate has a strictly positive probability.
+     * Tempering and a bounded score prevent a saturated interest from monopolizing the feed. */
+    internal fun weightedOrder(items: List<VideoItem>, taste: PreferenceProfile, now: Long): List<VideoItem> =
+        items.map { item ->
+            val weight = kotlin.math.exp((scoreOf(item, taste, now) / 3.0).coerceIn(-3.0, 3.0))
+            item to (kotlin.math.ln(random.nextDouble().coerceAtLeast(1e-12)) / weight)
+        }.sortedByDescending { it.second }.map { it.first }
 
     /** 一条候选此刻的得分：来源 + 质量 + 新鲜度 + 画像 + 稳定抖动。 */
     fun scoreOf(item: VideoItem, taste: PreferenceProfile, now: Long): Double =
@@ -287,7 +300,7 @@ class RecommendationRanker(private val random: Random = Random()) {
         val taste = profile
         val (open, buried) = feed.partition { taste.score(it) >= EXPLORE_NEGATIVE_THRESHOLD }
         if (buried.isEmpty() || open.isEmpty()) return feed
-        val retryable = buried.filterNot { taste.isMuted(it) }.sortedByDescending { taste.score(it) }
+        val retryable = weightedOrder(buried.filterNot { taste.isMuted(it) }, taste, System.currentTimeMillis())
         if (retryable.isEmpty()) return feed
         val slots = (open.size / EXPLORE_EVERY).coerceAtLeast(1).coerceAtMost(retryable.size)
         val explore = ArrayDeque(retryable.take(slots))

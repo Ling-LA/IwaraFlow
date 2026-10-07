@@ -31,7 +31,9 @@ class ManualInterestBalanceTest {
         val candidates = (liked(160) + other(80)).associate { item ->
             item.id to RecommendationCandidate(item, sourceScore = if (taste.matchesManualInterest(item)) 10.0 else 1.0)
         }
-        val ranked = ranker.rank(candidates)
+        // Deliberately recreate the worst-case score-only order. Normal ranking now samples
+        // with positive probabilities, but the final diversity guard must also handle this input.
+        val ranked = ranker.rank(candidates).sortedByDescending { ranker.scoreOf(it, taste, System.currentTimeMillis()) }
         assertTrue(ranked.take(80).all(taste::matchesManualInterest))
         val result = ranker.assemble(ranked, emptySet(), emptySet(), emptyList())
         assertEquals(80, result.size)

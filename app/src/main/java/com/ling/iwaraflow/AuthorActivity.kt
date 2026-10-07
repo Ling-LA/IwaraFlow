@@ -72,6 +72,7 @@ class AuthorActivity : AppCompatActivity() {
         super.onCreate(savedInstanceState)
         setContentView(R.layout.activity_author)
 
+        PageNavigation.install(this, findViewById(R.id.authorFeedPage)) { feedAdapter.suspendPlayback() }
         api = IwaraApi(this)
         history = HistoryStore(this)
         prefs = AppPrefs(this)
@@ -109,7 +110,7 @@ class AuthorActivity : AppCompatActivity() {
             prefs = prefs,
             mediaCache = mediaCache,
             onDownload = ::download,
-            onEnterPip = ::enterPip,
+            onEnterPip = { FloatingVideoService.request(this, feedAdapter, ::enterPip) },
             onShare = ::shareVideo,
             onEnded = ::nextWork,
             onNeedLogin = { Toast.makeText(this, "请先在主页登录 Iwara", Toast.LENGTH_SHORT).show() },
@@ -213,9 +214,10 @@ class AuthorActivity : AppCompatActivity() {
         if (loadingPage || noMore || a.id.isBlank() || exiting) return
         loadingPage = true
         statusView.text = if (works.isEmpty()) "正在加载作者作品…" else "正在加载更多作品…"
-        api.getAuthorVideos(a.id, page, pageSize) { result ->
-            if (isFinishing || isDestroyed || exiting) return@getAuthorVideos
-            result.onSuccess { raw ->
+        api.getAuthorVideoPage(a.id, page, pageSize) { result ->
+            if (isFinishing || isDestroyed || exiting) return@getAuthorVideoPage
+            result.onSuccess { batch ->
+                val raw = batch.videos
                 if (raw.isEmpty()) {
                     runOnUiThread {
                         if (isFinishing || isDestroyed || exiting) return@runOnUiThread
@@ -232,21 +234,28 @@ class AuthorActivity : AppCompatActivity() {
                 runOnUiThread {
                     if (isFinishing || isDestroyed || exiting) return@runOnUiThread
                     val start = works.size
-                    works += raw
-                    listAdapter.notifyItemRangeInserted(start, raw.size)
+                    val fresh = raw.distinctBy { it.id }.filter { incoming -> works.none { it.id == incoming.id } }
+                    works += fresh
+                    listAdapter.notifyItemRangeInserted(start, fresh.size)
                     page++
-                    noMore = raw.size < pageSize
+                    noMore = fresh.isEmpty() || (batch.total >= 0 && works.size >= batch.total)
                     loadingPage = false
                     verifying += 1
                     updateStatus()
+                    val requested = intent.getStringExtra("open_work_id")
+                    if (requested != null) {
+                        val work = works.firstOrNull { it.id == requested }
+                        if (work != null) { intent.removeExtra("open_work_id"); openWork(work) }
+                        else if (!noMore) loadNextPage()
+                    }
 
-                    gate.inspectAll(raw, prefs.defaultQuality) { _ ->
+                    gate.inspectAll(fresh, prefs.defaultQuality) { _ ->
                         if (isFinishing || isDestroyed || exiting) return@inspectAll
                         runOnUiThread {
                             if (isFinishing || isDestroyed || exiting) return@runOnUiThread
                             verifying = (verifying - 1).coerceAtLeast(0)
                             // inspectAll 改的就是列表里那几个对象，重新绑定一次就能看到标记。
-                            listAdapter.notifyItemRangeChanged(start, raw.size)
+                            listAdapter.notifyItemRangeChanged(start, fresh.size)
                             if (inFeed) rebuildFeedKeepingCurrent()
                             updateStatus()
                         }
@@ -346,6 +355,7 @@ class AuthorActivity : AppCompatActivity() {
     }
 
     private fun setFullscreen(enabled: Boolean) {
+        window.decorView.findViewWithTag<View>("page_navigation_menu")?.visibility = if (enabled) View.GONE else View.VISIBLE
         if (exiting || isFinishing || isDestroyed) return
         if (enabled) comments.close()
         FullscreenMode.apply(this, feedAdapter, listOf(findViewById<View>(R.id.feedBack)), enabled)
@@ -520,6 +530,7 @@ class AuthorActivity : AppCompatActivity() {
         android.app.PictureInPictureParams.Builder().setAspectRatio(android.util.Rational(16, 9)).build()
 
     private fun enterPip() {
+        if (FloatingVideoService.open(this, feedAdapter)) return
         if (!inFeed || exiting) return
         comments.close()
         // 先登记再进：系统把本页挪进独立任务时主页会被顶上来，那一刻它就得知道有小窗。
@@ -541,6 +552,8 @@ class AuthorActivity : AppCompatActivity() {
     override fun onPictureInPictureModeChanged(isInPictureInPictureMode: Boolean) {
         super.onPictureInPictureModeChanged(isInPictureInPictureMode)
         findViewById<View>(R.id.feedBack).visibility =
+            if (isInPictureInPictureMode || feedAdapter.isFullscreen) View.GONE else View.VISIBLE
+        window.decorView.findViewWithTag<View>("page_navigation_menu")?.visibility =
             if (isInPictureInPictureMode || feedAdapter.isFullscreen) View.GONE else View.VISIBLE
         feedAdapter.setPipMode(isInPictureInPictureMode)
         when {

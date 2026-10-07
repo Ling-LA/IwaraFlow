@@ -39,8 +39,9 @@ class CommentsPanel(
     /** 「为什么推荐给我」：页面按视频 id 给出推荐理由，没有就不显示这一行。 */
     private val reasonFor: ((String) -> String?)? = null
 ) {
-    enum class Tab { INFO, COMMENTS }
+    enum class Tab { INFO, COMMENTS, DANMAKU }
 
+    private lateinit var tabDanmaku: TextView
     private val tabInfo = root.findViewById<View>(R.id.panelTabInfo)
     private val tabInfoLabel = root.findViewById<TextView>(R.id.panelTabInfoLabel)
     private val tabInfoLine = root.findViewById<View>(R.id.panelTabInfoLine)
@@ -101,7 +102,14 @@ class CommentsPanel(
         tabInfo.setOnClickListener { selectTab(Tab.INFO) }
         tabComments.setOnClickListener { selectTab(Tab.COMMENTS) }
         // 手指滑到哪一页，页签跟着走。
-        pages.onPageSettled = { index -> applyTab(if (index == 0) Tab.INFO else Tab.COMMENTS) }
+        tabDanmaku = TextView(root.context).apply {
+            text = "弹幕"; textSize = 16f; gravity = android.view.Gravity.CENTER
+            setPadding(24, 0, 24, 0); minHeight = (44 * resources.displayMetrics.density).toInt()
+            setOnClickListener { selectTab(Tab.DANMAKU) }
+        }
+        (root.findViewById<View>(R.id.panelHeader) as android.widget.LinearLayout).addView(tabDanmaku, 2)
+        pages.addView(DanmakuSettings.create(root.context), android.widget.FrameLayout.LayoutParams(-1, -1))
+        pages.onPageSettled = { index -> applyTab(Tab.entries[index]) }
         infoTags.movementMethod = android.text.method.LinkMovementMethod.getInstance()
         infoTags.highlightColor = 0x33285C7B
         input.setOnClickListener { openInput() }
@@ -200,7 +208,7 @@ class CommentsPanel(
 
     /** 切页签：内容区滑过去（打开面板时 [animate] 传 false，直接就位）。 */
     private fun selectTab(next: Tab, animate: Boolean = true) {
-        pages.setPage(if (next == Tab.INFO) 0 else 1, animate)
+        pages.setPage(next.ordinal, animate)
         applyTab(next)
     }
 
@@ -208,19 +216,22 @@ class CommentsPanel(
     private fun applyTab(next: Tab) {
         tab = next
         val info = next == Tab.INFO
+        val commenting = next == Tab.COMMENTS
+        tabDanmaku.setTextColor(if (next == Tab.DANMAKU) 0xFF17324A.toInt() else 0xFF8A9BAA.toInt())
+        tabDanmaku.setTypeface(null, if (next == Tab.DANMAKU) android.graphics.Typeface.BOLD else android.graphics.Typeface.NORMAL)
         tabInfoLabel.setTextColor(if (info) 0xFF17324A.toInt() else 0xFF8A9BAA.toInt())
         tabInfoLabel.setTypeface(null, if (info) android.graphics.Typeface.BOLD else android.graphics.Typeface.NORMAL)
         tabInfoLine.visibility = if (info) View.VISIBLE else View.INVISIBLE
-        title.setTextColor(if (info) 0xFF8A9BAA.toInt() else 0xFF17324A.toInt())
-        title.setTypeface(null, if (info) android.graphics.Typeface.NORMAL else android.graphics.Typeface.BOLD)
-        tabCommentsLine.visibility = if (info) View.INVISIBLE else View.VISIBLE
+        title.setTextColor(if (commenting) 0xFF17324A.toInt() else 0xFF8A9BAA.toInt())
+        title.setTypeface(null, if (commenting) android.graphics.Typeface.BOLD else android.graphics.Typeface.NORMAL)
+        tabCommentsLine.visibility = if (commenting) View.VISIBLE else View.INVISIBLE
 
         // 两页一直都在，只是被挪到屏幕外；底部的输入栏不属于页面，跟着页签切。
-        inputRow.visibility = if (info) View.GONE else View.VISIBLE
-        replyBar.visibility = if (!info && replyTo != null) View.VISIBLE else View.GONE
+        inputRow.visibility = if (commenting) View.VISIBLE else View.GONE
+        replyBar.visibility = if (commenting && replyTo != null) View.VISIBLE else View.GONE
         if (info) {
             ensureDescription()
-        } else {
+        } else if (commenting) {
             val item = video
             if (item != null && commentsLoadedFor != item.id) {
                 commentsLoadedFor = item.id

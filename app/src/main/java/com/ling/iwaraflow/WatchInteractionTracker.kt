@@ -70,7 +70,7 @@ class WatchInteractionTracker(
         val skipped = interest <= -WATCH_SIGNAL_FLOOR && swipedAway
         when {
             interest >= WATCH_SIGNAL_FLOOR -> {
-                history.recordInteractionAsync(item, "watch", interest)
+                history.recordInteractionAsync(item, if (endedOnce) "complete" else "watch", interest)
                 onWatched()
             }
             // 划走才算负反馈：切后台、开别的页面不是态度。

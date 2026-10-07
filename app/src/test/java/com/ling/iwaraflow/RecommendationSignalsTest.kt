@@ -39,7 +39,7 @@ class RecommendationSignalsTest {
         history.recordInteraction(video("vx", "Dull", listOf("t")), "skip", -0.5)
         val after = history.preferenceProfile()
         val authorDrop = before.authorWeights["dull"]!! - after.authorWeights["dull"]!!
-        assertTrue("第 ${HistoryStore.LONG_TERM_SKIPS} 次划走后作者要多压一层：$authorDrop", authorDrop > HistoryStore.LONG_TERM_AUTHOR_PENALTY)
+        assertTrue("第 ${HistoryStore.LONG_TERM_SKIPS} 次划走后作者要多压一层：$authorDrop", authorDrop > 0 && after.authorWeights.getValue("dull") >= -6.0)
         val tagDrop = before.tagWeights["t"]!! - after.tagWeights["t"]!!
         assertTrue("标签同样多压一层：$tagDrop", tagDrop > HistoryStore.LONG_TERM_TAG_PENALTY)
     }

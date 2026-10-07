@@ -43,6 +43,7 @@ class SavedVideosActivity : AppCompatActivity() {
         super.onCreate(savedInstanceState)
         setContentView(R.layout.activity_saved_videos)
 
+        PageNavigation.install(this, findViewById(R.id.savedFeedPage)) { feedAdapter.suspendPlayback() }
         api = IwaraApi(this)
         history = HistoryStore(this)
         prefs = AppPrefs(this)
@@ -84,7 +85,7 @@ class SavedVideosActivity : AppCompatActivity() {
             prefs = prefs,
             mediaCache = mediaCache,
             onDownload = ::download,
-            onEnterPip = ::enterPip,
+            onEnterPip = { FloatingVideoService.request(this, feedAdapter, ::enterPip) },
             onShare = ::shareVideo,
             onEnded = ::nextVideo,
             onNeedLogin = { Toast.makeText(this, "请先在主页登录 Iwara", Toast.LENGTH_SHORT).show() },
@@ -202,6 +203,7 @@ class SavedVideosActivity : AppCompatActivity() {
     }
 
     private fun setFullscreen(enabled: Boolean) {
+        window.decorView.findViewWithTag<View>("page_navigation_menu")?.visibility = if (enabled) View.GONE else View.VISIBLE
         if (closed || isFinishing || isDestroyed) return
         if (enabled) comments.close()
         FullscreenMode.apply(this, feedAdapter, listOf(findViewById<View>(R.id.savedFeedBack)), enabled)
@@ -328,6 +330,7 @@ class SavedVideosActivity : AppCompatActivity() {
         android.app.PictureInPictureParams.Builder().setAspectRatio(android.util.Rational(16, 9)).build()
 
     private fun enterPip() {
+        if (FloatingVideoService.open(this, feedAdapter)) return
         if (!inFeed || closed) return
         comments.close()
         PipRegistry.enter(this)
@@ -348,6 +351,8 @@ class SavedVideosActivity : AppCompatActivity() {
     override fun onPictureInPictureModeChanged(isInPictureInPictureMode: Boolean) {
         super.onPictureInPictureModeChanged(isInPictureInPictureMode)
         findViewById<View>(R.id.savedFeedBack).visibility =
+            if (isInPictureInPictureMode || feedAdapter.isFullscreen) View.GONE else View.VISIBLE
+        window.decorView.findViewWithTag<View>("page_navigation_menu")?.visibility =
             if (isInPictureInPictureMode || feedAdapter.isFullscreen) View.GONE else View.VISIBLE
         feedAdapter.setPipMode(isInPictureInPictureMode)
         when {

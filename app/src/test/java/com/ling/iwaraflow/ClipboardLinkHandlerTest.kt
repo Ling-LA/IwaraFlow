@@ -30,6 +30,8 @@ class ClipboardLinkHandlerTest {
         // Android sets this timestamp whenever a new copy replaces the primary clip.
         android.content.ClipDescription::class.java.getDeclaredMethod("setTimestamp", Long::class.javaPrimitiveType)
             .invoke(clipboard.primaryClip!!.description, timestamp)
+        android.content.ClipDescription::class.java.getDeclaredMethod("setConfidenceScores", Map::class.java)
+            .invoke(clipboard.primaryClip!!.description, if (text.contains("https://")) mapOf("url" to 1f) else emptyMap<String, Float>())
     }
 
     @Test fun onlyLatestCopyIsReadAndRecopyIsRequiredEvenAfterRestart() {

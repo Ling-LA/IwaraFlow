@@ -23,6 +23,7 @@ class PauseSeekBar @JvmOverloads constructor(
     attrs: AttributeSet? = null
 ) : AppCompatSeekBar(context, attrs) {
 
+    var cachedFraction: Double = 0.0
     private var dragging = false
     private var observedPlayer: Player? = null
     private var chromeHidden = false
@@ -49,6 +50,7 @@ class PauseSeekBar @JvmOverloads constructor(
         max = 1000
         splitTrack = false
         progressTintList = ColorStateList.valueOf(0xFFFFFFFF.toInt())
+        secondaryProgressTintList = ColorStateList.valueOf(0xFF9E9E9E.toInt())
         progressBackgroundTintList = ColorStateList.valueOf(0x66FFFFFF)
         thumbTintList = ColorStateList.valueOf(0xFFFFFFFF.toInt())
         visibility = View.GONE
@@ -140,6 +142,7 @@ class PauseSeekBar @JvmOverloads constructor(
         val p = findPlayer()
         observedPlayer = p
         val duration = p?.duration ?: 0L
+        secondaryProgress = (max * maxOf(cachedFraction, if (duration > 0) (p?.bufferedPosition ?: 0L).toDouble() / duration else 0.0)).toInt().coerceIn(0, max)
         val alive = p != null && p.playbackState != Player.STATE_IDLE && p.playbackState != Player.STATE_ENDED
         val paused = alive && p != null && !p.isPlaying && !p.playWhenReady
         // 关掉「点一下画面暂停播放」时点出来的控件：没暂停也要显示。

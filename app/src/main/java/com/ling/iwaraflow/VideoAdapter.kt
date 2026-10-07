@@ -338,7 +338,6 @@ class VideoAdapter(
         private val fullscreen = view.findViewById<TextView>(R.id.fullscreen)
         private val pausePip = view.findViewById<View>(R.id.pausePip)
         private val pauseDownload = view.findViewById<View>(R.id.pauseDownload)
-        private val pauseFavorite = view.findViewById<ImageView>(R.id.pauseFavorite)
         private val pauseFullscreenExit = view.findViewById<View>(R.id.pauseFullscreenExit)
         private val seekPreview = view.findViewById<TextView>(R.id.seekPreview)
         private val share = view.findViewById<TextView>(R.id.share)
@@ -361,9 +360,8 @@ class VideoAdapter(
         }.also { (view as android.widget.FrameLayout).addView(it,
             android.widget.FrameLayout.LayoutParams(-2, -2, android.view.Gravity.TOP or android.view.Gravity.CENTER_HORIZONTAL)
                 .apply { topMargin = (80 * view.resources.displayMetrics.density).toInt() }) }
-        private val likeHold = HoldReaction(like, 0xFFFF365D.toInt()) { doubleReaction() }
-        private val favoriteHold = HoldReaction(favorite, 0xFFFFD54F.toInt()) { doubleReaction() }
-        private val fullscreenFavoriteHold = HoldReaction(pauseFavorite, 0xFFFFD54F.toInt()) { doubleReaction() }
+        private val likeHold = HoldReaction(like, 0xFFFF365D.toInt(), favorite, 0xFFFFD54F.toInt()) { doubleReaction() }
+        private val favoriteHold = HoldReaction(favorite, 0xFFFFD54F.toInt(), like, 0xFFFF365D.toInt()) { doubleReaction() }
         private val screenReactionHold = ScreenReactionHold(view) {
             if (active && fullscreenMode && !pipMode) { touchMoved = true; doubleReaction() }
         }
@@ -594,10 +592,6 @@ class VideoAdapter(
                 }
                 // 收藏有动画、取消有图标变化，不用再弹一层提示挡着视频。
                 updateLikeUi(item)
-            }
-            pauseFavorite.setOnClickListener {
-                favorite.performClick()
-                if (item.localFavorite) reactionBurst.playOn(pauseFavorite, ReactionBurstView.Kind.FAVORITE)
             }
             quality.setOnClickListener { showQualityChooser(item, false) }
             download.setOnClickListener { showQualityChooser(item, true) }
@@ -916,7 +910,7 @@ class VideoAdapter(
             if (!active) return
             persistHistory(completed = false)
             active = false
-            likeHold.cancel(); favoriteHold.cancel(); fullscreenFavoriteHold.cancel(); screenReactionHold.cancel()
+            likeHold.cancel(); favoriteHold.cancel(); screenReactionHold.cancel()
             pendingSingleTap?.let { tapHandler.removeCallbacks(it) }
             pendingSingleTap = null
             tapHandler.removeCallbacks(holdToSpeed)
@@ -1022,7 +1016,7 @@ class VideoAdapter(
         }
 
         fun cancelSurfaceGesture() {
-            screenReactionHold.cancel(); fullscreenFavoriteHold.cancel(); likeHold.cancel(); favoriteHold.cancel()
+            screenReactionHold.cancel(); likeHold.cancel(); favoriteHold.cancel()
             touchMoved = true
             pendingSingleTap?.let { tapHandler.removeCallbacks(it) }; pendingSingleTap = null; lastTap = 0L
             if (seeking) finishSeek()
@@ -1193,11 +1187,6 @@ class VideoAdapter(
                 if (item.localFavorite) R.drawable.ic_star_rounded else R.drawable.ic_star_rounded_outline,
                 if (item.localFavorite) 0xFFFFD54F.toInt() else 0xFFFFFFFF.toInt()
             )
-            pauseFavorite.setIcon(
-                if (item.localFavorite) R.drawable.ic_star_rounded else R.drawable.ic_star_rounded_outline,
-                if (item.localFavorite) 0xFFFFD54F.toInt() else 0xFFFFFFFF.toInt()
-            )
-            pauseFavorite.contentDescription = if (item.localFavorite) "取消收藏" else "收藏视频"
             likeCount.text = formatCount(item.likes)
         }
 
@@ -1272,7 +1261,7 @@ class VideoAdapter(
             pendingSingleTap = null
             // 卡片被回收去放别的视频了，上一条的点赞动画不能跟着漂过去。
             reactionBurst.cancelBurst()
-            likeHold.cancel(); favoriteHold.cancel(); fullscreenFavoriteHold.cancel(); screenReactionHold.cancel()
+            likeHold.cancel(); favoriteHold.cancel(); screenReactionHold.cancel()
             danmaku.clear(); danmakuLoaded = false; danmakuAttemptAt = -15000L
             networkHint.visibility = View.GONE
             applyVideoInsets()
@@ -1286,7 +1275,7 @@ class VideoAdapter(
             seekPreview.visibility = View.GONE
             playerView.player = null
             danmaku.player = null
-            likeHold.cancel(); favoriteHold.cancel(); fullscreenFavoriteHold.cancel(); screenReactionHold.cancel()
+            likeHold.cancel(); favoriteHold.cancel(); screenReactionHold.cancel()
             bufferingSince = 0L; stableSince = 0L
             player?.let { p ->
                 p.setPlaybackSpeed(1f)

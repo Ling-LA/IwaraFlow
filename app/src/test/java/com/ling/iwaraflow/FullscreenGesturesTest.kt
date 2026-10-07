@@ -104,19 +104,15 @@ class FullscreenGesturesTest {
             assertNotNull(root.findViewWithTag<View>("playback_gesture_guide"))
         } finally { PlaybackGuide.dismiss(activity); controller.pause().stop().destroy() }
     }
-    @Test fun narrowFullscreenStacksFavoriteControlsAbovePlaybackControls() = fixture { _, holder, _, _ ->
-        val root = holder.itemView
-        val density = root.resources.displayMetrics.density
-        val width = (320*density).toInt(); val height = (800*density).toInt()
-        root.measure(View.MeasureSpec.makeMeasureSpec(width, View.MeasureSpec.EXACTLY), View.MeasureSpec.makeMeasureSpec(height, View.MeasureSpec.EXACTLY))
-        root.layout(0, 0, width, height)
-        root.findViewById<View>(R.id.pauseIndicator).visibility = View.VISIBLE
-        val bar = root.findViewById<PauseSeekBar>(R.id.pauseSeekBar); bar.translationY = height-80*density
-        PauseSeekBar::class.java.getDeclaredMethod("placeControls", View::class.java).apply { isAccessible = true }.invoke(bar, root)
-        PauseSeekBar::class.java.getDeclaredMethod("placeTopRow", View::class.java, Long::class.javaPrimitiveType, Long::class.javaPrimitiveType)
-            .apply { isAccessible = true }.invoke(bar, root, 0L, 60000L)
-        val favorites = root.findViewById<View>(R.id.pauseTopRow); val playback = root.findViewById<View>(R.id.pauseControls)
-        assertTrue("窄屏两组控件不能重叠: root=${root.width}, right=${favorites.measuredWidth} x ${favorites.measuredHeight} y=${favorites.translationY}, left=${playback.measuredWidth} x ${playback.measuredHeight} y=${playback.translationY}", favorites.translationY + favorites.measuredHeight < playback.translationY)
+    @Test fun fullscreenAnimationIsLargeAndCenteredAtThePressPoint() {
+        val context = RuntimeEnvironment.getApplication(); val density = context.resources.displayMetrics.density
+        val view = View(context); view.layout(0, 0, (800*density).toInt(), (360*density).toInt())
+        val hold = ScreenReactionHold(view) {}
+        hold.start(400*density, 180*density)
+        val drawable = hold.javaClass.getDeclaredField("ring").apply { isAccessible = true }.get(hold) as android.graphics.drawable.Drawable
+        assertTrue(drawable.bounds.width() >= 240*density)
+        assertEquals(400*density, drawable.bounds.exactCenterX(), 1f)
+        assertEquals(180*density, drawable.bounds.exactCenterY(), 1f)
+        hold.cancel()
     }
-
 }

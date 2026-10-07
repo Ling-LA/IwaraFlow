@@ -33,7 +33,7 @@ class PlayerUpgradeTest {
         assertEquals(1, doubles)
         hold.cancel()
     }
-    @Test fun interruptedHoldDoesNeitherReactionAndOtherButtonDoesNotAnimate() {
+    @Test fun interruptedHoldDoesNeitherReactionAndDoesNotTriggerOtherButton() {
         val view = ImageView(RuntimeEnvironment.getApplication())
         val other = ImageView(RuntimeEnvironment.getApplication())
         var doubles = 0; var clicks = 0; var otherDoubles = 0
@@ -48,6 +48,29 @@ class PlayerUpgradeTest {
         touch(view, MotionEvent.ACTION_DOWN); touch(view, MotionEvent.ACTION_CANCEL)
         shadowOf(Looper.getMainLooper()).idleFor(Duration.ofSeconds(4))
         assertEquals(0, doubles)
+    }
+    @Test fun holdingEitherButtonDrawsBothRingsTogetherInTheirOwnColors() {
+        val context = RuntimeEnvironment.getApplication()
+        val like = ImageView(context).apply { layout(0, 0, 76, 36) }
+        val favorite = ImageView(context).apply { layout(0, 0, 76, 36) }
+        var completed = 0
+        val hold = HoldReaction(like, 0xFFFF365D.toInt(), favorite, 0xFFFFD54F.toInt()) { completed++ }
+        touch(like, MotionEvent.ACTION_DOWN)
+        shadowOf(Looper.getMainLooper()).idleFor(Duration.ofMillis(1500))
+        fun arc(name: String): Pair<Float, Int> {
+            val ring = hold.javaClass.getDeclaredField(name).apply { isAccessible = true }.get(hold) as android.graphics.drawable.Drawable
+            val canvas = org.mockito.Mockito.mock(android.graphics.Canvas::class.java)
+            ring.draw(canvas)
+            val draw = org.mockito.Mockito.mockingDetails(canvas).invocations.single { it.method.name == "drawArc" }
+            assertEquals(-90f, draw.arguments[4] as Float, .01f)
+            return (draw.arguments[5] as Float) to (draw.arguments[7] as android.graphics.Paint).color
+        }
+        val first = arc("ring"); val second = arc("partnerRing")
+        assertEquals(first.first, second.first, .01f); assertEquals(180f, first.first, 2f)
+        assertEquals(0xFFFF365D.toInt(), first.second); assertEquals(0xFFFFD54F.toInt(), second.second)
+        touch(like, MotionEvent.ACTION_CANCEL)
+        shadowOf(Looper.getMainLooper()).idleFor(Duration.ofSeconds(4))
+        assertEquals(0, completed); assertEquals(0f, arc("ring").first, 0f); assertEquals(0f, arc("partnerRing").first, 0f)
     }
     @Test fun ordinaryTapStillClicks() {
         val view = ImageView(RuntimeEnvironment.getApplication()); var clicks = 0

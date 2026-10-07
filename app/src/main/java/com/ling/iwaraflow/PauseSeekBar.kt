@@ -95,18 +95,17 @@ class PauseSeekBar @JvmOverloads constructor(
             if (mode(root) == MODE_FULLSCREEN) View.VISIBLE else View.GONE
         root.findViewById<View>(R.id.pauseDownload)?.visibility =
             if (mode(root) == MODE_FULLSCREEN) View.VISIBLE else View.GONE
-        root.findViewById<View>(R.id.pauseFavorite)?.visibility =
-            if (mode(root) == MODE_FULLSCREEN) View.VISIBLE else View.GONE
         if (row.visibility != View.VISIBLE) row.visibility = View.VISIBLE
-        row.measure(View.MeasureSpec.makeMeasureSpec(root.width, View.MeasureSpec.AT_MOST),
-            View.MeasureSpec.makeMeasureSpec(root.height, View.MeasureSpec.AT_MOST))
-        val rowHeight = row.measuredHeight
+        var rowHeight = row.height
+        if (rowHeight <= 0) {
+            row.measure(
+                View.MeasureSpec.makeMeasureSpec(root.width, View.MeasureSpec.AT_MOST),
+                View.MeasureSpec.makeMeasureSpec(root.height, View.MeasureSpec.AT_MOST)
+            )
+            rowHeight = row.measuredHeight
+        }
         val gap = (4f * resources.displayMetrics.density).roundToInt()
-        val leftControls = controls(root)
-        val overlap = leftControls != null && leftControls.visibility == View.VISIBLE &&
-            row.measuredWidth + leftControls.measuredWidth + (40 * resources.displayMetrics.density) > root.width
-        val anchor = if (overlap) leftControls!!.translationY else translationY
-        row.translationY = (anchor - rowHeight - gap).coerceAtLeast(0f)
+        row.translationY = (translationY - rowHeight - gap).coerceAtLeast(0f)
     }
 
     private fun topRow(root: View?): View? = root?.findViewById(R.id.pauseTopRow)

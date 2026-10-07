@@ -9,8 +9,9 @@ import android.view.MotionEvent
 import android.view.View
 
 /** A single cancellable gesture, with no click after a completed or cancelled hold. */
-class HoldReaction(private val view: View, color: Int, private val complete: () -> Unit) {
-    private val ring = object : Drawable() {
+class HoldReaction(private val view: View, color: Int, private val partner: View? = null,
+    partnerColor: Int = color, private val complete: () -> Unit) {
+    private inner class Ring(color: Int) : Drawable() {
         val paint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
             this.color = color; style = Paint.Style.STROKE; strokeWidth = 3f * view.resources.displayMetrics.density
             strokeCap = Paint.Cap.ROUND
@@ -26,6 +27,8 @@ class HoldReaction(private val view: View, color: Int, private val complete: () 
         override fun setColorFilter(filter: ColorFilter?) { paint.colorFilter = filter }
         @Deprecated("Deprecated in Android") override fun getOpacity() = PixelFormat.TRANSLUCENT
     }
+    private val ring = Ring(color)
+    private val partnerRing = Ring(partnerColor)
     private val handler = android.os.Handler(android.os.Looper.getMainLooper())
     private var animation: Runnable? = null
     private var fired = false
@@ -42,11 +45,13 @@ class HoldReaction(private val view: View, color: Int, private val complete: () 
                     startedAt = android.os.SystemClock.uptimeMillis()
                     view.parent?.requestDisallowInterceptTouchEvent(true)
                     ring.setBounds(0, 0, view.width, view.height); view.overlay.add(ring)
+                    partner?.let { partnerRing.setBounds(0, 0, it.width, it.height); it.overlay.add(partnerRing) }
                     animation = object : Runnable {
                         override fun run() {
                             if (cancelled || fired) return
                             val elapsed = android.os.SystemClock.uptimeMillis() - startedAt
                             ring.progress = (elapsed / 3000f).coerceIn(0f, 1f); ring.invalidateSelf()
+                            partnerRing.progress = ring.progress; partnerRing.invalidateSelf()
                             if (elapsed >= 3000L) { fired = true; complete() }
                             else handler.postDelayed(this, minOf(16L, 3000L - elapsed))
                         }
@@ -64,10 +69,14 @@ class HoldReaction(private val view: View, color: Int, private val complete: () 
                     cancel(); view.parent?.requestDisallowInterceptTouchEvent(false)
                     if (click) view.performClick()
                 }
-                MotionEvent.ACTION_CANCEL -> { cancelled = true; cancel(); view.parent?.requestDisallowInterceptTouchEvent(false) }
+                MotionEvent.ACTION_CANCEL, MotionEvent.ACTION_POINTER_DOWN -> { cancelled = true; cancel(); view.parent?.requestDisallowInterceptTouchEvent(false) }
             }
             true
         }
     }
-    fun cancel() { animation?.let(handler::removeCallbacks); animation = null; ring.progress = 0f; view.overlay.remove(ring) }
+    fun cancel() {
+        cancelled = true; animation?.let(handler::removeCallbacks); animation = null
+        ring.progress = 0f; partnerRing.progress = 0f
+        view.overlay.remove(ring); partner?.overlay?.remove(partnerRing)
+    }
 }

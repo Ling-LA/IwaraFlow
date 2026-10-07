@@ -102,7 +102,12 @@ class ProfileUiDeviceTest {
             val deadline = android.os.SystemClock.uptimeMillis() + 5000
             while (activity.resources.configuration.orientation != android.content.res.Configuration.ORIENTATION_LANDSCAPE && android.os.SystemClock.uptimeMillis() < deadline) android.os.SystemClock.sleep(100)
             instrumentation.waitForIdleSync()
-            main { PlaybackGuide.show(activity, true) }
+            val root = activity.window.decorView
+            lateinit var fullHold: ScreenReactionHold
+            main { fullHold = ScreenReactionHold(root) {}; fullHold.start(root.width/2f, root.height/2f) }
+            android.os.SystemClock.sleep(900)
+            screenshot("fullscreen-double-reaction")
+            main { fullHold.cancel(); PlaybackGuide.show(activity, true) }
             screenshot("fullscreen-guide-landscape")
             main {
                 PlaybackGuide.dismiss(activity)
@@ -117,6 +122,30 @@ class ProfileUiDeviceTest {
             while (activity.resources.configuration.orientation != android.content.res.Configuration.ORIENTATION_PORTRAIT && android.os.SystemClock.uptimeMillis() < portraitDeadline) android.os.SystemClock.sleep(100)
             main { PlaybackGuide.show(activity, false) }
             screenshot("fullscreen-guide-portrait")
+            lateinit var pairHold: HoldReaction
+            lateinit var like: android.widget.ImageView
+            main {
+                PlaybackGuide.dismiss(activity)
+                val density = activity.resources.displayMetrics.density
+                val panel = android.widget.LinearLayout(activity).apply {
+                    orientation = android.widget.LinearLayout.VERTICAL; gravity = android.view.Gravity.CENTER
+                    setBackgroundColor(0xFF162C3D.toInt())
+                }
+                like = android.widget.ImageView(activity).apply { setImageResource(R.drawable.ic_heart_rounded); setColorFilter(0xFFFF365D.toInt()); setPadding(6, 6, 6, 6) }
+                val favorite = android.widget.ImageView(activity).apply { setImageResource(R.drawable.ic_star_rounded); setColorFilter(0xFFFFD54F.toInt()); setPadding(6, 6, 6, 6) }
+                panel.addView(like, android.widget.LinearLayout.LayoutParams((76*density).toInt(), (36*density).toInt()))
+                panel.addView(favorite, android.widget.LinearLayout.LayoutParams((76*density).toInt(), (36*density).toInt()).apply { topMargin = (20*density).toInt() })
+                activity.setContentView(panel)
+                pairHold = HoldReaction(like, 0xFFFF365D.toInt(), favorite, 0xFFFFD54F.toInt()) {}
+            }
+            instrumentation.waitForIdleSync()
+            main {
+                val time = android.os.SystemClock.uptimeMillis()
+                android.view.MotionEvent.obtain(time, time, android.view.MotionEvent.ACTION_DOWN, like.width/2f, like.height/2f, 0).also { like.dispatchTouchEvent(it); it.recycle() }
+            }
+            android.os.SystemClock.sleep(900)
+            screenshot("double-reaction-buttons")
+            main { pairHold.cancel() }
         } finally { main { PlaybackGuide.dismiss(activity); activity.finish() }; history.close() }
     }
 

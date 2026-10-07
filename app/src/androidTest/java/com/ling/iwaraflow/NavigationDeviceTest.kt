@@ -351,10 +351,18 @@ class NavigationDeviceTest {
                     checkbox = descendants(originalSettings.window.decorView).filterIsInstance<android.widget.CheckBox>().first()
                     checkbox.isChecked = !checkbox.isChecked // Unsaved form must survive the preview.
                     scroll = descendants(originalSettings.window.decorView).filterIsInstance<android.widget.ScrollView>().first()
-                    scroll.fullScroll(View.FOCUS_DOWN)
+                    // Seed a stable interior position, not an in-flight fullScroll animation
+                    // or the bottom edge that can be clamped while window insets settle.
+                    scroll.isSmoothScrollingEnabled = false
+                    scroll.scrollTo(0, ((scroll.getChildAt(0).height - scroll.height) / 2).coerceAtLeast(0))
                 }
                 instrumentation.waitForIdleSync()
-                val checked = checkbox.isChecked; val scrollY = scroll.scrollY
+                var checked = false
+                var scrollY = 0
+                main {
+                    checked = checkbox.isChecked; scrollY = scroll.scrollY
+                    assertTrue("Settings fixture must start scrolled", scrollY > 0)
+                }
                 main { (text(originalSettings, "操作引导").parent as View).performClick() }
                 assertSame(playerActivity, awaitActivity(playerActivity.javaClass))
                 awaitLayout(playerActivity, false)
@@ -378,7 +386,8 @@ class NavigationDeviceTest {
                 else main { text(playerActivity, "知道了").performClick() }
                 assertSame(originalSettings, awaitActivity(SettingsActivity::class.java))
                 main {
-                    assertEquals(checked, checkbox.isChecked); assertEquals(scrollY, scroll.scrollY)
+                    assertEquals(checked, checkbox.isChecked)
+                    assertEquals("Settings scroll position changed after the guide", scrollY, scroll.scrollY)
                     assertFalse(adapter.isFullscreen); assertSame(current, adapter.activeItem())
                     assertTrue("Playback position was reset", current!!.resumePositionMs >= 1500)
                     assertFalse(PlaybackGuide.isActive(playerActivity))

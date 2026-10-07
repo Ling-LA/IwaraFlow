@@ -42,7 +42,9 @@ data class RecommendationCandidate(
      * 于是新一轮会沿用上一轮的来源分、命中标签、“探索位 / 老片”标记，
      * 推荐理由和评分都跟着串。轮次对不上就重建一条，不再接着用旧的。
      */
-    var generation: Int = 0
+    var generation: Int = 0,
+    /** A bounded interest-inference explanation assigned after the final feed is assembled. */
+    var interestSuggested: Boolean = false
 ) {
     /** 「为什么推荐给我」：挑最能说明问题的那一条理由。 */
     fun reason(): String = when {
@@ -51,6 +53,7 @@ data class RecommendationCandidate(
         matchedTags.isNotEmpty() -> "你最近常看 #${matchedTags.first()}"
         matchedAuthorId.isNotBlank() -> "你喜欢这位作者的作品"
         classic -> "历史上的高赞作品"
+        interestSuggested -> "猜你喜欢 · 根据点赞、收藏、关注和完整观看分析"
         Source.MONTH_TOP in sources -> "近期的高赞作品"
         Source.TRENDING in sources -> "热门榜上的作品"
         Source.POPULARITY in sources -> "流行榜上的作品"

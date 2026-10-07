@@ -43,12 +43,7 @@ class RecommendationRanker(private val random: Random = Random()) {
     fun startGeneration() { generation += 1 }
 
     /** 「为什么推荐给我」：这条视频是怎么被选出来的。没记录就返回 null。 */
-    fun reasonFor(videoId: String): String? = candidates[videoId]?.let { candidate ->
-        if (!candidate.subscribed && candidate.item.tags.any {
-            (profile.positiveTagWeights[SearchQuery.canonicalTag(it)] ?: 0.0) >= 1.0 &&
-                (profile.tagWeights[SearchQuery.canonicalTag(it)] ?: 0.0) > 0.0
-        }) "猜你喜欢 · 根据点赞、收藏、关注和完整观看分析" else candidate.reason()
-    }
+    fun reasonFor(videoId: String): String? = candidates[videoId]?.reason()
 
     fun candidateFor(videoId: String): RecommendationCandidate? = candidates[videoId]
 
@@ -98,6 +93,7 @@ class RecommendationRanker(private val random: Random = Random()) {
     fun rerank(items: List<VideoItem>, taste: PreferenceProfile, now: Long): List<VideoItem> =
         balanceManualInterests(
             diversify(spreadAuthors(weightedOrder(hardMuteFilter(items, taste), taste, now))), taste)
+            .also { assignInterestReasons(it, taste) }
 
     /** Exponential race: every eligible candidate has a strictly positive probability.
      * Tempering and a bounded score prevent a saturated interest from monopolizing the feed. */
@@ -196,7 +192,43 @@ class RecommendationRanker(private val random: Random = Random()) {
         return balanceManualInterests(weaveClassics(
             interleave(exploreDisliked(diversify(spreadAuthors(feed))), subscribed, followed),
             pool
-        )).take(MAX_RESULTS)
+        )).take(MAX_RESULTS).also { assignInterestReasons(it, profile) }
+    }
+
+    /**
+     * A positive common tag is evidence, not a replacement for every recall/placement reason.
+     * Keep explicit subscription, exploration, classic, tag and author explanations. Among
+     * remaining items, label at most one in each full four-item block as interest inference,
+     * leaving at least three intervening items with their original reason. This never changes
+     * videos, scores or their order, and is reapplied after live reranking with its actual profile.
+     * Keep at least one representative of each existing source reason in this batch.
+     */
+    internal fun assignInterestReasons(items: List<VideoItem>, taste: PreferenceProfile) {
+        items.forEach { candidates[it.id]?.interestSuggested = false }
+        val remainingReasons = items.mapNotNull { candidates[it.id]?.reason() }.groupingBy { it }.eachCount().toMutableMap()
+        var lastSuggested = -INTEREST_REASON_INTERVAL
+        items.chunked(INTEREST_REASON_INTERVAL).forEachIndexed { blockIndex, block ->
+            if (block.size < INTEREST_REASON_INTERVAL) return@forEachIndexed
+            val selected = block.withIndex().mapNotNull { (offset, item) ->
+                val position = blockIndex * INTEREST_REASON_INTERVAL + offset
+                val candidate = candidates[item.id] ?: return@mapNotNull null
+                if (position - lastSuggested < INTEREST_REASON_INTERVAL || candidate.subscribed ||
+                    candidate.exploration || candidate.classic || candidate.matchedTags.isNotEmpty() ||
+                    candidate.matchedAuthorId.isNotBlank() || taste.isMuted(item) ||
+                    taste.matchesManualDisinterest(item) || taste.rankingScore(item) <= 0.0 ||
+                    (remainingReasons[candidate.reason()] ?: 0) <= 1) return@mapNotNull null
+                val evidence = item.tags.map(SearchQuery::canonicalTag).distinct().mapNotNull { tag ->
+                    taste.positiveTagWeights[tag]?.takeIf { it >= 1.0 && (taste.tagWeights[tag] ?: 0.0) > 0.0 }
+                }.sortedDescending().take(PreferenceProfile.TOP_TAGS).sum()
+                if (evidence <= 0.0) null else Triple(candidate, position, evidence)
+            }.maxByOrNull { it.third }
+            if (selected != null) {
+                val originalReason = selected.first.reason()
+                remainingReasons[originalReason] = remainingReasons.getValue(originalReason) - 1
+                selected.first.interestSuggested = true
+                lastSuggested = selected.second
+            }
+        }
     }
 
     /**
@@ -476,6 +508,8 @@ class RecommendationRanker(private val random: Random = Random()) {
         const val MAX_RESULTS = 80
         /** When alternatives exist, allow at most this many manual-interest matches in a row. */
         const val MANUAL_INTEREST_RUN = 3
+        /** At most one inferred-interest explanation per four recommendations. */
+        const val INTEREST_REASON_INTERVAL = 4
         /** 画像分在总分里占的比重，以及稳定扰动的幅度。 */
         const val TASTE_WEIGHT = 0.38
         const val JITTER_WEIGHT = 0.15

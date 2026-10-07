@@ -36,6 +36,7 @@ class RecommendationCandidateTest {
         val ranker = RecommendationRanker()
         ranker.remember(item()) {
             it.exploration = true
+            it.interestSuggested = true
             it.sourceScore = 9.0
             it.matchedTags += "miku"
         }
@@ -48,6 +49,7 @@ class RecommendationCandidateTest {
         assertFalse("上一轮的探索位标记不该带过来", fresh.exploration)
         assertEquals("上一轮的来源分也不该带过来", 0.0, fresh.sourceScore, 1e-9)
         assertTrue(fresh.matchedTags.isEmpty())
+        assertFalse(fresh.interestSuggested)
     }
 
     /** 同一轮里再记一次是补充信息，不是重来一次。 */

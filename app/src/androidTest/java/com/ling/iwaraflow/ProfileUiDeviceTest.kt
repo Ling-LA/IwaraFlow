@@ -35,10 +35,16 @@ class ProfileUiDeviceTest {
         bitmap.recycle()
         // Gradle 卸载测试应用会删除 externalFilesDir；立即用 shell 导出到独立目录。
         val export = "/sdcard/Download/IwaraFlow-ui-checks"
-        val descriptor = instrumentation.uiAutomation.executeShellCommand(
-            "mkdir -p '$export' && cp '${file.absolutePath}' '$export/$name.png' && echo exported")
-        val output = android.os.ParcelFileDescriptor.AutoCloseInputStream(descriptor).bufferedReader().use { it.readText() }
-        assertTrue("Screenshot export failed: $output", output.contains("exported"))
+        require(name.matches(Regex("[a-z0-9-]+")))
+        fun command(value: String): String {
+            val descriptor = instrumentation.uiAutomation.executeShellCommand(value)
+            return android.os.ParcelFileDescriptor.AutoCloseInputStream(descriptor).bufferedReader().use { it.readText() }
+        }
+        // UiAutomation executes argv directly; it does not interpret shell quotes or &&.
+        command("mkdir -p $export")
+        command("cp ${file.absolutePath} $export/$name.png")
+        val output = command("wc -c $export/$name.png")
+        assertTrue("Screenshot export failed: $output", (output.trim().substringBefore(' ').toLongOrNull() ?: 0) > 0)
     }
     @Test fun profileSectionsAndNativeUploadRenderAsFullPages() {
         val context = instrumentation.targetContext

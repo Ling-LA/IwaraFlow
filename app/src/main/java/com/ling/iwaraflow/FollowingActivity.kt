@@ -116,7 +116,7 @@ class FollowingActivity : AppCompatActivity() {
     }
 
     private fun openAuthor(author: IwaraAuthor) {
-        if (author.username.isBlank() || author.id.isBlank()) return
+        if (author.username.isBlank() && author.id.isBlank()) return
         authorLauncher.launch(Intent(this, AuthorActivity::class.java).apply {
             putExtra(AuthorActivity.EXTRA_ID, author.id)
             putExtra(AuthorActivity.EXTRA_NAME, author.name)

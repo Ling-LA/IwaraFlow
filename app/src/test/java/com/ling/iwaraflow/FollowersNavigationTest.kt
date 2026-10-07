@@ -47,6 +47,20 @@ class FollowersNavigationTest {
         }
     }
 
+    @Test fun knownAuthorIdStillOpensWhenUsernameIsUnavailable() {
+        mockConstruction(IwaraApi::class.java) { api, _ -> `when`(api.isLoggedIn()).thenReturn(true) }.use {
+            val controller = Robolectric.buildActivity(FollowingActivity::class.java).setup()
+            try {
+                val activity = controller.get()
+                activity.javaClass.getDeclaredMethod("openAuthor", IwaraAuthor::class.java).apply { isAccessible = true }
+                    .invoke(activity, IwaraAuthor("known-id", "示例作者", ""))
+                val target = shadowOf(activity).nextStartedActivity
+                assertEquals("known-id", target.getStringExtra(AuthorActivity.EXTRA_ID))
+                assertEquals(AuthorActivity::class.java.name, target.component!!.className)
+            } finally { controller.pause().stop().destroy() }
+        }
+    }
+
     @Test fun bothPlaybackMenusKeepSettingsWithoutDuplicateInterestEntry() {
         mockConstruction(IwaraApi::class.java).use {
             mockConstruction(UpdateManager::class.java).use {

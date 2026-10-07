@@ -43,13 +43,7 @@ jobs:
           target: default
           emulator-options: -no-window -gpu swiftshader -noaudio -no-boot-anim -camera-back none
           disable-animations: true
-          script: |
-            adb shell input keyevent KEYCODE_WAKEUP
-            adb shell wm dismiss-keyguard
-            adb shell settings put system screen_off_timeout 1800000
-            gradle :app:connectedDebugAndroidTest --no-daemon
-            gradle :app:connectedDebugAndroidTest -Pandroid.testInstrumentationRunnerArguments.backMode=key --no-daemon
-            adb pull /sdcard/Download/IwaraFlow-ui-checks app/build/reports/ui-checks
+          script: bash scripts/device-regressions.sh
       - name: Upload regression reports
         if: always()
         uses: actions/upload-artifact@v4

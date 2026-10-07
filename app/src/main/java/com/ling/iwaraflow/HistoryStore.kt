@@ -16,7 +16,8 @@ data class MutedEntities(
     val tags: Set<String> = emptySet()
 )
 
-class HistoryStore(context: Context, private val profileFile: String? = null) : SQLiteOpenHelper(context, profileFile ?: "iwaraflow.db", null, 11) {
+// SQLiteOpenHelper only implements AutoCloseable on newer Android versions.
+class HistoryStore(context: Context, private val profileFile: String? = null) : SQLiteOpenHelper(context, profileFile ?: "iwaraflow.db", null, 11), java.io.Closeable {
     /**
      * **UI 线程不写库**。划一条视频要写好几笔（观看记录、行为、已看标记），
      * 而这些方法都是 `@Synchronized` 的——和后台算画像抢同一把锁，用久了就是划走那一下的微卡顿。

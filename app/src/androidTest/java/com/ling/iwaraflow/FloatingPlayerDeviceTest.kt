@@ -55,7 +55,8 @@ class FloatingPlayerDeviceTest {
             val deadline = SystemClock.uptimeMillis() + 15000L
             var ready = false
             while (!ready && SystemClock.uptimeMillis() < deadline) {
-                main { instance()?.let { ready = (field(it, "window") as? FrameLayout)?.isLaidOut == true } }
+                main { instance()?.let { ready = (field(it, "window") as? FrameLayout)?.isLaidOut == true &&
+                    (field(it, "player") as? ExoPlayer)?.playbackState == androidx.media3.common.Player.STATE_READY } }
                 if (!ready) SystemClock.sleep(50)
             }
             assertTrue("Overlay should be attached", ready)

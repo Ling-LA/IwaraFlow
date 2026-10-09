@@ -14,7 +14,8 @@ import org.robolectric.annotation.Config
  * 也不把 refresh token 明文写到磁盘上；老版本写下的明文文件要删掉。
  */
 @RunWith(RobolectricTestRunner::class)
-@Config(sdk = [36])
+// Test migration explicitly; the application startup thread must not migrate between fixture writes and clear().
+@Config(sdk = [36], application = android.app.Application::class)
 class SecretStorageTest {
     private val context: Context get() = RuntimeEnvironment.getApplication()
 

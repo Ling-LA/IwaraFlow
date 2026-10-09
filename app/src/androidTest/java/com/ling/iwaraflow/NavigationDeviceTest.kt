@@ -197,7 +197,7 @@ class NavigationDeviceTest {
                 }
 
                 playFixture(home, R.id.pager)
-                main { invoke(home, "openAuthor", "fixture-author", "Fixture author", "") }
+                main { invoke(home, "openAuthor", "fixture-author", "Fixture author", "", "") }
                 var author = awaitActivity(AuthorActivity::class.java) as AuthorActivity
                 playAuthorFixture(author, mediaFile)
                 main { assertFalse((field(home, "adapter") as VideoAdapter).isActivePlaying()) }

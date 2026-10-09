@@ -17,8 +17,6 @@ import androidx.lifecycle.Lifecycle
 import androidx.recyclerview.widget.LinearLayoutManager
 import androidx.recyclerview.widget.RecyclerView
 import androidx.viewpager2.widget.ViewPager2
-import coil.load
-import coil.transform.CircleCropTransformation
 
 class AuthorActivity : AppCompatActivity(), PlaybackGuideHost {
     override val playbackGuideAdapter: VideoAdapter get() = feedAdapter
@@ -160,6 +158,7 @@ class AuthorActivity : AppCompatActivity(), PlaybackGuideHost {
         val username = intent.getStringExtra(EXTRA_USERNAME).orEmpty()
         val id = intent.getStringExtra(EXTRA_ID).orEmpty()
         val display = intent.getStringExtra(EXTRA_NAME).orEmpty()
+        AvatarImages.bind(findViewById(R.id.authorAvatar), intent.getStringExtra(EXTRA_AVATAR_URL).orEmpty())
         nameView.text = display.ifBlank { username }
         usernameView.text = if (username.isBlank()) "" else "@$username"
 
@@ -184,14 +183,7 @@ class AuthorActivity : AppCompatActivity(), PlaybackGuideHost {
                     nameView.text = loaded.name
                     usernameView.text = "@${loaded.username}"
                     descriptionView.text = loaded.description
-                    if (loaded.avatarUrl.isNotBlank()) {
-                        findViewById<android.widget.ImageView>(R.id.authorAvatar).load(loaded.avatarUrl) {
-                            crossfade(true)
-                            placeholder(R.drawable.bg_avatar_placeholder)
-                            error(R.drawable.bg_avatar_placeholder)
-                            transformations(CircleCropTransformation())
-                        }
-                    }
+                    AvatarImages.bind(findViewById(R.id.authorAvatar), loaded.avatarUrl)
                     refreshRelationUi()
                     if (api.isLoggedIn()) {
                         api.getFriendStatus(loaded.id) { statusResult ->
@@ -345,6 +337,7 @@ class AuthorActivity : AppCompatActivity(), PlaybackGuideHost {
             putExtra(EXTRA_ID, target.id)
             putExtra(EXTRA_NAME, target.name)
             putExtra(EXTRA_USERNAME, target.username)
+            putExtra(EXTRA_AVATAR_URL, target.avatarUrl)
         })
     }
 
@@ -590,6 +583,7 @@ class AuthorActivity : AppCompatActivity(), PlaybackGuideHost {
         const val EXTRA_ID = "author_id"
         const val EXTRA_NAME = "author_name"
         const val EXTRA_USERNAME = "author_username"
+        const val EXTRA_AVATAR_URL = "author_avatar_url"
         const val EXTRA_FOLLOWING = "author_following"
         const val EXTRA_RETURN_FROM_AUTHOR = "return_from_author"
 

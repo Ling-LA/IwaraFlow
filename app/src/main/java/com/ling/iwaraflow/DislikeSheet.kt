@@ -43,32 +43,45 @@ object DislikeSheet {
 
         val list = LinearLayout(activity).apply {
             orientation = LinearLayout.VERTICAL
-            setPadding(dp(12), dp(4), dp(12), dp(12))
-            background = androidx.core.content.ContextCompat.getDrawable(activity, R.drawable.bg_comments_panel)
+            setPadding(0, dp(4), 0, dp(12))
         }
         val sheet = ScrollView(activity).apply { addView(list); isFillViewport = false }
         val container = LinearLayout(activity).apply {
             orientation = LinearLayout.VERTICAL
             background = androidx.core.content.ContextCompat.getDrawable(activity, R.drawable.bg_comments_panel)
         }
-        val header = LinearLayout(activity).apply { gravity = Gravity.CENTER_VERTICAL; setPadding(dp(18), 0, dp(8), 0) }
-        header.addView(TextView(activity).apply { text = "不感兴趣"; textSize = 17f; setTextColor(0xFF17324A.toInt()) }, LinearLayout.LayoutParams(0, dp(48), 1f))
-        header.addView(TextView(activity).apply {
-            text = "×"; textSize = 26f; gravity = Gravity.CENTER; setTextColor(0xFF285C7B.toInt()); contentDescription = "关闭不感兴趣选项"
-            setOnClickListener { dialog.dismiss() }
-        }, LinearLayout.LayoutParams(dp(48), dp(48)))
-        container.addView(header)
-        container.addView(sheet, LinearLayout.LayoutParams(-1, 0, 1f))
-        // 拖拽把手：整块 28dp 高都能按到，按住往下拖过面板高度的四分之一（或者甩得够快）就收起。
+        // 与评论面板相同：把手、固定标题行、分隔线、可滚动内容。
+        // 拖动时移动整个面板，标题不会与选项列表分离。
+        val drag = DragToDismiss(container) { dialog.dismiss() }
         val handle = android.widget.FrameLayout(activity).apply {
-            layoutParams = LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, dp(28))
             addView(View(activity).apply {
-                layoutParams = android.widget.FrameLayout.LayoutParams(dp(40), dp(4), Gravity.CENTER)
                 setBackgroundColor(0xFFD5DEE6.toInt())
-            })
-            setOnTouchListener(DragToDismiss(sheet) { dialog.dismiss() })
+            }, android.widget.FrameLayout.LayoutParams(dp(40), dp(4), Gravity.CENTER))
+            setOnTouchListener(drag)
         }
-        list.addView(handle)
+        container.addView(handle, LinearLayout.LayoutParams(-1, dp(24)))
+        val header = LinearLayout(activity).apply {
+            orientation = LinearLayout.HORIZONTAL
+            gravity = Gravity.CENTER_VERTICAL
+            setPadding(dp(20), 0, dp(6), 0)
+            setOnTouchListener(drag)
+        }
+        header.addView(TextView(activity).apply {
+            text = "不感兴趣"; textSize = 17f; setTextColor(0xFF17324A.toInt())
+            typeface = android.graphics.Typeface.DEFAULT_BOLD
+            gravity = Gravity.CENTER_VERTICAL
+            androidx.core.view.ViewCompat.setAccessibilityHeading(this, true)
+        }, LinearLayout.LayoutParams(0, -1, 1f))
+        header.addView(TextView(activity).apply {
+            text = "✕"; textSize = 18f; gravity = Gravity.CENTER; setTextColor(0xFF607D93.toInt())
+            contentDescription = "关闭不感兴趣选项"
+            setOnClickListener { dialog.dismiss() }
+        }, LinearLayout.LayoutParams(dp(44), dp(44)))
+        container.addView(header, LinearLayout.LayoutParams(-1, dp(48)))
+        container.addView(View(activity).apply {
+            setBackgroundColor(0xFFEEF2F6.toInt())
+        }, LinearLayout.LayoutParams(-1, dp(1)))
+        container.addView(sheet, LinearLayout.LayoutParams(-1, 0, 1f))
         fun row(label: String, strong: Boolean = false, onClick: () -> Unit) {
             list.addView(TextView(activity).apply {
                 text = label
@@ -77,7 +90,7 @@ object DislikeSheet {
                 gravity = Gravity.CENTER_VERTICAL
                 minHeight = dp(48)
                 maxLines = 2; ellipsize = android.text.TextUtils.TruncateAt.END
-                setPadding(dp(18), 0, dp(18), 0)
+                setPadding(dp(20), 0, dp(20), 0)
                 background = with(android.util.TypedValue()) {
                     activity.theme.resolveAttribute(android.R.attr.selectableItemBackground, this, true)
                     androidx.core.content.ContextCompat.getDrawable(activity, resourceId)

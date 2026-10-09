@@ -4,15 +4,12 @@ import android.content.Intent
 import android.os.Bundle
 import android.view.Gravity
 import android.view.View
-import android.widget.ImageView
 import android.widget.TextView
 import androidx.appcompat.app.AppCompatActivity
 import androidx.core.view.ViewCompat
 import androidx.core.view.WindowInsetsCompat
 import androidx.recyclerview.widget.LinearLayoutManager
 import androidx.recyclerview.widget.RecyclerView
-import coil.load
-import coil.transform.CircleCropTransformation
 
 class MyActivity : AppCompatActivity() {
     private lateinit var api: IwaraApi
@@ -77,7 +74,8 @@ class MyActivity : AppCompatActivity() {
             val user = me ?: return@AuthorVideoListAdapter
             startActivity(Intent(this, AuthorActivity::class.java)
                 .putExtra(AuthorActivity.EXTRA_ID, user.id).putExtra(AuthorActivity.EXTRA_USERNAME, user.username)
-                .putExtra(AuthorActivity.EXTRA_NAME, user.name).putExtra("open_work_id", item.id))
+                .putExtra(AuthorActivity.EXTRA_NAME, user.name).putExtra(AuthorActivity.EXTRA_AVATAR_URL, user.avatarUrl)
+                .putExtra("open_work_id", item.id))
         }
         findViewById<RecyclerView>(R.id.authorVideos).apply {
             layoutManager = LinearLayoutManager(this@MyActivity)
@@ -116,11 +114,7 @@ class MyActivity : AppCompatActivity() {
             text = user.description.takeUnless { it.trim().equals("null", true) }.orEmpty()
             visibility = if (text.isBlank()) View.GONE else View.VISIBLE
         }
-        findViewById<ImageView>(R.id.authorAvatar).load(user.avatarUrl.ifBlank { null }) {
-            placeholder(R.drawable.bg_avatar_placeholder)
-            error(R.drawable.bg_avatar_placeholder)
-            transformations(CircleCropTransformation())
-        }
+        AvatarImages.bind(findViewById(R.id.authorAvatar), user.avatarUrl)
         findViewById<View>(R.id.followButton).isEnabled = true
         findViewById<View>(R.id.friendButton).isEnabled = true
     }

@@ -6,8 +6,6 @@ import android.view.ViewGroup
 import android.widget.ImageView
 import android.widget.TextView
 import androidx.recyclerview.widget.RecyclerView
-import coil.load
-import coil.transform.CircleCropTransformation
 
 class FollowingAuthorAdapter(
     private val items: List<IwaraAuthor>,
@@ -38,13 +36,7 @@ class FollowingAuthorAdapter(
                 }
             }
             description.text = item.description.replace('\n', ' ').trim().ifBlank { emptyDescription }
-            avatar.setImageDrawable(null)
-            if (item.avatarUrl.isNotBlank()) {
-                avatar.load(item.avatarUrl) {
-                    crossfade(true)
-                    transformations(CircleCropTransformation())
-                }
-            }
+            AvatarImages.bind(avatar, item.avatarUrl)
             itemView.setOnClickListener { onClick(item) }
         }
 

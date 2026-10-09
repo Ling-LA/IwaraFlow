@@ -189,6 +189,11 @@ class ProfileUiDeviceTest {
             }
             val portraitDeadline = android.os.SystemClock.uptimeMillis() + 5000
             while (activity.resources.configuration.orientation != android.content.res.Configuration.ORIENTATION_PORTRAIT && android.os.SystemClock.uptimeMillis() < portraitDeadline) android.os.SystemClock.sleep(100)
+            main {
+                DislikeSheet.show(activity, VideoItem("fixture", "示例作品", "示例作者", listOf("animation", "music", "nature", "game", "travel", "art"), 60), history, null)
+            }
+            screenshot("dislike-portrait")
+            instrumentation.sendKeyDownUpSync(android.view.KeyEvent.KEYCODE_BACK)
             main { PlaybackGuide.show(activity, false) }
             screenshot("fullscreen-guide-portrait")
             lateinit var pairHold: HoldReaction

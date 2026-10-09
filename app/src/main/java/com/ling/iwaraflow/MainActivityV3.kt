@@ -209,7 +209,7 @@ class MainActivityV3 : AppCompatActivity(), PlaybackGuideHost {
             topBarHeight = { topBar.height.takeIf { it > 0 } ?: dp(58) },
             gapPx = dp(COMMENTS_PANEL_GAP_DP),
             onNeedLogin = ::showLoginDialog,
-            onOpenAuthor = { author -> openAuthor(author.id, author.name, author.username) },
+            onOpenAuthor = { author -> openAuthor(author.id, author.name, author.username, author.avatarUrl) },
             onOpenChanged = { open -> closeCommentsOnBack.isEnabled = open },
             onCommentPosted = { item -> history.recordInteraction(item, "comment", 1.5); rerankQueue() },
             onOpenTag = ::openTagSearch,
@@ -835,7 +835,7 @@ class MainActivityV3 : AppCompatActivity(), PlaybackGuideHost {
         openAuthor(item.authorId, item.author, item.authorUsername)
     }
 
-    private fun openAuthor(id: String, name: String, username: String) {
+    private fun openAuthor(id: String, name: String, username: String, avatarUrl: String = "") {
         if (openingInternalPage || isFinishing || isDestroyed) return
         if (id.isBlank() && username.isBlank()) {
             Toast.makeText(this, "该视频没有作者资料", Toast.LENGTH_SHORT).show(); return
@@ -846,6 +846,7 @@ class MainActivityV3 : AppCompatActivity(), PlaybackGuideHost {
             putExtra(AuthorActivity.EXTRA_ID, id)
             putExtra(AuthorActivity.EXTRA_NAME, name)
             putExtra(AuthorActivity.EXTRA_USERNAME, username)
+            putExtra(AuthorActivity.EXTRA_AVATAR_URL, avatarUrl)
         })
     }
 

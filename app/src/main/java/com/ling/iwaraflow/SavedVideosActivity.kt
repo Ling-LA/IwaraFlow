@@ -353,6 +353,7 @@ class SavedVideosActivity : AppCompatActivity(), PlaybackGuideHost {
             putExtra(AuthorActivity.EXTRA_ID, target.id)
             putExtra(AuthorActivity.EXTRA_NAME, target.name)
             putExtra(AuthorActivity.EXTRA_USERNAME, target.username)
+            putExtra(AuthorActivity.EXTRA_AVATAR_URL, target.avatarUrl)
         })
     }
 

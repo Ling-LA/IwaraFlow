@@ -109,8 +109,10 @@ class FollowingActivity : AppCompatActivity() {
 
             runOnUiThread {
                 if (closed || index !in items.indices || items[index].id != author.id) return@runOnUiThread
-                items[index] = updated
-                adapter.notifyItemChanged(index)
+                if (items[index] != updated) {
+                    items[index] = updated
+                    adapter.notifyItemChanged(index)
+                }
             }
         }
     }
@@ -121,6 +123,7 @@ class FollowingActivity : AppCompatActivity() {
             putExtra(AuthorActivity.EXTRA_ID, author.id)
             putExtra(AuthorActivity.EXTRA_NAME, author.name)
             putExtra(AuthorActivity.EXTRA_USERNAME, author.username)
+            putExtra(AuthorActivity.EXTRA_AVATAR_URL, author.avatarUrl)
         })
     }
 

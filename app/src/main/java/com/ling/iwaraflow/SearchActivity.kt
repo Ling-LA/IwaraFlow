@@ -728,6 +728,7 @@ class SearchActivity : AppCompatActivity(), PlaybackGuideHost {
             putExtra(AuthorActivity.EXTRA_ID, author.id)
             putExtra(AuthorActivity.EXTRA_NAME, author.name)
             putExtra(AuthorActivity.EXTRA_USERNAME, author.username)
+            putExtra(AuthorActivity.EXTRA_AVATAR_URL, author.avatarUrl)
         })
     }
 

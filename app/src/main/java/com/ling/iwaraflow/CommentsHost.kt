@@ -40,10 +40,12 @@ class CommentsHost(
         onOpenAuthor = onOpenAuthor,
         onCommentPosted = onCommentPosted,
         onOpenTag = onOpenTag,
-        reasonFor = reasonFor
+        reasonFor = reasonFor,
+        onDanmakuPosted = { item, posted -> adapter.appendDanmaku(item.id, posted) }
     )
 
     init {
+        adapter.onQuickComment = panel::quickComment
         scrim.setOnClickListener { panel.close() }
     }
 
@@ -66,5 +68,5 @@ class CommentsHost(
 
     fun close() = panel.close()
 
-    fun release() = panel.release()
+    fun release() { adapter.onQuickComment = null; panel.release() }
 }

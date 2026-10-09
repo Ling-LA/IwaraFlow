@@ -135,6 +135,8 @@ class SearchActivity : AppCompatActivity(), PlaybackGuideHost {
     private var query = ""
     /** 这次搜索实际在用的几种写法：原词 + 中英日韩里另外三种的译法。 */
     private var queries = listOf<String>()
+    private var matchingNote = ""
+    private var expansionStarted = false
     private var searchPlan = SearchQuery(emptyList())
     private var availablePlan = SearchQuery(emptyList())
     private var authorPlan = SearchQuery(emptyList())
@@ -278,6 +280,7 @@ class SearchActivity : AppCompatActivity(), PlaybackGuideHost {
         hideKeyboard()
         if (inFeed) showList()
         query = trimmed
+        expansionStarted = false
         translationTasks.forEach { it.cancel() }; translationTasks.clear()
         expansionSerial++
         api.cancelPendingRequests()
@@ -287,7 +290,10 @@ class SearchActivity : AppCompatActivity(), PlaybackGuideHost {
         if (terms.isNotEmpty()) history.recordInteraction(VideoItem("search:$trimmed", trimmed, "", terms, 0), HistoryStore.ACTION_SEARCH, HistoryStore.SEARCH_WEIGHT)
         // 已经翻过的词直接用四种写法开搜；没翻过的先按原词搜着，译文回来再补进去。
         // 作者名只按输入的原词搜：作者的用户名就是他自己起的那一个，翻成别的语言反而搜偏。
-        searchPlan = if (originalOnly) SearchQuery.literal(trimmed) else SearchQuery.local(trimmed)
+        matchingNote = if (!originalOnly && prefs.aiSearchMatching) {
+            if (Translator.aiReady()) "AI 正在核对匹配词…" else "AI 精准匹配需先在设置配置 AI 翻译"
+        } else ""
+        searchPlan = if (originalOnly) SearchQuery.literal(trimmed) else SearchQuery.local(trimmed, prefs.aiSearchMatching)
         availablePlan = searchPlan
         authorPlan = SearchQuery.literal(trimmed)
         val start = searchPlan.seeds
@@ -300,21 +306,26 @@ class SearchActivity : AppCompatActivity(), PlaybackGuideHost {
         feedAdapter.replace(emptyList())
         loadNextPage(currentTab)
         updateStatus()
-        if (!originalOnly) expandQuery(trimmed)
+        if (!originalOnly && currentTab != Tab.AUTHORS) expandQuery(trimmed)
     }
 
     /** Expand each AND term independently, then restart validation with the complete plan. */
     private fun expandQuery(raw: String) {
+        expansionStarted = true
         val serial = ++expansionSerial
         val terms = SearchQuery.terms(raw)
         val groups = searchPlan.groups.toMutableList()
         var remaining = terms.size
         terms.forEachIndexed { index, term ->
-            translationTasks += QueryTranslator.expand(term, { !exiting && query == raw && serial == expansionSerial }) { expanded ->
+            translationTasks += QueryTranslator.expand(term, { !exiting && query == raw && serial == expansionSerial },
+                aiPrecision = prefs.aiSearchMatching, context = raw,
+                onWarning = { matchingNote = it; updateStatus() }) { expanded ->
                 if (exiting || isFinishing || isDestroyed || query != raw || serial != expansionSerial) return@expand
                 groups[index] = expanded.ifEmpty { listOf(term) }
                 remaining--
                 if (remaining != 0) return@expand
+                if (matchingNote == "AI 正在核对匹配词…") matchingNote = "AI 已核对匹配词，可在调整匹配词中查看"
+                updateStatus()
                 val updated = SearchQuery(groups.toList())
                 if (updated == searchPlan) return@expand
                 availablePlan = updated
@@ -378,6 +389,7 @@ class SearchActivity : AppCompatActivity(), PlaybackGuideHost {
         }
         resultList.scrollToPosition(0)
         loadIfNeeded(tab)
+        if (query.isNotBlank() && tab != Tab.AUTHORS && !originalOnly && !expansionStarted) expandQuery(query)
         updateStatus()
     }
 
@@ -628,6 +640,7 @@ class SearchActivity : AppCompatActivity(), PlaybackGuideHost {
         val sortHint = if (currentTab == Tab.AUTHORS) "关注数优先" else SearchSort.label(sortKey, sortDescending)
         statusView.text = buildString {
             append("$subject · $label · $sortHint")
+            if (currentTab != Tab.AUTHORS && matchingNote.isNotBlank()) append(" · $matchingNote")
             when {
                 failure != null && count == 0 -> append("  ·  加载失败：$failure")
                 failure != null -> append("  ·  $count 条 · 后续加载失败：$failure")

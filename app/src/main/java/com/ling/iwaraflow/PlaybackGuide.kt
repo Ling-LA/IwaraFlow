@@ -154,7 +154,12 @@ object PlaybackGuide {
             setWillNotDraw(false); setBackgroundColor(0xD0182532.toInt()); isClickable = true; isFocusable = true
             addView(heading); zones.forEach { addView(it) }; addView(controlCaption)
             footer.addView(TextView(activity).apply {
-                text = "仅在空白画面长按；导航、按钮和底部信息区除外\n单击暂停 / 显示控件 · 左右滑动调进度 · 双击点赞"; textSize = 11f; setTextColor(-1); gravity = Gravity.CENTER
+                text = "← 左滑快退     右滑快进 →"; textSize = 14f; setTextColor(-1)
+                typeface = Typeface.DEFAULT_BOLD; gravity = Gravity.CENTER
+                setPadding(0, 0, 0, dp(4))
+            })
+            footer.addView(TextView(activity).apply {
+                text = "仅在空白画面长按；导航、按钮和底部信息区除外\n单击暂停 / 显示控件 · 双击点赞\n长按评论 1 秒：快捷发送弹幕评论"; textSize = 11f; setTextColor(-1); gravity = Gravity.CENTER
             })
             val actions = LinearLayout(activity).apply { gravity = Gravity.CENTER }
             actions.addView(switch, LinearLayout.LayoutParams(dp(148), dp(44)))
@@ -168,7 +173,7 @@ object PlaybackGuide {
             updateLabels()
         }
         private fun updateLabels() {
-            heading.text = if (horizontal) "横屏全屏操作引导" else "播放画面长按指引"
+            heading.text = if (horizontal) "横屏全屏操作引导" else "播放画面操作指引"
             zones[0].text = "⊘\n长按${if (horizontal) "左侧" else "上方"}\n不感兴趣\n选择视频、作者或标签"
             zones[1].text = "♡ + ☆\n按住中间 2.5 秒\n点赞＋收藏\n提前松开即可取消"
             zones[2].text = "≫\n长按${if (horizontal) "右侧" else "下方"}\n2× 加速\n松开恢复正常速度"
@@ -183,7 +188,7 @@ object PlaybackGuide {
             val insets = androidx.core.view.ViewCompat.getRootWindowInsets(this)?.getInsets(
                 androidx.core.view.WindowInsetsCompat.Type.systemBars() or androidx.core.view.WindowInsetsCompat.Type.displayCutout())
             topInset = insets?.top ?: 0; bottomInset = insets?.bottom ?: 0
-            footer.measure(MeasureSpec.makeMeasureSpec(w, MeasureSpec.EXACTLY), MeasureSpec.makeMeasureSpec(dp(120), MeasureSpec.AT_MOST))
+            footer.measure(MeasureSpec.makeMeasureSpec(w, MeasureSpec.EXACTLY), MeasureSpec.makeMeasureSpec(dp(148), MeasureSpec.AT_MOST))
             footerTop = h - bottomInset - footer.measuredHeight
             chrome = readChrome()
             if (horizontal) {

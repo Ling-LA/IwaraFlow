@@ -37,11 +37,14 @@ class CommentsPanel(
     /** 点了简介页里的标签：页面去搜这个标签。 */
     private val onOpenTag: ((String) -> Unit)? = null,
     /** 「为什么推荐给我」：页面按视频 id 给出推荐理由，没有就不显示这一行。 */
-    private val reasonFor: ((String) -> String?)? = null
+    private val reasonFor: ((String) -> String?)? = null,
+    private val onDanmakuPosted: ((VideoItem, IwaraComment) -> Unit)? = null
 ) {
     enum class Tab { INFO, COMMENTS, DANMAKU }
 
-    private lateinit var tabDanmaku: TextView
+    private val tabDanmaku = root.findViewById<View>(R.id.panelTabDanmaku)
+    private val tabDanmakuLabel = root.findViewById<TextView>(R.id.panelTabDanmakuLabel)
+    private val tabDanmakuLine = root.findViewById<View>(R.id.panelTabDanmakuLine)
     private val tabInfo = root.findViewById<View>(R.id.panelTabInfo)
     private val tabInfoLabel = root.findViewById<TextView>(R.id.panelTabInfoLabel)
     private val tabInfoLine = root.findViewById<View>(R.id.panelTabInfoLine)
@@ -102,12 +105,7 @@ class CommentsPanel(
         tabInfo.setOnClickListener { selectTab(Tab.INFO) }
         tabComments.setOnClickListener { selectTab(Tab.COMMENTS) }
         // 手指滑到哪一页，页签跟着走。
-        tabDanmaku = TextView(root.context).apply {
-            text = "弹幕"; textSize = 16f; gravity = android.view.Gravity.CENTER
-            setPadding(24, 0, 24, 0); minHeight = (44 * resources.displayMetrics.density).toInt()
-            setOnClickListener { selectTab(Tab.DANMAKU) }
-        }
-        (root.findViewById<View>(R.id.panelHeader) as android.widget.LinearLayout).addView(tabDanmaku, 2)
+        tabDanmaku.setOnClickListener { selectTab(Tab.DANMAKU) }
         pages.addView(DanmakuSettings.create(root.context), android.widget.FrameLayout.LayoutParams(-1, -1))
         pages.onPageSettled = { index -> applyTab(Tab.entries[index]) }
         infoTags.movementMethod = android.text.method.LinkMovementMethod.getInstance()
@@ -131,6 +129,7 @@ class CommentsPanel(
         adapter.translationEnabled = true
         if (sameVideo) { selectTab(initialTab); return }
         generation++
+        sending = false
         cancelReply()
         draft = ""
         renderInput()
@@ -144,6 +143,16 @@ class CommentsPanel(
         renderInfo(item)
         // 刚打开，不用滑动动画，直接停在该在的那一页。
         selectTab(initialTab, animate = false)
+    }
+
+    /** Direct composer, without opening the full comment list or posting anything automatically. */
+    fun quickComment(item: VideoItem) {
+        if (video?.id != item.id) {
+            generation++; video = item; draft = ""; sending = false
+            commentsLoadedFor = null; adapter.replaceAll(emptyList()); total = -1
+        }
+        cancelReply()
+        openInput(quick = true)
     }
 
     fun close() {
@@ -217,8 +226,9 @@ class CommentsPanel(
         tab = next
         val info = next == Tab.INFO
         val commenting = next == Tab.COMMENTS
-        tabDanmaku.setTextColor(if (next == Tab.DANMAKU) 0xFF17324A.toInt() else 0xFF8A9BAA.toInt())
-        tabDanmaku.setTypeface(null, if (next == Tab.DANMAKU) android.graphics.Typeface.BOLD else android.graphics.Typeface.NORMAL)
+        tabDanmakuLabel.setTextColor(if (next == Tab.DANMAKU) 0xFF17324A.toInt() else 0xFF8A9BAA.toInt())
+        tabDanmakuLabel.setTypeface(null, if (next == Tab.DANMAKU) android.graphics.Typeface.BOLD else android.graphics.Typeface.NORMAL)
+        tabDanmakuLine.visibility = if (next == Tab.DANMAKU) View.VISIBLE else View.INVISIBLE
         tabInfoLabel.setTextColor(if (info) 0xFF17324A.toInt() else 0xFF8A9BAA.toInt())
         tabInfoLabel.setTypeface(null, if (info) android.graphics.Typeface.BOLD else android.graphics.Typeface.NORMAL)
         tabInfoLine.visibility = if (info) View.VISIBLE else View.INVISIBLE
@@ -462,7 +472,8 @@ class CommentsPanel(
         return null
     }
 
-    private fun openInput() {
+    private fun openInput(quick: Boolean = false) {
+        if (sending) { Toast.makeText(root.context, "正在发送，请稍候", Toast.LENGTH_SHORT).show(); return }
         val activity = hostActivity() ?: return
         if (activity.isFinishing || activity.isDestroyed) return
         if (!api.isLoggedIn()) { onNeedLogin(); return }
@@ -471,7 +482,8 @@ class CommentsPanel(
             replyTo = replyTo?.let { "@${replyName(it)}" },
             draft = draft,
             onSend = ::submit,
-            onDraft = { draft = it; renderInput() }
+            onDraft = { draft = it; renderInput() },
+            hint = if (quick) "发送弹幕评论（同步到 Iwara）" else null
         ).show()
     }
 
@@ -492,6 +504,7 @@ class CommentsPanel(
                 sending = false
                 result.onSuccess { posted ->
                     if (parentId == null) {
+                        onDanmakuPosted?.invoke(item, posted)
                         adapter.prepend(posted)
                         list.scrollToPosition(0)
                     } else {

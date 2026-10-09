@@ -26,7 +26,8 @@ class CommentInputDialog(
     replyTo: String?,
     draft: String,
     private val onSend: (String) -> Unit,
-    private val onDraft: (String) -> Unit
+    private val onDraft: (String) -> Unit,
+    hint: String? = null
 ) : Dialog(activity) {
     private val field: EditText
 
@@ -52,7 +53,7 @@ class CommentInputDialog(
         else { target.visibility = View.VISIBLE; target.text = replyTo }
 
         field = view.findViewById(R.id.inputField)
-        field.hint = if (replyTo.isNullOrBlank()) "说点什么…" else "回复 $replyTo"
+        field.hint = hint ?: if (replyTo.isNullOrBlank()) "说点什么…" else "回复 $replyTo"
         field.setText(draft)
         field.setSelection(draft.length)
         field.requestFocus()

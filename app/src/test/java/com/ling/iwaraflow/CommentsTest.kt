@@ -29,6 +29,7 @@ class CommentsTest {
     private val requests = mutableListOf<RecordedRequest>()
 
     @Before fun startFixtureApi() {
+        SecureSessionStore(RuntimeEnvironment.getApplication()).clearAuthentication()
         server = MockWebServer()
         server.dispatcher = object : Dispatcher() {
             override fun dispatch(request: RecordedRequest): MockResponse {
@@ -57,6 +58,7 @@ class CommentsTest {
     }
 
     @After fun stopFixtureApi() {
+        SecureSessionStore(RuntimeEnvironment.getApplication()).clearAuthentication()
         server.shutdown()
     }
 
@@ -138,6 +140,35 @@ class CommentsTest {
             assertTrue(error!!.message!!.contains("登录"))
             assertTrue("没登录就不该发请求", requests.isEmpty())
         } finally { api.close() }
+    }
+
+    @Test fun quickComposerPostsOnlyAfterExplicitSendAndUpdatesDanmaku() {
+        val api = loggedInApi()
+        val controller = org.robolectric.Robolectric.buildActivity(android.app.Activity::class.java).setup()
+        val activity = controller.get()
+        val root = activity.layoutInflater.inflate(R.layout.view_comments_panel, null)
+        activity.setContentView(root)
+        var posted: IwaraComment? = null
+        val panel = CommentsPanel(root, api, { fail("Already logged in") }, { _, _, _ -> },
+            onDanmakuPosted = { item, comment -> assertEquals("video-quick", item.id); posted = comment })
+        try {
+            panel.quickComment(VideoItem("video-quick", "示例", "作者", emptyList(), 0))
+            assertTrue(requests.isEmpty())
+            assertFalse(panel.isOpen)
+            val dialog = org.robolectric.shadows.ShadowDialog.getLatestDialog() as CommentInputDialog
+            dialog.findViewById<android.widget.EditText>(R.id.inputField).setText("这是一条弹幕评论")
+            dialog.findViewById<android.view.View>(R.id.inputSend).performClick()
+            val until = System.nanoTime() + 10_000_000_000L
+            while (posted == null && System.nanoTime() < until) {
+                org.robolectric.Shadows.shadowOf(android.os.Looper.getMainLooper()).idle(); Thread.sleep(10)
+            }
+            assertNotNull(posted)
+            assertEquals("这是一条弹幕评论", posted!!.body)
+            val request = requests.single()
+            assertEquals("POST", request.method)
+            val body = JSONObject(request.body.clone().readUtf8())
+            assertEquals("这是一条弹幕评论", body.getString("body")); assertFalse(body.has("parentId"))
+        } finally { panel.release(); api.close(); controller.pause().stop().destroy() }
     }
 
     // ---------------------------------------------------------------- 面板几何

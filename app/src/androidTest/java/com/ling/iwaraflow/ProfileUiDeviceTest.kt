@@ -97,6 +97,43 @@ class ProfileUiDeviceTest {
             }
         } finally { main { upload.finish() } }
     }
+    @Test fun commentTabsShareTheSameBaselineAndDanmakuSettingsIncludeTranslation() {
+        val context = instrumentation.targetContext
+        val activity = instrumentation.startActivitySync(Intent(context, AuthorActivity::class.java)
+            .putExtra(AuthorActivity.EXTRA_ID, "fixture").addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)) as AuthorActivity
+        lateinit var panel: CommentsPanel
+        try {
+            main {
+                val api = field(activity, "api").get(activity) as IwaraApi
+                api.close()
+                val page = android.widget.FrameLayout(activity).apply { setBackgroundColor(0xFF182532.toInt()) }
+                val root = activity.layoutInflater.inflate(R.layout.view_comments_panel, page, false)
+                page.addView(root, android.widget.FrameLayout.LayoutParams(-1, -1, android.view.Gravity.BOTTOM))
+                activity.setContentView(page)
+                panel = CommentsPanel(root, api, {}, { _, _, _ -> })
+                val item = VideoItem("fixture", "示例视频", "示例作者", listOf("animation"), 10).apply { description = "用于核对页签和弹幕设置的示例简介。" }
+                panel.open(item, (activity.resources.displayMetrics.heightPixels*0.7f).toInt(), 0, CommentsPanel.Tab.INFO)
+            }
+            screenshot("comments-tabs-info")
+            main {
+                fun baseline(id: Int): Int {
+                    val view = activity.findViewById<TextView>(id)
+                    val xy = IntArray(2); view.getLocationOnScreen(xy)
+                    return xy[1] + view.baseline
+                }
+                assertEquals(baseline(R.id.panelTabInfoLabel), baseline(R.id.commentsTitle))
+                assertEquals(baseline(R.id.panelTabInfoLabel), baseline(R.id.panelTabDanmakuLabel))
+                activity.findViewById<View>(R.id.panelTabDanmaku).performClick()
+            }
+            screenshot("danmaku-translation-settings")
+            main {
+                assertEquals(View.VISIBLE, activity.findViewById<View>(R.id.panelTabDanmakuLine).visibility)
+                assertEquals(View.INVISIBLE, activity.findViewById<View>(R.id.panelTabCommentsLine).visibility)
+                assertTrue(texts(activity.window.decorView).any { it.text.toString().contains("额外消耗 token") })
+            }
+        } finally { main { activity.finish() } }
+    }
+
     @Test fun normalPlaybackGuideExcludesVisibleControls() {
         val context = instrumentation.targetContext
         val activity = instrumentation.startActivitySync(Intent(context, AuthorActivity::class.java).putExtra(AuthorActivity.EXTRA_ID, "fixture").addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)) as AuthorActivity

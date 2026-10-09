@@ -36,8 +36,8 @@ data class SearchQuery(val groups: List<List<String>>) {
             .filter { it.isNotBlank() }.distinctBy(::normalize).toList()
 
         fun literal(raw: String) = SearchQuery(terms(raw).map { listOf(it) })
-        fun local(raw: String) = SearchQuery(terms(raw).map { term ->
-            knownAliases(term) ?: QueryTranslator.cached(term) ?: listOf(term)
+        fun local(raw: String, aiPrecision: Boolean = false) = SearchQuery(terms(raw).map { term ->
+            knownAliases(term) ?: QueryTranslator.cached(term, aiPrecision, raw) ?: listOf(term)
         })
 
         // Domain terms must never be sent to a general translator (e.g. 扶她 → Support Her).

@@ -41,7 +41,8 @@ class PlaybackGuideSessionTest {
             texts(guide).first { it.text == "查看横屏操作" }.performClick()
             assertEquals(ActivityInfo.SCREEN_ORIENTATION_SENSOR_LANDSCAPE, activity.requestedOrientation)
             measure(400, 900) // Window rotation has not completed yet.
-            assertTrue(texts(guide).any { it.text == "播放画面长按指引" })
+            assertTrue(texts(guide).any { it.text == "播放画面操作指引" })
+            assertTrue(texts(guide).any { it.text.contains("左滑快退") && it.text.contains("右滑快进") })
             measure(900, 400)
             assertTrue(texts(guide).any { it.text == "横屏全屏操作引导" })
             assertEquals(300f, guide.labelAreas.first().width(), 0f)

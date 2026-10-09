@@ -48,6 +48,10 @@ class VideoAdapter(
     private val onFullscreen: ((VideoItem, Boolean) -> Unit)? = null
 ) : RecyclerView.Adapter<VideoAdapter.Holder>() {
 
+    var onQuickComment: ((VideoItem) -> Unit)? = null
+    fun appendDanmaku(videoId: String, comment: IwaraComment) {
+        holders.forEach { it.appendDanmaku(videoId, comment) }
+    }
     val items = mutableListOf<VideoItem>()
     private val holders = mutableSetOf<Holder>()
     private val preloadHandler = Handler(Looper.getMainLooper())
@@ -384,6 +388,12 @@ class VideoAdapter(
         private var downAction = FullscreenGesture.Action.SPEED
         private var bufferingSince = 0L
         private var stableSince = 0L
+        private val commentHold = OneSecondHold(comments) {
+            bound?.takeIf { active }?.let { onQuickComment?.invoke(it) }
+        }
+        fun appendDanmaku(videoId: String, comment: IwaraComment) {
+            if (bound?.id == videoId) danmaku.appendComment(comment)
+        }
         private var danmakuLoaded = false
         private var player: ExoPlayer? = null
         private var resumeAfterGuide = false
@@ -579,6 +589,7 @@ class VideoAdapter(
             landscape = false
             aspect = 0f
             applyVideoInsets()
+            comments.contentDescription = "评论，长按 1 秒发送弹幕评论"
             comments.visibility = if (onComments == null) View.GONE else View.VISIBLE
             comments.setOnClickListener {
                 // 打开评论区也是一点兴趣，比点赞轻得多。
@@ -1348,6 +1359,7 @@ class VideoAdapter(
             // 卡片被回收去放别的视频了，上一条的点赞动画不能跟着漂过去。
             reactionBurst.cancelBurst()
             likeHold.cancel(); favoriteHold.cancel(); screenReactionHold.cancel()
+            commentHold.cancel()
             danmaku.clear(); danmakuLoaded = false; danmakuAttemptAt = -15000L
             networkHint.visibility = View.GONE
             applyVideoInsets()

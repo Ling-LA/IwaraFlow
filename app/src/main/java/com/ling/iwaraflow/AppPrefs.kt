@@ -42,6 +42,13 @@ class AppPrefs(context: Context) {
         get() = prefs.getBoolean("preload_next", true)
         set(value) = prefs.edit().putBoolean("preload_next", value).apply()
 
+    var aiSearchMatching: Boolean
+        get() = prefs.getBoolean("ai_search_matching", false)
+        set(value) = prefs.edit().putBoolean("ai_search_matching", value).apply()
+    var translateDanmaku: Boolean
+        get() = prefs.getBoolean("danmaku_translate", false)
+        set(value) = prefs.edit().putBoolean("danmaku_translate", value).apply()
+
     var danmakuEnabled: Boolean
         get() = prefs.getBoolean("danmaku_enabled", true)
         set(value) = prefs.edit().putBoolean("danmaku_enabled", value).apply()

@@ -71,6 +71,15 @@ class SettingsDialogController(
             text = "打开后简介面板里会在「推荐理由」下面写清这条视频的分是怎么来的：来源 / 质量 / 新鲜度 / 画像 / 扰动各占多少、命中了哪些标签、来自哪一路召回。只用于调推荐算法，平时可以关着。"
             textSize = 12f; setTextColor(UiPalette.resolve(context, 0xFF607D93.toInt())); setPadding(dp(4), dp(4), 0, dp(8))
         })
+        panel.addView(sectionTitle("搜索"))
+        val aiSearch = CheckBox(activity).apply {
+            text = "AI 精准多语言匹配"; isChecked = prefs.aiSearchMatching
+        }
+        panel.addView(aiSearch)
+        panel.addView(TextView(activity).apply {
+            text = "开启且已配置 AI 翻译时，使用同一个模型核对搜索词的含义和通行译名。不确定的词保留原文，仍要求全部关键词命中；作者名保持原文搜索。可能额外消耗 token，付费模型可能产生费用。"
+            textSize = 12f; setTextColor(UiPalette.resolve(context, 0xFF607D93.toInt())); setPadding(dp(4), 0, dp(4), dp(8))
+        })
         panel.addView(sectionTitle("播放"))
         val autoNext = CheckBox(activity).apply { text = "播放完毕自动进入下一条"; isChecked = prefs.autoNext }
         val autoPip = CheckBox(activity).apply { text = "切到后台时自动进入画中画"; isChecked = prefs.autoPip }
@@ -305,6 +314,7 @@ class SettingsDialogController(
                 model = trModel.text.toString().trim(),
                 aiVendor = vendorIds[trAiVendor.selectedItemPosition.coerceAtLeast(0)]
             )
+            prefs.aiSearchMatching = aiSearch.isChecked
             prefs.translation = newTranslation
             Translator.configure(newTranslation)
             Toast.makeText(activity, "设置已保存", Toast.LENGTH_SHORT).show()

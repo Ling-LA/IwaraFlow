@@ -252,8 +252,23 @@ class ProfileUiDeviceTest {
             screenshot("fullscreen-double-reaction")
             main { fullHold.cancel(); PlaybackGuide.show(activity, true) }
             screenshot("fullscreen-guide-landscape")
+            main { PlaybackGuide.dismiss(activity) }
+            // Dismissing a guide restores the host's fullscreen state before its orientation.
+            // Wait through both configuration changes; an immediate screenshot can capture a
+            // portrait dialog surface rotated by Android's landscape transition animation.
+            val settledDeadline = android.os.SystemClock.uptimeMillis() + 5000
+            var stableFrames = 0
+            while (stableFrames < 5 && android.os.SystemClock.uptimeMillis() < settledDeadline) {
+                var ready = false
+                main {
+                    ready = activity.resources.configuration.orientation == android.content.res.Configuration.ORIENTATION_LANDSCAPE &&
+                        activity.window.decorView.width > activity.window.decorView.height
+                }
+                stableFrames = if (ready) stableFrames + 1 else 0
+                android.os.SystemClock.sleep(100)
+            }
+            assertEquals("Landscape must settle before testing the sheet", 5, stableFrames)
             main {
-                PlaybackGuide.dismiss(activity)
                 DislikeSheet.show(activity, VideoItem("fixture", "示例作品", "示例作者", listOf("animation", "music", "nature", "game", "travel", "art"), 60), history, null)
             }
             screenshot("dislike-landscape")

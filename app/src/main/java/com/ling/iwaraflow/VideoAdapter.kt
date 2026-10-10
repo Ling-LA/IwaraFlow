@@ -1073,8 +1073,13 @@ class VideoAdapter(
                 if (fullscreenMode) (72*density).toInt() else maxOf((height*.25f).toInt(), (120*density).toInt()))
             val left = (12*density).toInt()
             val right = (if (!fullscreenMode && actionPanel.visibility == View.VISIBLE) 84*density else 12*density).toInt()
-            if (hintParams.bottomMargin != margin || hintParams.leftMargin != left || hintParams.rightMargin != right) {
-                hintParams.bottomMargin = margin; hintParams.leftMargin = left; hintParams.rightMargin = right
+            // FrameLayout CENTER_HORIZONTAL offsets by the full margin difference.
+            // Half margins center the hint within the space left by the action column;
+            // maxWidth still reserves the full safe margins and prevents narrow-screen clipping.
+            val centerLeft = left / 2
+            val centerRight = right / 2
+            if (hintParams.bottomMargin != margin || hintParams.leftMargin != centerLeft || hintParams.rightMargin != centerRight) {
+                hintParams.bottomMargin = margin; hintParams.leftMargin = centerLeft; hintParams.rightMargin = centerRight
                 networkHint.layoutParams = hintParams
             }
             networkHint.maxWidth = ((itemView.width.takeIf { it > 0 } ?: itemView.resources.displayMetrics.widthPixels) - left - right).coerceAtLeast(1)

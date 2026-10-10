@@ -158,6 +158,9 @@ class ProfileUiDeviceTest {
             main {
                 assertTrue(hint.top > holder.itemView.height / 2)
                 assertTrue(hint.bottom < holder.itemView.height)
+                val density = activity.resources.displayMetrics.density
+                assertTrue(hint.left >= (12*density).toInt()-1)
+                assertTrue(hint.right <= holder.itemView.width - (84*density).toInt()+1)
                 assertTrue(hint.background is android.graphics.drawable.GradientDrawable)
                 hint.networkStable(true)
             }

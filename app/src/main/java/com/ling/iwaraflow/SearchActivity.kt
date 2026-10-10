@@ -114,6 +114,9 @@ class SearchActivity : AppCompatActivity(), PlaybackGuideHost {
 
     private lateinit var listPage: View
     private lateinit var feedPage: View
+    private lateinit var refreshLayout: androidx.swiperefreshlayout.widget.SwipeRefreshLayout
+    private var refreshingTab: Tab? = null
+    private var refreshingSerial = -1
     private lateinit var resultList: RecyclerView
     private lateinit var pager: ViewPager2
     private lateinit var statusView: TextView
@@ -172,6 +175,11 @@ class SearchActivity : AppCompatActivity(), PlaybackGuideHost {
         listPage = findViewById(R.id.searchListPage)
         feedPage = findViewById(R.id.searchFeedPage)
         resultList = findViewById(R.id.searchResults)
+        refreshLayout = findViewById(R.id.searchRefresh)
+        refreshLayout.isEnabled = false
+        refreshLayout.setColorSchemeColors(UiPalette.resolve(this, 0xFF285C7B.toInt()))
+        refreshLayout.setOnRefreshListener { refreshResults() }
+        refreshLayout.contentDescription = "下拉刷新搜索结果"
         pager = findViewById(R.id.searchPager)
         statusView = findViewById(R.id.searchStatus)
         findViewById<View>(R.id.searchMatchOptions).setOnClickListener { showMatchOptions() }
@@ -317,6 +325,27 @@ class SearchActivity : AppCompatActivity(), PlaybackGuideHost {
         loadNextPage(currentTab)
         updateStatus()
         if (!originalOnly && currentTab != Tab.AUTHORS) expandQuery(trimmed)
+    }
+
+    /** Reload submitted search criteria without re-translating or recording another interest action. */
+    private fun refreshResults() {
+        if (query.isBlank() || inFeed || exiting) { finishRefresh(); return }
+        if (refreshingTab != null) return
+        querySerial++
+        api.cancelPendingRequests()
+        refreshingTab = currentTab; refreshingSerial = querySerial
+        refreshLayout.isRefreshing = true
+        videoTab.reset(queries); tagTab.reset(queries); authorTab.reset(authorPlan.seeds)
+        videoAdapter.notifyDataSetChanged(); tagAdapter.notifyDataSetChanged(); authorAdapter.notifyDataSetChanged()
+        feedTab = null; feedAdapter.replace(emptyList())
+        resultList.scrollToPosition(0)
+        loadNextPage(currentTab)
+        updateStatus()
+    }
+
+    private fun finishRefresh() {
+        refreshingTab = null; refreshingSerial = -1
+        refreshLayout.isRefreshing = false
     }
 
     /** Expand each AND term independently, then restart validation with the complete plan. */
@@ -625,7 +654,9 @@ class SearchActivity : AppCompatActivity(), PlaybackGuideHost {
         exiting || isFinishing || isDestroyed || serial != querySerial
 
     private fun updateStatus() {
-        if (query.isBlank()) return
+        refreshLayout.isEnabled = query.isNotBlank() && !inFeed
+        if (query.isBlank()) { finishRefresh(); return }
+        if (refreshingTab != null && (refreshingSerial != querySerial || refreshingTab != currentTab)) finishRefresh()
         val label = when (currentTab) {
             Tab.VIDEOS -> "视频名"
             Tab.TAGS -> "标签"
@@ -646,6 +677,8 @@ class SearchActivity : AppCompatActivity(), PlaybackGuideHost {
             Tab.TAGS -> tagTab.noMore
             Tab.AUTHORS -> authorTab.noMore
         }
+        val state: TabState = when (currentTab) { Tab.VIDEOS -> videoTab; Tab.TAGS -> tagTab; Tab.AUTHORS -> authorTab }
+        if (refreshingTab == currentTab && !loading && state.variants.all { it.attempted }) finishRefresh()
         val count = currentCount()
         // 几种写法一起搜：把实际在搜的词都写出来，看得见中英日韩都覆盖到了。
         // 作者名只搜原词，就只写原词。
@@ -725,6 +758,7 @@ class SearchActivity : AppCompatActivity(), PlaybackGuideHost {
             resort(videoTab, Tab.VIDEOS); resort(tagTab, Tab.TAGS); updateStatus()
             if (currentCount() < 6) loadNextPage(currentTab)
         }
+        updateStatus()
     }
 
     private fun setFullscreen(enabled: Boolean) {

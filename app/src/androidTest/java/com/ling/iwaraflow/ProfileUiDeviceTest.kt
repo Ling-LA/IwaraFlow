@@ -257,6 +257,12 @@ class ProfileUiDeviceTest {
                 DislikeSheet.show(activity, VideoItem("fixture", "示例作品", "示例作者", listOf("animation", "music", "nature", "game", "travel", "art"), 60), history, null)
             }
             screenshot("dislike-landscape")
+            val landscapeCapture = instrumentation.uiAutomation.takeScreenshot()
+            try {
+                val samples = landscapeCapture.width / 10 until landscapeCapture.width * 3 / 10
+                val light = samples.count { x -> android.graphics.Color.red(landscapeCapture.getPixel(x, landscapeCapture.height-4)) > 220 }
+                assertTrue("Landscape panel must reach the bottom edge", light > samples.count() * .7)
+            } finally { landscapeCapture.recycle() }
             instrumentation.sendKeyDownUpSync(android.view.KeyEvent.KEYCODE_BACK)
             main {
                 activity.requestedOrientation = android.content.pm.ActivityInfo.SCREEN_ORIENTATION_PORTRAIT
@@ -264,7 +270,7 @@ class ProfileUiDeviceTest {
             val portraitDeadline = android.os.SystemClock.uptimeMillis() + 5000
             while (activity.resources.configuration.orientation != android.content.res.Configuration.ORIENTATION_PORTRAIT && android.os.SystemClock.uptimeMillis() < portraitDeadline) android.os.SystemClock.sleep(100)
             main {
-                DislikeSheet.show(activity, VideoItem("fixture", "示例作品", "示例作者", listOf("animation", "music", "nature", "game", "travel", "art"), 60), history, null)
+                DislikeSheet.show(activity, VideoItem("fixture", "示例作品", "示例作者", listOf("animation", "music"), 60), history, null)
             }
             screenshot("dislike-portrait")
             val sheetCapture = instrumentation.uiAutomation.takeScreenshot()
@@ -278,6 +284,13 @@ class ProfileUiDeviceTest {
                 }
                 assertTrue("Sheet background must extend through the navigation area: $lightPixels/${samples.count()}",
                     lightPixels > samples.count() * 0.7)
+                for (x in listOf(1, sheetCapture.width-2)) {
+                    assertTrue("No full-width white footer outside the panel", android.graphics.Color.red(sheetCapture.getPixel(x, sheetCapture.height-4)) < 220)
+                }
+                val firstWhite = (0 until sheetCapture.height).first { y ->
+                    android.graphics.Color.red(sheetCapture.getPixel(sheetCapture.width/2, y)) > 220
+                }
+                assertTrue("Portrait panel must not exceed 60% of screen height", firstWhite >= sheetCapture.height * .39)
             } finally { sheetCapture.recycle() }
             instrumentation.sendKeyDownUpSync(android.view.KeyEvent.KEYCODE_BACK)
             main { PlaybackGuide.show(activity, false) }
@@ -307,6 +320,48 @@ class ProfileUiDeviceTest {
             screenshot("double-reaction-buttons")
             main { pairHold.cancel() }
         } finally { main { PlaybackGuide.dismiss(activity); activity.finish() }; history.close() }
+    }
+
+    @Test fun pullingEmptySearchResultsRestartsTheSubmittedQuery() {
+        val context = instrumentation.targetContext
+        val activity = instrumentation.startActivitySync(Intent(context, SearchActivity::class.java).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)) as SearchActivity
+        try {
+            main {
+                // A closed client keeps the request pending without making a network call.
+                (field(activity, "api").get(activity) as IwaraApi).close()
+                field(activity, "query").set(activity, "animation")
+                field(activity, "queries").set(activity, listOf("animation"))
+                field(activity, "searchPlan").set(activity, SearchQuery.literal("animation"))
+                activity.javaClass.getDeclaredMethod("updateStatus").apply { isAccessible = true }.invoke(activity)
+            }
+            instrumentation.waitForIdleSync()
+            val location = IntArray(2)
+            var distance = 0f; var startX = 0f; var startY = 0f; var before = 0
+            main {
+                val refresh = activity.findViewById<androidx.swiperefreshlayout.widget.SwipeRefreshLayout>(R.id.searchRefresh)
+                assertTrue(refresh.isEnabled)
+                refresh.getLocationOnScreen(location)
+                startX = location[0] + refresh.width / 2f
+                startY = location[1] + 12 * activity.resources.displayMetrics.density
+                distance = minOf(refresh.height * .8f, 220 * activity.resources.displayMetrics.density)
+                before = field(activity, "querySerial").getInt(activity)
+            }
+            val down = android.os.SystemClock.uptimeMillis()
+            fun touch(action: Int, y: Float) {
+                android.view.MotionEvent.obtain(down, android.os.SystemClock.uptimeMillis(), action, startX, y, 0).also {
+                    instrumentation.sendPointerSync(it); it.recycle()
+                }
+            }
+            touch(android.view.MotionEvent.ACTION_DOWN, startY)
+            repeat(12) { i -> android.os.SystemClock.sleep(20); touch(android.view.MotionEvent.ACTION_MOVE, startY + distance * (i+1) / 12) }
+            touch(android.view.MotionEvent.ACTION_UP, startY + distance)
+            android.os.SystemClock.sleep(700)
+            main {
+                assertEquals(before + 1, field(activity, "querySerial").getInt(activity))
+                assertTrue(activity.findViewById<androidx.swiperefreshlayout.widget.SwipeRefreshLayout>(R.id.searchRefresh).isRefreshing)
+            }
+            screenshot("search-refresh")
+        } finally { main { activity.finish() } }
     }
 
 }

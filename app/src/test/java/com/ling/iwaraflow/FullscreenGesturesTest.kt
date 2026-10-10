@@ -161,7 +161,7 @@ class FullscreenGesturesTest {
         val landscape = DislikeSheet.panelSize(1920, 1080, 3f)
         assertTrue(landscape.first < 1920/2); assertTrue(landscape.second < 1080)
         val portrait = DislikeSheet.panelSize(1080, 1920, 3f)
-        assertTrue(portrait.first < 1080); assertTrue(portrait.second <= (1920*.7).toInt())
+        assertTrue(portrait.first < 1080); assertTrue(portrait.second <= (1920*.6).toInt())
     }
     @Test fun guideAppearsOncePerOrientationAndCanBeOpenedAgainFromSettings() {
         val controller = Robolectric.buildActivity(SettingsActivity::class.java).setup()

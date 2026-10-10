@@ -48,6 +48,7 @@ object DislikeSheet {
         val sheet = ScrollView(activity).apply { addView(list); isFillViewport = false }
         val container = LinearLayout(activity).apply {
             orientation = LinearLayout.VERTICAL
+            tag = "dislike_panel"
             background = androidx.core.content.ContextCompat.getDrawable(activity, R.drawable.bg_comments_panel)
         }
         // 与评论面板相同：把手、固定标题行、分隔线、可滚动内容。
@@ -120,8 +121,6 @@ object DislikeSheet {
         // Floating windows are kept above the navigation bar on newer Android versions.
         // Use a transparent full-window host, with only the actual panel drawn and clickable.
         val root = android.widget.FrameLayout(activity)
-        val navigationBackground = View(activity).apply { setBackgroundColor(Color.WHITE) }
-        root.addView(navigationBackground, android.widget.FrameLayout.LayoutParams(-1, 0, Gravity.BOTTOM))
         container.isClickable = true
         root.addView(container, android.widget.FrameLayout.LayoutParams(-1, -1))
         root.setOnClickListener { dialog.dismiss() }
@@ -130,19 +129,19 @@ object DislikeSheet {
             if (root.width <= 0 || root.height <= 0) return
             val landscape = root.width > root.height
             val size = panelSize(root.width, root.height, density)
+            list.measure(View.MeasureSpec.makeMeasureSpec(size.first, View.MeasureSpec.EXACTLY),
+                View.MeasureSpec.makeMeasureSpec(0, View.MeasureSpec.UNSPECIFIED))
+            val contentHeight = dp(73) + list.measuredHeight + navigationInsets.bottom
             val params = container.layoutParams as android.widget.FrameLayout.LayoutParams
-            params.width = size.first; params.height = size.second
-            params.gravity = if (landscape) Gravity.START or Gravity.CENTER_VERTICAL else Gravity.BOTTOM or Gravity.CENTER_HORIZONTAL
+            params.width = size.first; params.height = minOf(size.second, contentHeight)
+            // Both orientations meet the bottom edge; only the panel paints its safe area.
+            params.gravity = Gravity.BOTTOM or if (landscape) Gravity.START else Gravity.CENTER_HORIZONTAL
             params.leftMargin = if (landscape) dp(16) + navigationInsets.left else 0
             container.layoutParams = params
-            container.setPadding(0, 0, 0, if (landscape) 0 else navigationInsets.bottom)
-            navigationBackground.visibility = if (landscape) View.GONE else View.VISIBLE
-            navigationBackground.layoutParams = (navigationBackground.layoutParams as android.widget.FrameLayout.LayoutParams).apply {
-                height = navigationInsets.bottom
-            }
+            container.setPadding(0, 0, 0, navigationInsets.bottom)
             dialog.window?.let { window ->
                 @Suppress("DEPRECATION")
-                window.navigationBarColor = if (landscape) Color.TRANSPARENT else Color.WHITE
+                window.navigationBarColor = Color.TRANSPARENT
                 androidx.core.view.WindowCompat.getInsetsController(window, window.decorView).isAppearanceLightNavigationBars = !landscape
             }
         }
@@ -163,7 +162,7 @@ object DislikeSheet {
             setDimAmount(0.3f)
             androidx.core.view.WindowCompat.setDecorFitsSystemWindows(this, false)
             @Suppress("DEPRECATION")
-            navigationBarColor = if (activity.resources.configuration.orientation == android.content.res.Configuration.ORIENTATION_PORTRAIT) Color.WHITE else Color.TRANSPARENT
+            navigationBarColor = Color.TRANSPARENT
             if (android.os.Build.VERSION.SDK_INT >= 29) isNavigationBarContrastEnforced = false
             androidx.core.view.WindowCompat.getInsetsController(this, decorView).isAppearanceLightNavigationBars = activity.resources.configuration.orientation == android.content.res.Configuration.ORIENTATION_PORTRAIT
         }
@@ -178,7 +177,7 @@ object DislikeSheet {
 
     internal fun panelSize(width: Int, height: Int, density: Float): Pair<Int, Int> =
         if (width > height) minOf((width*0.44f).toInt(), (360*density).toInt()) to (height*0.86f).toInt()
-        else minOf((width-24*density).toInt(), (560*density).toInt()).coerceAtLeast(1) to (height*0.7f).toInt()
+        else minOf((width-24*density).toInt(), (560*density).toInt()).coerceAtLeast(1) to (height*0.6f).toInt()
 
     /** 只把选中的那一维写进画像：作者不带标签，标签不带作者。 */
     internal fun apply(context: Context, item: VideoItem, history: HistoryStore, kind: Kind, tag: String, onApplied: ((VideoItem, Kind) -> Unit)?) {

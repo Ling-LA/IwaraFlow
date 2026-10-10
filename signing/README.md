@@ -10,7 +10,7 @@
 
 ## 升级衔接
 
-应用最低支持 Android 9，使用 APK v3 和 `--rotation-min-sdk-version 28`，所有支持的系统均采用新密钥。轮换证明允许旧版数据迁入新版，明确关闭旧签名的 rollback、shared UID、signature permission 和 authenticator 信任。旧开发密钥曾公开，删除当前文件不能消除 Git 历史中的副本。
+应用最低支持 Android 9，使用 APK v3 和 `--rotation-min-sdk-version 28`，所有支持的系统均采用新密钥。轮换证明允许旧版数据迁入新版，保留旧版权限声明升级所需的 signature permission 能力，明确关闭旧签名的 rollback、shared UID 和 authenticator 信任。AndroidX 的 `DYNAMIC_RECEIVER_NOT_EXPORTED_PERMISSION` 在旧版已声明，关闭权限继承会触发系统的重复权限错误而无法覆盖安装。旧开发密钥曾公开，删除当前文件不能消除 Git 历史中的副本。
 
 发布必须通过 Android 9、13、16 的覆盖升级测试：安装 0.16.9、写入数据标记、覆盖安装新版并检查标记、拒绝旧密钥重新签署的同版本 APK、验证新签名可重装。测试仅从固定历史提交读取公开旧密钥，用于拒绝测试，不用于正式签名。
 

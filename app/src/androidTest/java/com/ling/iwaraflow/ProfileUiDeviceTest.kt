@@ -267,6 +267,13 @@ class ProfileUiDeviceTest {
                 DislikeSheet.show(activity, VideoItem("fixture", "示例作品", "示例作者", listOf("animation", "music", "nature", "game", "travel", "art"), 60), history, null)
             }
             screenshot("dislike-portrait")
+            val sheetCapture = instrumentation.uiAutomation.takeScreenshot()
+            try {
+                // Sample away from the system navigation icons / gesture pill.
+                val bottomColor = sheetCapture.getPixel(sheetCapture.width / 3, sheetCapture.height - 4)
+                assertTrue("Sheet background must extend through the navigation area",
+                    android.graphics.Color.red(bottomColor) > 220 && android.graphics.Color.green(bottomColor) > 220 && android.graphics.Color.blue(bottomColor) > 220)
+            } finally { sheetCapture.recycle() }
             instrumentation.sendKeyDownUpSync(android.view.KeyEvent.KEYCODE_BACK)
             main { PlaybackGuide.show(activity, false) }
             screenshot("fullscreen-guide-portrait")

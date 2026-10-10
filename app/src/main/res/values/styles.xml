@@ -14,6 +14,14 @@
         <item name="buttonBarNeutralButtonStyle">@style/IwaraFlow.DialogButton.Text</item>
     </style>
 
+    <!-- A non-floating transparent window can draw the sheet behind system navigation. -->
+    <style name="Theme.IwaraFlow.Sheet" parent="Theme.IwaraFlow">
+        <item name="android:windowIsFloating">false</item>
+        <item name="android:windowIsTranslucent">true</item>
+        <item name="android:windowBackground">@android:color/transparent</item>
+        <item name="android:backgroundDimEnabled">true</item>
+    </style>
+
     <style name="Theme.IwaraFlow.Dialog" parent="Theme.AppCompat.DayNight.Dialog.Alert">
         <item name="android:windowBackground">@drawable/bg_dialog_surface</item>
         <item name="android:colorAccent">#FF5C85</item>

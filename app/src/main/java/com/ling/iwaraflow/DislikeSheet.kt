@@ -38,7 +38,7 @@ object DislikeSheet {
         if (activity.isFinishing || activity.isDestroyed) return
         val density = context.resources.displayMetrics.density
         val dp = { v: Int -> (v * density).toInt() }
-        val dialog = Dialog(activity)
+        val dialog = Dialog(activity, R.style.Theme_IwaraFlow_Sheet)
         dialog.requestWindowFeature(Window.FEATURE_NO_TITLE)
 
         val list = LinearLayout(activity).apply {
@@ -117,7 +117,44 @@ object DislikeSheet {
         divider()
         row("取消") { }
 
-        dialog.setContentView(container)
+        // Floating windows are kept above the navigation bar on newer Android versions.
+        // Use a transparent full-window host, with only the actual panel drawn and clickable.
+        val root = android.widget.FrameLayout(activity)
+        val navigationBackground = View(activity).apply { setBackgroundColor(Color.WHITE) }
+        root.addView(navigationBackground, android.widget.FrameLayout.LayoutParams(-1, 0, Gravity.BOTTOM))
+        container.isClickable = true
+        root.addView(container, android.widget.FrameLayout.LayoutParams(-1, -1))
+        root.setOnClickListener { dialog.dismiss() }
+        var navigationInsets = androidx.core.graphics.Insets.NONE
+        fun layoutPanel() {
+            if (root.width <= 0 || root.height <= 0) return
+            val landscape = root.width > root.height
+            val size = panelSize(root.width, root.height, density)
+            val params = container.layoutParams as android.widget.FrameLayout.LayoutParams
+            params.width = size.first; params.height = size.second
+            params.gravity = if (landscape) Gravity.START or Gravity.CENTER_VERTICAL else Gravity.BOTTOM or Gravity.CENTER_HORIZONTAL
+            params.leftMargin = if (landscape) dp(16) + navigationInsets.left else 0
+            container.layoutParams = params
+            container.setPadding(0, 0, 0, if (landscape) 0 else navigationInsets.bottom)
+            navigationBackground.visibility = if (landscape) View.GONE else View.VISIBLE
+            navigationBackground.layoutParams = (navigationBackground.layoutParams as android.widget.FrameLayout.LayoutParams).apply {
+                height = navigationInsets.bottom
+            }
+            dialog.window?.let { window ->
+                @Suppress("DEPRECATION")
+                window.navigationBarColor = if (landscape) Color.TRANSPARENT else Color.WHITE
+                androidx.core.view.WindowCompat.getInsetsController(window, window.decorView).isAppearanceLightNavigationBars = !landscape
+            }
+        }
+        root.addOnLayoutChangeListener { _, l, t, r, b, oldL, oldT, oldR, oldB ->
+            if (r-l != oldR-oldL || b-t != oldB-oldT) layoutPanel()
+        }
+        androidx.core.view.ViewCompat.setOnApplyWindowInsetsListener(root) { _, insets ->
+            navigationInsets = insets.getInsets(androidx.core.view.WindowInsetsCompat.Type.navigationBars())
+            layoutPanel()
+            insets
+        }
+        dialog.setContentView(root)
         dialog.setCanceledOnTouchOutside(true)
         dialog.window?.apply {
             setBackgroundDrawable(ColorDrawable(Color.TRANSPARENT))
@@ -130,23 +167,13 @@ object DislikeSheet {
             if (android.os.Build.VERSION.SDK_INT >= 29) isNavigationBarContrastEnforced = false
             androidx.core.view.WindowCompat.getInsetsController(this, decorView).isAppearanceLightNavigationBars = activity.resources.configuration.orientation == android.content.res.Configuration.ORIENTATION_PORTRAIT
         }
-        androidx.core.view.ViewCompat.setOnApplyWindowInsetsListener(container) { v, insets ->
-            val bars = insets.getInsets(androidx.core.view.WindowInsetsCompat.Type.navigationBars())
-            v.setPadding(bars.left, 0, bars.right, bars.bottom)
-            insets
-        }
         dialog.show()
-        androidx.core.view.ViewCompat.requestApplyInsets(container)
-        val decor = activity.window.decorView
-        val width = decor.width.takeIf { it > 0 } ?: context.resources.displayMetrics.widthPixels
-        val height = decor.height.takeIf { it > 0 } ?: context.resources.displayMetrics.heightPixels
-        val size = panelSize(width, height, density)
         dialog.window?.apply {
-            // 横屏左侧紧凑面板；始终保留一半以上的视频画面，长列表在面板内滚动。
-            setGravity(if (width > height) Gravity.START or Gravity.CENTER_VERTICAL else Gravity.BOTTOM or Gravity.CENTER_HORIZONTAL)
-            attributes = attributes.apply { x = if (width > height) dp(16) else 0; y = 0 }
-            setLayout(size.first, size.second)
+            setGravity(Gravity.FILL)
+            setLayout(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.MATCH_PARENT)
         }
+        androidx.core.view.ViewCompat.requestApplyInsets(root)
+
     }
 
     internal fun panelSize(width: Int, height: Int, density: Float): Pair<Int, Int> =

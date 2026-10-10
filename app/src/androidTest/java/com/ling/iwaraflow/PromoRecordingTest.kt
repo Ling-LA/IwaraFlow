@@ -179,8 +179,15 @@ class PromoRecordingTest {
         awaitPlaying(home)
         record("01-feed",10) {
             SystemClock.sleep(2600)
-            gesture(460f,1450f,460f,450f,420)
-            SystemClock.sleep(600)
+            val pager=home.findViewById<ViewPager2>(R.id.pager)
+            main {
+                assertEquals("Two local examples must be bound",2,pager.adapter!!.itemCount)
+                assertEquals(ViewPager2.ORIENTATION_VERTICAL,pager.orientation)
+                assertTrue("Pager must accept a scripted native drag",pager.beginFakeDrag())
+            }
+            repeat(18) { main { pager.fakeDragBy(-pager.height/18f) };SystemClock.sleep(22) }
+            main { pager.endFakeDrag() }
+            SystemClock.sleep(800)
             main { assertEquals("Native swipe must reach the second video",1,home.findViewById<ViewPager2>(R.id.pager).currentItem) }
             awaitPlaying(home)
         }
@@ -250,7 +257,12 @@ class PromoRecordingTest {
         main { my.findViewById<View>(R.id.authorShare).performClick() };SystemClock.sleep(1000)
         record("08-upload",8) {
             SystemClock.sleep(3200)
-            gesture(500f,1560f,500f,830f,600)
+            main {
+                val activity=androidx.test.runner.lifecycle.ActivityLifecycleMonitorRegistry.getInstance()
+                    .getActivitiesInStage(androidx.test.runner.lifecycle.Stage.RESUMED).last()
+                views(activity.window.decorView).filterIsInstance<android.widget.ScrollView>().first()
+                    .smoothScrollBy(0,620)
+            }
         }
         shell("getprop ro.build.version.release").also { assertTrue(it.trim().startsWith("16")) }
         println("PROMO VERIFIED: API ${Build.VERSION.SDK_INT}, Android ${Build.VERSION.RELEASE}, native UI recordings complete; synthetic data only.")

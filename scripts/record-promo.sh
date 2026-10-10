@@ -13,6 +13,7 @@ adb shell input keyevent KEYCODE_WAKEUP
 adb shell wm dismiss-keyguard
 adb shell wm size 1080x1920
 adb shell wm density 420
+adb shell cmd overlay enable-exclusive --category com.android.internal.systemui.navbar.gestural
 adb shell settings put system screen_off_timeout 1800000
 adb shell settings put system accelerometer_rotation 0
 adb shell settings put system user_rotation 0

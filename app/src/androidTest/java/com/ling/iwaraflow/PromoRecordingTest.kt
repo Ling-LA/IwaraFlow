@@ -81,17 +81,7 @@ class PromoRecordingTest {
         shell("cp ${local.absolutePath} $export/$name.png")
     }
     private fun gesture(x: Float, y: Float, x2: Float = x, y2: Float = y, duration: Long) {
-        val start = SystemClock.uptimeMillis()
-        fun send(action: Int, progress: Float) {
-            val event = MotionEvent.obtain(start, SystemClock.uptimeMillis(), action,
-                x + (x2-x)*progress, y + (y2-y)*progress, 0)
-            event.source = android.view.InputDevice.SOURCE_TOUCHSCREEN
-            ins.sendPointerSync(event); event.recycle()
-        }
-        send(MotionEvent.ACTION_DOWN, 0f)
-        val steps = (duration / 20).toInt().coerceAtLeast(1)
-        repeat(steps) { SystemClock.sleep(20); send(MotionEvent.ACTION_MOVE, (it+1f)/steps) }
-        send(MotionEvent.ACTION_UP, 1f)
+        shell("input touchscreen swipe ${x.toInt()} ${y.toInt()} ${x2.toInt()} ${y2.toInt()} $duration")
     }
     private fun hold(view: View, duration: Long) {
         val xy = IntArray(2); var x = 0f; var y = 0f
@@ -154,6 +144,7 @@ class PromoRecordingTest {
         main {
             set(home,"requestSerial",(get(home,"requestSerial") as Int)+100)
             set(home,"pagingEnabled",false)
+            set(home,"launchUpdateChecked",true)
             neutralApi(get(home,"api") as IwaraApi)
             home.findViewById<View>(R.id.loading).visibility=View.GONE
             home.findViewById<View>(R.id.error).visibility=View.GONE
@@ -165,13 +156,15 @@ class PromoRecordingTest {
         record("01-feed",10) {
             SystemClock.sleep(2600)
             gesture(460f,1450f,460f,450f,420)
+            SystemClock.sleep(600)
+            main { assertEquals("Native swipe must reach the second video",1,home.findViewById<ViewPager2>(R.id.pager).currentItem) }
             awaitPlaying(home)
         }
         record("02-reaction",10) {
             SystemClock.sleep(1400)
             hold(currentHolder(home).itemView.findViewById(R.id.like),2300)
             SystemClock.sleep(1800)
-            main { assertTrue(items[1].liked);assertTrue(items[1].localFavorite) }
+            main { assertTrue("Reaction must like active example",items[1].liked);assertTrue("Reaction must save active example",items[1].localFavorite) }
         }
         record("03-danmaku",10) {
             main { AppPrefs(context).danmakuEnabled=true; (get(home,"adapter") as VideoAdapter).applyDisplayPrefs() }

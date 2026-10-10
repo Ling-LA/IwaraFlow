@@ -11,3 +11,11 @@
 app/build/
 
 .playwright-cli/
+
+# Private signing material must never be committed.
+*.jks
+*.keystore
+*.p12
+*.pfx
+*keystore*.b64
+*password*.txt

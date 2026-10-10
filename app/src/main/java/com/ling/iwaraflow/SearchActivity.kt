@@ -119,6 +119,7 @@ class SearchActivity : AppCompatActivity(), PlaybackGuideHost {
     private lateinit var statusView: TextView
     private lateinit var input: EditText
     private lateinit var tabViews: Map<Tab, TextView>
+    private lateinit var excludeSeen: android.widget.CheckBox
     private lateinit var sortRow: View
     private lateinit var sortChips: Map<SearchSort.Key, TextView>
     private lateinit var orderToggle: TextView
@@ -195,6 +196,15 @@ class SearchActivity : AppCompatActivity(), PlaybackGuideHost {
         videoAdapter = AuthorVideoListAdapter(videoTab.items) { item -> openWork(Tab.VIDEOS, item) }
         tagAdapter = AuthorVideoListAdapter(tagTab.items) { item -> openWork(Tab.TAGS, item) }
         authorAdapter = FollowingAuthorAdapter(authorTab.items, emptyDescription = "查看作者主页", onClick = ::openAuthor)
+        excludeSeen = findViewById(R.id.searchExcludeSeen)
+        excludeSeen.isChecked = prefs.searchExcludeSeen
+        excludeSeen.setOnCheckedChangeListener { _, checked ->
+            prefs.searchExcludeSeen = checked
+            videoTab.chain = 0; tagTab.chain = 0
+            resort(videoTab, Tab.VIDEOS); resort(tagTab, Tab.TAGS)
+            resultList.scrollToPosition(0); updateStatus()
+            if (currentTab != Tab.AUTHORS && currentCount() < 6) loadNextPage(currentTab)
+        }
         resultList.layoutManager = LinearLayoutManager(this)
         resultList.adapter = videoAdapter
         resultList.addOnScrollListener(object : RecyclerView.OnScrollListener() {
@@ -414,6 +424,7 @@ class SearchActivity : AppCompatActivity(), PlaybackGuideHost {
     private fun styleSort() {
         // 作者名一栏固定按关注数多的优先，没有可调的排序。
         sortRow.visibility = if (currentTab == Tab.AUTHORS) View.GONE else View.VISIBLE
+        excludeSeen.visibility = if (currentTab == Tab.AUTHORS) View.GONE else View.VISIBLE
         sortChips.forEach { (key, view) ->
             val selected = key == sortKey
             view.setBackgroundResource(if (selected) R.drawable.bg_sort_chip_active else R.drawable.bg_sort_chip)
@@ -461,7 +472,10 @@ class SearchActivity : AppCompatActivity(), PlaybackGuideHost {
     private fun resort(state: VideoTab, tab: Tab) {
         val currentId = if (inFeed && feedTab == tab) feedAdapter.items.getOrNull(pager.currentItem)?.id else null
         state.items.clear()
-        state.items += SearchSort.sorted(state.loaded, sortKey, sortDescending)
+        val seen = if (prefs.searchExcludeSeen) history.loadStatuses(state.loaded.map { it.id }).seen else emptySet()
+        // A playing queue stays stable; refresh watched filtering when returning to the results.
+        val keep = if (inFeed && feedTab == tab) feedAdapter.items.map { it.id }.toSet() else emptySet()
+        state.items += SearchSort.sorted(state.loaded.filter { it.id !in seen || it.id in keep }, sortKey, sortDescending)
         state.playable.clear()
         state.playable += state.items.filter { it.playbackIssue == null }
         if (currentTab == tab) adapterFor(tab).notifyDataSetChanged()
@@ -547,9 +561,11 @@ class SearchActivity : AppCompatActivity(), PlaybackGuideHost {
                             resort(state, tab)
                             updateStatus()
                             // 这一页全是别的写法搜过的重复结果：接着翻，别让列表停在原地。
-                            state.chain = if (fresh.isEmpty()) state.chain + 1 else 0
+                            val visibleIds = state.items.map { it.id }.toSet()
+                            val noVisibleNew = fresh.none { it.id in visibleIds }
+                            state.chain = if (noVisibleNew) state.chain + 1 else 0
                             if (state.variants.any { !it.attempted } ||
-                                (fresh.isEmpty() && !state.noMore && state.chain <= MAX_CHAINED_PAGES)) loadVideoPage(tab)
+                                (noVisibleNew && !state.noMore && state.chain <= MAX_CHAINED_PAGES)) loadVideoPage(tab)
                         }
                     }
                 }
@@ -640,6 +656,7 @@ class SearchActivity : AppCompatActivity(), PlaybackGuideHost {
         val sortHint = if (currentTab == Tab.AUTHORS) "关注数优先" else SearchSort.label(sortKey, sortDescending)
         statusView.text = buildString {
             append("$subject · $label · $sortHint")
+            if (currentTab != Tab.AUTHORS && prefs.searchExcludeSeen) append(" · 已排除看过的视频")
             if (currentTab != Tab.AUTHORS && matchingNote.isNotBlank()) append(" · $matchingNote")
             when {
                 failure != null && count == 0 -> append("  ·  加载失败：$failure")
@@ -704,6 +721,10 @@ class SearchActivity : AppCompatActivity(), PlaybackGuideHost {
         inFeed = false
         feedPage.visibility = View.GONE
         listPage.visibility = View.VISIBLE
+        if (prefs.searchExcludeSeen) {
+            resort(videoTab, Tab.VIDEOS); resort(tagTab, Tab.TAGS); updateStatus()
+            if (currentCount() < 6) loadNextPage(currentTab)
+        }
     }
 
     private fun setFullscreen(enabled: Boolean) {
@@ -780,6 +801,9 @@ class SearchActivity : AppCompatActivity(), PlaybackGuideHost {
         super.onResume()
         leavingForShare = false
         if (inFeed && !exiting) feedAdapter.resumeActive()
+        else if (!exiting && ::excludeSeen.isInitialized && prefs.searchExcludeSeen) {
+            resort(videoTab, Tab.VIDEOS); resort(tagTab, Tab.TAGS); updateStatus()
+        }
     }
 
     override fun onPause() {

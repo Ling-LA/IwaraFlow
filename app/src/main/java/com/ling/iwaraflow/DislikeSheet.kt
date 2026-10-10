@@ -122,10 +122,21 @@ object DislikeSheet {
         dialog.window?.apply {
             setBackgroundDrawable(ColorDrawable(Color.TRANSPARENT))
 
-            addFlags(WindowManager.LayoutParams.FLAG_DIM_BEHIND)
+            addFlags(WindowManager.LayoutParams.FLAG_DIM_BEHIND or WindowManager.LayoutParams.FLAG_DRAWS_SYSTEM_BAR_BACKGROUNDS)
             setDimAmount(0.3f)
+            androidx.core.view.WindowCompat.setDecorFitsSystemWindows(this, false)
+            @Suppress("DEPRECATION")
+            navigationBarColor = if (activity.resources.configuration.orientation == android.content.res.Configuration.ORIENTATION_PORTRAIT) Color.WHITE else Color.TRANSPARENT
+            if (android.os.Build.VERSION.SDK_INT >= 29) isNavigationBarContrastEnforced = false
+            androidx.core.view.WindowCompat.getInsetsController(this, decorView).isAppearanceLightNavigationBars = activity.resources.configuration.orientation == android.content.res.Configuration.ORIENTATION_PORTRAIT
+        }
+        androidx.core.view.ViewCompat.setOnApplyWindowInsetsListener(container) { v, insets ->
+            val bars = insets.getInsets(androidx.core.view.WindowInsetsCompat.Type.navigationBars())
+            v.setPadding(bars.left, 0, bars.right, bars.bottom)
+            insets
         }
         dialog.show()
+        androidx.core.view.ViewCompat.requestApplyInsets(container)
         val decor = activity.window.decorView
         val width = decor.width.takeIf { it > 0 } ?: context.resources.displayMetrics.widthPixels
         val height = decor.height.takeIf { it > 0 } ?: context.resources.displayMetrics.heightPixels
@@ -133,7 +144,7 @@ object DislikeSheet {
         dialog.window?.apply {
             // 横屏左侧紧凑面板；始终保留一半以上的视频画面，长列表在面板内滚动。
             setGravity(if (width > height) Gravity.START or Gravity.CENTER_VERTICAL else Gravity.BOTTOM or Gravity.CENTER_HORIZONTAL)
-            attributes = attributes.apply { x = if (width > height) dp(16) else 0; y = if (width > height) 0 else dp(12) }
+            attributes = attributes.apply { x = if (width > height) dp(16) else 0; y = 0 }
             setLayout(size.first, size.second)
         }
     }

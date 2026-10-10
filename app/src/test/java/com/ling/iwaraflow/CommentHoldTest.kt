@@ -17,7 +17,7 @@ import java.time.Duration
 
 @RunWith(RobolectricTestRunner::class)
 @Config(sdk = [36])
-class OneSecondHoldTest {
+class CommentHoldTest {
     private fun touch(view: View, action: Int, x: Float = 5f) {
         val event = MotionEvent.obtain(SystemClock.uptimeMillis(), SystemClock.uptimeMillis(), action, x, 5f, 0)
         view.dispatchTouchEvent(event); event.recycle()
@@ -28,7 +28,7 @@ class OneSecondHoldTest {
         controller.get().setContentView(view)
         var clicks = 0; var holds = 0
         view.setOnClickListener { clicks++ }
-        OneSecondHold(view) { holds++ }
+        CommentHold(view) { holds++ }
         try { block(view) { clicks to holds } } finally { controller.pause().stop().destroy() }
     }
     @Test fun shortTapOnlyOpensRegularComments() = fixture { view, counts ->
@@ -38,9 +38,9 @@ class OneSecondHoldTest {
         shadowOf(Looper.getMainLooper()).idleFor(Duration.ofSeconds(2))
         assertEquals(1 to 0, counts())
     }
-    @Test fun opensComposerExactlyOnceAfterOneSecondWithoutClickingOnRelease() = fixture { view, counts ->
+    @Test fun opensComposerExactlyOnceAfterHalfASecondWithoutClickingOnRelease() = fixture { view, counts ->
         touch(view, MotionEvent.ACTION_DOWN)
-        shadowOf(Looper.getMainLooper()).idleFor(Duration.ofMillis(999))
+        shadowOf(Looper.getMainLooper()).idleFor(Duration.ofMillis(499))
         assertEquals(0 to 0, counts())
         shadowOf(Looper.getMainLooper()).idleFor(Duration.ofMillis(1))
         assertEquals(0 to 1, counts())

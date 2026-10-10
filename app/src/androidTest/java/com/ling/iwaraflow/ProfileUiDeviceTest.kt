@@ -134,6 +134,40 @@ class ProfileUiDeviceTest {
         } finally { main { activity.finish() } }
     }
 
+    @Test fun networkHintAndAboutDialogRenderAndRecover() {
+        val context = instrumentation.targetContext
+        val activity = instrumentation.startActivitySync(Intent(context, AuthorActivity::class.java)
+            .putExtra(AuthorActivity.EXTRA_ID, "fixture").addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)) as AuthorActivity
+        val history = HistoryStore(activity)
+        val cache = MediaPreloadCache(activity)
+        lateinit var adapter: VideoAdapter
+        lateinit var holder: VideoAdapter.Holder
+        lateinit var hint: NetworkQualityHint
+        try {
+            main {
+                val api = field(activity, "api").get(activity) as IwaraApi; api.close()
+                adapter = VideoAdapter(api, history, AppPrefs(activity), cache, { _, _ -> }, {}, {}, {})
+                adapter.items += VideoItem("fixture", "示例播放画面", "示例作者", listOf("animation"), 10)
+                holder = adapter.onCreateViewHolder(android.widget.FrameLayout(activity), 0)
+                adapter.onBindViewHolder(holder, 0)
+                activity.setContentView(holder.itemView)
+                hint = field(holder, "networkHint").get(holder) as NetworkQualityHint
+                hint.offer("540p") {}; holder.applyVideoInsets()
+            }
+            screenshot("network-quality-hint")
+            main {
+                assertTrue(hint.top > holder.itemView.height / 2)
+                assertTrue(hint.bottom < holder.itemView.height)
+                assertTrue(hint.background is android.graphics.drawable.GradientDrawable)
+                hint.networkStable(true)
+            }
+            android.os.SystemClock.sleep(3200)
+            main { assertEquals(View.GONE, hint.visibility); AboutDialog.show(activity) }
+            screenshot("about-dialog")
+            instrumentation.sendKeyDownUpSync(android.view.KeyEvent.KEYCODE_BACK)
+        } finally { main { adapter.releaseAll(); cache.close(); history.close(); activity.finish() } }
+    }
+
     @Test fun normalPlaybackGuideExcludesVisibleControls() {
         val context = instrumentation.targetContext
         val activity = instrumentation.startActivitySync(Intent(context, AuthorActivity::class.java).putExtra(AuthorActivity.EXTRA_ID, "fixture").addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)) as AuthorActivity

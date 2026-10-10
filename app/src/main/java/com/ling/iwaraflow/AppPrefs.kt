@@ -42,6 +42,10 @@ class AppPrefs(context: Context) {
         get() = prefs.getBoolean("preload_next", true)
         set(value) = prefs.edit().putBoolean("preload_next", value).apply()
 
+    var searchExcludeSeen: Boolean
+        get() = prefs.getBoolean("search_exclude_seen", false)
+        set(value) = prefs.edit().putBoolean("search_exclude_seen", value).apply()
+
     var aiSearchMatching: Boolean
         get() = prefs.getBoolean("ai_search_matching", false)
         set(value) = prefs.edit().putBoolean("ai_search_matching", value).apply()

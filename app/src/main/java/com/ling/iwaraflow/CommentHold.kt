@@ -5,8 +5,8 @@ import android.view.View
 import android.view.ViewConfiguration
 import kotlin.math.abs
 
-/** Consume the touch so Android's shorter default long-click cannot fire first. */
-internal class OneSecondHold(private val view: View, private val action: () -> Unit) : View.OnTouchListener {
+/** One cancellable half-second hold, with short taps preserved for opening comments. */
+internal class CommentHold(private val view: View, private val action: () -> Unit) : View.OnTouchListener {
     private val slop = ViewConfiguration.get(view.context).scaledTouchSlop
     private var x = 0f
     private var y = 0f
@@ -32,7 +32,7 @@ internal class OneSecondHold(private val view: View, private val action: () -> U
         when (event.actionMasked) {
             MotionEvent.ACTION_DOWN -> {
                 cancel(); down = true; fired = false; x = event.x; y = event.y
-                v.isPressed = true; v.postDelayed(hold, 1_000L)
+                v.isPressed = true; v.postDelayed(hold, 500L)
             }
             MotionEvent.ACTION_MOVE -> if (abs(event.x-x) > slop || abs(event.y-y) > slop) cancel()
             MotionEvent.ACTION_POINTER_DOWN, MotionEvent.ACTION_CANCEL -> cancel()

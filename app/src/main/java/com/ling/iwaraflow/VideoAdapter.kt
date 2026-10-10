@@ -283,7 +283,6 @@ class VideoAdapter(
                 val allowed = linkedSetOf<String>()
                 if (currentUrl != null) {
                     allowed += currentUrl
-                    mediaCache.prefetchFull(currentUrl)
                 }
                 val holder = holders.firstOrNull { it.bindingAdapterPosition == position }
                 val progress = mediaCache.progress(currentUrl)
@@ -297,7 +296,6 @@ class VideoAdapter(
                     val url = item.streamUrl
                     if (url != null) {
                         allowed += url
-                        mediaCache.prefetchFull(url, primary = progress.fraction >= 1.0 && offset == 1)
                     } else if (resolvingPreloads.add(item.id)) {
                         api.resolvePreloadSources(item.id) { result ->
                             preloadHandler.post {
@@ -311,6 +309,12 @@ class VideoAdapter(
                     }
                 }
                 mediaCache.keepPreloads(allowed)
+                currentUrl?.let { mediaCache.prefetchFull(it) }
+                for (offset in 1..ahead) {
+                    items.getOrNull(position + offset)?.streamUrl?.takeIf { it in allowed }?.let {
+                        mediaCache.prefetchFull(it, primary = progress.fraction >= 1.0 && offset == 1)
+                    }
+                }
                 preloadHandler.postDelayed(this, 1000L)
             }
         }
@@ -373,12 +377,10 @@ class VideoAdapter(
         private val danmaku = DanmakuView(view.context).also {
             (view as android.widget.FrameLayout).addView(it, 1, android.widget.FrameLayout.LayoutParams(-1, -1))
         }
-        private val networkHint = TextView(view.context).apply {
-            textSize = 14f; setTextColor(-1); setBackgroundColor(0xCC285C7B.toInt())
-            setPadding(18, 12, 18, 12); visibility = View.GONE
+        private val networkHint = NetworkQualityHint(view.context).apply {
+            onVisibilityChange = { itemView.post { applyVideoInsets() } }
         }.also { (view as android.widget.FrameLayout).addView(it,
-            android.widget.FrameLayout.LayoutParams(-2, -2, android.view.Gravity.TOP or android.view.Gravity.CENTER_HORIZONTAL)
-                .apply { topMargin = (80 * view.resources.displayMetrics.density).toInt() }) }
+            android.widget.FrameLayout.LayoutParams(-2, -2, android.view.Gravity.BOTTOM or android.view.Gravity.CENTER_HORIZONTAL)) }
         private val likeHold = HoldReaction(like, 0xFFFF365D.toInt(), favorite, 0xFFFFD54F.toInt()) { doubleReaction() }
         private val favoriteHold = HoldReaction(favorite, 0xFFFFD54F.toInt(), like, 0xFFFF365D.toInt()) { doubleReaction() }
         private val screenReactionHold = ScreenReactionHold(view) {
@@ -388,7 +390,7 @@ class VideoAdapter(
         private var downAction = FullscreenGesture.Action.SPEED
         private var bufferingSince = 0L
         private var stableSince = 0L
-        private val commentHold = OneSecondHold(comments) {
+        private val commentHold = CommentHold(comments) {
             bound?.takeIf { active }?.let { onQuickComment?.invoke(it) }
         }
         fun appendDanmaku(videoId: String, comment: IwaraComment) {
@@ -505,7 +507,7 @@ class VideoAdapter(
         }
 
         /**
-         * 普通模式及竖屏全屏为上中下三区；横屏全屏为左中右三区，中央按住 2.5 秒双连。
+         * 普通模式及竖屏全屏为上中下三区；横屏全屏为左中右三区，中央按住 2 秒双连。
          * 一次按压只采用 DOWN 时的分区，小窗不触发这些操作。
          */
         private val holdToSpeed = Runnable {
@@ -589,7 +591,7 @@ class VideoAdapter(
             landscape = false
             aspect = 0f
             applyVideoInsets()
-            comments.contentDescription = "评论，长按 1 秒发送弹幕评论"
+            comments.contentDescription = "评论，长按 0.5 秒发送弹幕评论"
             comments.visibility = if (onComments == null) View.GONE else View.VISIBLE
             comments.setOnClickListener {
                 // 打开评论区也是一点兴趣，比点赞轻得多。
@@ -805,7 +807,7 @@ class VideoAdapter(
             val next = sources.filter { it.score < current.score }.maxByOrNull { it.score } ?: return
             item.selectedQuality = next.name; item.streamUrl = next.url
             prepareChosenSource(item, sources, preservePosition = true)
-            networkHint.visibility = View.GONE
+            networkHint.reset()
             applyVideoInsets()
             bufferingSince = 0L
         }
@@ -814,10 +816,7 @@ class VideoAdapter(
             val item = bound ?: return
             val current = item.sources?.firstOrNull { it.url == item.streamUrl } ?: return
             val lower = item.sources?.filter { it.score < current.score }?.maxByOrNull { it.score } ?: return
-            networkHint.text = "网络不佳 · 点击切换至 ${lower.name}"
-            networkHint.visibility = View.VISIBLE
-            networkHint.setOnClickListener { lowerQuality() }
-            networkHint.post { applyVideoInsets() }
+            networkHint.offer(lower.name) { lowerQuality() }
         }
 
         private fun start(item: VideoItem) {
@@ -883,6 +882,8 @@ class VideoAdapter(
                             PlaybackMetrics.buffered(now - rebufferAt); rebufferAt = 0L
                         }
 
+                        if (playbackState == Player.STATE_ENDED) networkHint.reset()
+                        else networkHint.networkStable(playbackState == Player.STATE_READY)
                         if (playbackState == Player.STATE_BUFFERING) {
                             if (bufferingSince == 0L) bufferingSince = android.os.SystemClock.elapsedRealtime()
                             stableSince = 0L
@@ -1066,9 +1067,19 @@ class VideoAdapter(
             // Page controls live above the card, independently of PlayerView padding.
             val chromeBottom = if (pipMode || fullscreenMode) 0 else
                 overlayTopInset.takeIf { it > 0 } ?: (72 * itemView.resources.displayMetrics.density).toInt()
-            val hintBottom = if (networkHint.visibility == View.VISIBLE) networkHint.bottom +
-                (8 * itemView.resources.displayMetrics.density).toInt() else 0
-            danmaku.setPadding(0, maxOf(cappedTop, chromeBottom, hintBottom).coerceAtMost(height), 0, cappedBottom)
+            val density = itemView.resources.displayMetrics.density
+            val hintParams = networkHint.layoutParams as android.widget.FrameLayout.LayoutParams
+            val margin = maxOf(cappedBottom + (16*density).toInt(),
+                if (fullscreenMode) (72*density).toInt() else maxOf((height*.25f).toInt(), (120*density).toInt()))
+            val left = (12*density).toInt()
+            val right = (if (!fullscreenMode && actionPanel.visibility == View.VISIBLE) 84*density else 12*density).toInt()
+            if (hintParams.bottomMargin != margin || hintParams.leftMargin != left || hintParams.rightMargin != right) {
+                hintParams.bottomMargin = margin; hintParams.leftMargin = left; hintParams.rightMargin = right
+                networkHint.layoutParams = hintParams
+            }
+            networkHint.maxWidth = ((itemView.width.takeIf { it > 0 } ?: itemView.resources.displayMetrics.widthPixels) - left - right).coerceAtLeast(1)
+            val hintInset = if (networkHint.visibility == View.VISIBLE) margin + networkHint.height + (8*density).toInt() else 0
+            danmaku.setPadding(0, maxOf(cappedTop, chromeBottom).coerceAtMost(height), 0, maxOf(cappedBottom, hintInset))
             if (playerView.paddingBottom != cappedBottom || playerView.paddingTop != cappedTop) {
                 playerView.setPadding(0, cappedTop, 0, cappedBottom)
             }
@@ -1138,9 +1149,6 @@ class VideoAdapter(
                 pauseSeekBar.cachedFraction = mediaCache.progress(bound?.streamUrl).fraction
                 if (p.playWhenReady && bufferingSince > 0 && android.os.SystemClock.elapsedRealtime() - bufferingSince > 5000) {
                     offerLowerQuality()
-                } else if (stableSince > 0 && android.os.SystemClock.elapsedRealtime() - stableSince > 12000) {
-                    networkHint.visibility = View.GONE
-                    applyVideoInsets()
                 }
                 val shouldAdvance = p.playWhenReady && p.playbackState == Player.STATE_READY
                 if (shouldAdvance && lastWatchdogPosition >= 0 && position <= lastWatchdogPosition + 120L) stalledChecks++
@@ -1361,7 +1369,7 @@ class VideoAdapter(
             likeHold.cancel(); favoriteHold.cancel(); screenReactionHold.cancel()
             commentHold.cancel()
             danmaku.clear(); danmakuLoaded = false; danmakuAttemptAt = -15000L
-            networkHint.visibility = View.GONE
+            networkHint.reset()
             applyVideoInsets()
             releasePlayerOnly()
         }

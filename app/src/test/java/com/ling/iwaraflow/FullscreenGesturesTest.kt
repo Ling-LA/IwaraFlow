@@ -57,11 +57,11 @@ class FullscreenGesturesTest {
         assertEquals(expected, listOf(100f, 450f, 800f).map { FullscreenGesture.action(200f, it, 450, 900, false) })
         assertEquals(FullscreenGesture.Action.DOUBLE_REACTION, FullscreenGesture.action(300f, 0f, 900, 450, true))
     }
-    @Test fun screenRingCompletesOnlyAfterTwoAndAHalfSecondsAndOncePerHold() {
+    @Test fun screenRingCompletesOnlyAfterTwoSecondsAndOncePerHold() {
         val view = View(RuntimeEnvironment.getApplication()); view.layout(0, 0, 900, 450)
         var completed = 0
         val hold = ScreenReactionHold(view) { completed++ }
-        hold.start(450f, 225f); idle(2499); assertEquals(0, completed)
+        hold.start(450f, 225f); idle(1999); assertEquals(0, completed)
         idle(1); assertEquals(1, completed); idle(4000); assertEquals(1, completed)
         hold.cancel()
     }
@@ -69,8 +69,8 @@ class FullscreenGesturesTest {
         val view = View(RuntimeEnvironment.getApplication()); view.layout(0, 0, 900, 450)
         var completed = 0
         val hold = ScreenReactionHold(view) { completed++ }
-        hold.start(450f, 225f); idle(2000); hold.cancel(); idle(4000); assertEquals(0, completed)
-        hold.start(450f, 225f); idle(2500); assertEquals(1, completed); hold.cancel()
+        hold.start(450f, 225f); idle(1500); hold.cancel(); idle(4000); assertEquals(0, completed)
+        hold.start(450f, 225f); idle(2000); assertEquals(1, completed); hold.cancel()
     }
     private fun fixture(block: (VideoAdapter, VideoAdapter.Holder, VideoItem, ExoPlayer) -> Unit) {
         val context = RuntimeEnvironment.getApplication()
@@ -114,7 +114,7 @@ class FullscreenGesturesTest {
         touch(holder.itemView, MotionEvent.ACTION_UP, 450f, 300f)
     }
     @Test fun middleHoldAddsFavoriteWithoutPausingOrTogglingAnExistingLikeOff() = fixture { _, holder, item, player ->
-        touch(holder.itemView, MotionEvent.ACTION_DOWN, 450f, 180f); idle(2499)
+        touch(holder.itemView, MotionEvent.ACTION_DOWN, 450f, 180f); idle(1999)
         assertFalse(item.localFavorite); idle(1); assertTrue(item.localFavorite); assertTrue(item.liked)
         touch(holder.itemView, MotionEvent.ACTION_UP, 450f, 180f); idle(400)
         verify(player, never()).pause()

@@ -10,7 +10,7 @@ import android.os.Looper
 import android.os.SystemClock
 import android.view.View
 
-/** Shown only after long-press confirmation; the full press still completes after 2.5 seconds. */
+/** Shown only after long-press confirmation; the full press still completes after 2 seconds. */
 internal class ScreenReactionHold(private val view: View, private val complete: () -> Unit) {
     private val handler = Handler(Looper.getMainLooper())
     private val density = view.resources.displayMetrics.density

@@ -23,8 +23,9 @@ object PageNavigation {
         actions += "已下载" to { saved(activity, SavedVideosActivity.KIND_DOWNLOADS) }
         actions += "搜索" to { activity.startActivity(Intent(activity, SearchActivity::class.java)) }
         actions += "设置" to { activity.startActivity(Intent(activity, SettingsActivity::class.java)) }
+        actions += "关于" to { AboutDialog.show(activity) }
         AlertDialog.Builder(activity).setTitle("跳转页面")
-            .setItems(actions.map { it.first }.toTypedArray()) { _, index -> beforeNavigate(); actions[index].second() }.show()
+            .setItems(actions.map { it.first }.toTypedArray()) { _, index -> if (actions[index].first != "关于") beforeNavigate(); actions[index].second() }.show()
     }
     fun saved(activity: Activity, kind: String) {
         activity.startActivity(Intent(activity, SavedVideosActivity::class.java).putExtra(SavedVideosActivity.EXTRA_KIND, kind))

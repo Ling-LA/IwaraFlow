@@ -159,7 +159,7 @@ object PlaybackGuide {
                 setPadding(0, 0, 0, dp(4))
             })
             footer.addView(TextView(activity).apply {
-                text = "仅在空白画面长按；导航、按钮和底部信息区除外\n单击暂停 / 显示控件 · 双击点赞\n长按评论 1 秒：快捷发送弹幕评论"; textSize = 11f; setTextColor(-1); gravity = Gravity.CENTER
+                text = "仅在空白画面长按；导航、按钮和底部信息区除外\n单击暂停 / 显示控件 · 双击点赞\n长按评论 0.5 秒：快捷发送弹幕评论"; textSize = 11f; setTextColor(-1); gravity = Gravity.CENTER
             })
             val actions = LinearLayout(activity).apply { gravity = Gravity.CENTER }
             actions.addView(switch, LinearLayout.LayoutParams(dp(148), dp(44)))
@@ -175,7 +175,7 @@ object PlaybackGuide {
         private fun updateLabels() {
             heading.text = if (horizontal) "横屏全屏操作引导" else "播放画面操作指引"
             zones[0].text = "⊘\n长按${if (horizontal) "左侧" else "上方"}\n不感兴趣\n选择视频、作者或标签"
-            zones[1].text = "♡ + ☆\n按住中间 2.5 秒\n点赞＋收藏\n提前松开即可取消"
+            zones[1].text = "♡ + ☆\n按住中间 2 秒\n点赞＋收藏\n提前松开即可取消"
             zones[2].text = "≫\n长按${if (horizontal) "右侧" else "下方"}\n2× 加速\n松开恢复正常速度"
             switch.text = if (horizontal) "查看竖屏操作" else "查看横屏操作"
         }
@@ -221,8 +221,8 @@ object PlaybackGuide {
                 val r = labelAreas[i]
                 val compact = r.height() < dp(86) || r.width() < dp(220)
                 zone.textSize = if (compact) 12f else 15f; zone.setLineSpacing(2*density, 1f)
-                zone.text = if (r.height() < dp(60)) listOf("长按上方：不感兴趣", "中间 2.5 秒：点赞＋收藏", "长按下方：2× 加速")[i]
-                    else listOf("⊘\n长按上方空白画面\n不感兴趣选项", "♡ + ☆\n按住中间 2.5 秒\n点赞＋收藏", "≫\n长按下方空白画面\n2× 加速 · 松开恢复")[i]
+                zone.text = if (r.height() < dp(60)) listOf("长按上方：不感兴趣", "中间 2 秒：点赞＋收藏", "长按下方：2× 加速")[i]
+                    else listOf("⊘\n长按上方空白画面\n不感兴趣选项", "♡ + ☆\n按住中间 2 秒\n点赞＋收藏", "≫\n长按下方空白画面\n2× 加速 · 松开恢复")[i]
                 zone.measure(MeasureSpec.makeMeasureSpec(r.width().toInt().coerceAtLeast(0), MeasureSpec.EXACTLY),
                     MeasureSpec.makeMeasureSpec(r.height().toInt().coerceAtLeast(0), MeasureSpec.EXACTLY))
             }

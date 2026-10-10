@@ -196,6 +196,13 @@
                         android:textSize="12sp" />
                 </LinearLayout>
             </HorizontalScrollView>
+            <CheckBox
+                android:id="@+id/searchExcludeSeen"
+                android:layout_width="wrap_content"
+                android:layout_height="48dp"
+                android:text="排除已看"
+                android:textSize="14sp"
+                android:textColor="@color/page_accent" />
         </LinearLayout>
 
         <TextView

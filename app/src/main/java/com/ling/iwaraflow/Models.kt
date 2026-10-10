@@ -135,7 +135,9 @@ data class VideoItem(
     /** 作者写的简介（Iwara 的 `body`）；列表接口就带，本地表里存的视频为空，看时再补拉。 */
     var description: String = "",
     /** Playback intent survives temporary page suspension and player recreation. */
-    var resumePlayWhenReady: Boolean = true
+    var resumePlayWhenReady: Boolean = true,
+    /** Which account supplied this personal status; prevents restoring another account's heart. */
+    var likeStateAccount: String? = null
 )
 
 data class LoginResult(

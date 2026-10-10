@@ -19,6 +19,9 @@ class IwaraApi(context: Context, private val apiRoot: String = DEFAULT_API_ROOT)
     private val siteRoot = "https://www.iwara.tv"
     private val imageRoot = "https://i.iwara.tv"
     private val session = SecureSessionStore(context.applicationContext)
+    private val likeStates = VideoLikeStore(context.applicationContext)
+    private data class LikeRead(val snapshot: VideoLikeStore.Snapshot, val authenticated: Boolean, val detail: Boolean)
+    private val likeRead = ThreadLocal<LikeRead>()
     private val io = Executors.newFixedThreadPool(6)
     private val playbackIo = Executors.newFixedThreadPool(2)
     private val requestPriority = ThreadLocal<RequestScheduler.Priority>()
@@ -337,7 +340,13 @@ class IwaraApi(context: Context, private val apiRoot: String = DEFAULT_API_ROOT)
         for (i in 0 until arr.length()) {
             val wrapper = arr.optJSONObject(i) ?: continue
             val video = wrapper.optJSONObject("video") ?: wrapper
-            parseVideo(video)?.let { out += it.copy(liked = true) }
+            parseVideo(video)?.let { parsed ->
+                val liked = parsed.copy(liked = true)
+                likeRead.get()?.takeIf { it.authenticated }?.let { read ->
+                    likeStates.observe(read.snapshot, liked, detail = false, countKnown = video.has("numLikes"))
+                }
+                out += likeStates.apply(liked)
+            }
         }
         return FavoritesPage(out, root.optInt("count", -1), hasMorePages(root, page, out.size))
     }
@@ -419,16 +428,22 @@ class IwaraApi(context: Context, private val apiRoot: String = DEFAULT_API_ROOT)
         )
     }
 
-    fun likeVideo(videoId: String, liked: Boolean, callback: (Result<Unit>) -> Unit) = relationWrite("$apiRoot/video/$videoId/like", liked, callback)
+    fun likeVideo(videoId: String, liked: Boolean, callback: (Result<Unit>) -> Unit) {
+        val snapshot = likeStates.snapshot()
+        relationWrite("$apiRoot/video/$videoId/like", liked, callback,
+            accepted = { likeStates.confirm(snapshot, videoId, liked) }, validSession = { likeStates.isCurrent(snapshot) })
+    }
     fun followUser(userId: String, following: Boolean, callback: (Result<Unit>) -> Unit) = relationWrite("$apiRoot/user/$userId/followers", following, callback)
     fun setFriend(userId: String, enabled: Boolean, callback: (Result<Unit>) -> Unit) = relationWrite("$apiRoot/user/$userId/friends", enabled, callback)
 
-    private fun relationWrite(url: String, enabled: Boolean, callback: (Result<Unit>) -> Unit) {
+    private fun relationWrite(url: String, enabled: Boolean, callback: (Result<Unit>) -> Unit, accepted: () -> Unit = {}, validSession: () -> Boolean = { true }) {
         enqueue(callback) { runCatching {
+            if (!validSession()) throw IOException("账号已切换，请重试")
             if (!isLoggedIn()) throw IOException("请先登录 Iwara")
             ensureAccessTokenBlocking() ?: throw IOException("登录已失效，请重新登录")
             val builder = baseRequest(url, authenticated = true)
             val request = if (enabled) builder.post(ByteArray(0).toRequestBody(null)).build() else builder.delete().build()
+            if (!validSession()) throw IOException("账号已切换，请重试")
             client.newCall(request).execute().use { response ->
                 val raw = response.body?.string().orEmpty()
                 if (!response.isSuccessful) {
@@ -436,6 +451,7 @@ class IwaraApi(context: Context, private val apiRoot: String = DEFAULT_API_ROOT)
                     throw IOException(extractMessage(raw, "操作失败（HTTP ${response.code}）"))
                 }
             }
+            accepted()
         } }
     }
 
@@ -514,6 +530,8 @@ class IwaraApi(context: Context, private val apiRoot: String = DEFAULT_API_ROOT)
 
     fun resolveSourcesBlocking(videoId: String): List<VideoSource> {
         val detail = getJsonObject("$apiRoot/video/$videoId", optionalAuth = true)
+        // This detail request already carries personal status; reuse it instead of making a second request.
+        parseVideo(detail)
         val fileUrl = detail.optString("fileUrl")
         if (fileUrl.isBlank()) {
             val reason = when {
@@ -573,13 +591,17 @@ class IwaraApi(context: Context, private val apiRoot: String = DEFAULT_API_ROOT)
     private fun getJsonObject(url: String, optionalAuth: Boolean = false, requireAuth: Boolean = false): JSONObject {
         if (requireAuth && ensureAccessTokenBlocking().isNullOrBlank()) throw IOException("登录已失效，请重新登录")
         val shouldAuthenticate = requireAuth || (optionalAuth && isLoggedIn())
+        val snapshot = likeStates.snapshot()
         val request = baseRequest(url, authenticated = shouldAuthenticate).get().build()
+        likeRead.remove()
         client.newCall(request).execute().use { response ->
             val raw = response.body?.string().orEmpty()
             if (!response.isSuccessful) {
                 if (response.code == 401 && (optionalAuth || requireAuth)) session.accessToken = null
                 throw IOException(extractMessage(raw, "HTTP ${response.code}"))
             }
+            likeRead.set(LikeRead(snapshot, request.header("Authorization") != null,
+                request.url.encodedPath.matches(Regex(".*/video/[^/]+"))))
             return JSONObject(raw)
         }
     }
@@ -626,8 +648,16 @@ class IwaraApi(context: Context, private val apiRoot: String = DEFAULT_API_ROOT)
             isPrivate = o.optBoolean("private", false),
             status = o.optString("status"),
             thumbnailUrl = thumbnailUrl,
-            description = o.optString("body").takeIf { it != "null" }.orEmpty()
-        )
+            description = o.optString("body").takeIf { it != "null" }.orEmpty(),
+            likeStateAccount = likeRead.get()?.snapshot?.account
+        ).also { item ->
+            likeRead.get()?.let { read ->
+                val statusKnown = o.has("liked") && !o.isNull("liked")
+                if (read.authenticated)
+                    likeStates.observe(read.snapshot, item, read.detail && statusKnown, o.has("numLikes"), statusKnown)
+            }
+            likeStates.apply(item)
+        }
     }
 
     private fun buildThumbnailUrl(video: JSONObject): String {

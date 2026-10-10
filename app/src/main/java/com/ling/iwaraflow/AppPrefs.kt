@@ -3,6 +3,7 @@ package com.ling.iwaraflow
 import android.content.Context
 
 class AppPrefs(context: Context) {
+    internal val likeStates = VideoLikeStore(context.applicationContext)
     private val prefs = context.getSharedPreferences(FILE, Context.MODE_PRIVATE)
 
     /**

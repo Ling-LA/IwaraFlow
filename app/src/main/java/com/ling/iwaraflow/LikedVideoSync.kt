@@ -3,7 +3,7 @@ package com.ling.iwaraflow
 import java.util.concurrent.Executors
 
 /**
- * 把 Iwara 官方点赞完整同步进本地“已看”表。
+ * 把 Iwara 官方点赞同步到共享点赞状态和本地“已看”表。
  *
  * 推荐刷新时只顺手读了点赞列表的第一页，而服务端一页最多 50 条，点赞多的账号
  * 剩下的老点赞永远不会被标记，于是一直在推荐里回来。这里在后台把所有页翻完，
@@ -21,7 +21,7 @@ class LikedVideoSync(
     fun syncIfStale(force: Boolean = false) {
         if (closed || running || !api.isLoggedIn()) return
         val age = System.currentTimeMillis() - prefs.likedSyncAt
-        if (!force && prefs.likedSyncAt > 0L && age < SYNC_INTERVAL_MS) return
+        if (!force && prefs.likeStates.hasImportedLikes() && prefs.likedSyncAt > 0L && age < SYNC_INTERVAL_MS) return
         running = true
         runCatching { io.execute { try { syncBlocking() } finally { running = false } } }
             .onFailure { running = false }
@@ -55,7 +55,9 @@ class LikedVideoSync(
             io.execute {
                 runCatching {
                     val account = resolveAccount()
+                    val snapshot = prefs.likeStates.snapshot()
                     val first = api.getFavoritesPageBlocking(0)
+                    if (closed || !prefs.likeStates.isCurrent(snapshot)) return@runCatching
                     history.markSeen(first.videos.map { it.id }, account = account)
                     history.seedCloudLikes(first.videos)
                 }
@@ -87,8 +89,10 @@ class LikedVideoSync(
         var page = 0
         var marked = 0
         val account = resolveAccount()
-        while (!closed && page < MAX_PAGES) {
+        val likeSnapshot = prefs.likeStates.snapshot()
+        while (!closed && prefs.likeStates.isCurrent(likeSnapshot) && page < MAX_PAGES) {
             val result = runCatching { api.getFavoritesPageBlocking(page) }.getOrNull() ?: return marked
+            if (closed || !prefs.likeStates.isCurrent(likeSnapshot)) return marked
             history.markSeen(result.videos.map { it.id }, account = account)
             // 最近的几百个点赞同时作为口味画像的种子（作者、标签），新装的用户马上有偏好可推。
             if (page < SEED_PAGES) history.seedCloudLikes(result.videos)
@@ -96,7 +100,10 @@ class LikedVideoSync(
             if (!result.hasMore) break
             page += 1
         }
-        if (!closed) prefs.likedSyncAt = System.currentTimeMillis()
+        if (!closed && prefs.likeStates.isCurrent(likeSnapshot)) {
+            prefs.likedSyncAt = System.currentTimeMillis()
+            prefs.likeStates.markImported(likeSnapshot)
+        }
         return marked
     }
 

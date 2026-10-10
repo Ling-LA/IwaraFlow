@@ -55,6 +55,13 @@ class VideoAdapter(
     val items = mutableListOf<VideoItem>()
     private val holders = mutableSetOf<Holder>()
     private val preloadHandler = Handler(Looper.getMainLooper())
+    private val likeStates = prefs.likeStates
+    private val likeSubscription = likeStates.listen { videoId ->
+        if (!released) {
+            items.filter { videoId == null || it.id == videoId }.forEach(likeStates::apply)
+            holders.toList().forEach { it.refreshLikeState(videoId) }
+        }
+    }
     private var preloadTask: Runnable? = null
     private var activePosition = RecyclerView.NO_POSITION
     private var pipMode = false
@@ -89,7 +96,7 @@ class VideoAdapter(
         cancelIdlePreload()
         holders.toList().forEach { it.release() }
         items.clear()
-        items.addAll(newItems)
+        items.addAll(newItems.map(likeStates::apply))
         activePosition = if (items.isEmpty()) RecyclerView.NO_POSITION else 0
         notifyDataSetChanged()
     }
@@ -100,7 +107,7 @@ class VideoAdapter(
         val unique = newItems.filter { existing.add(it.id) }
         if (unique.isEmpty()) return
         val start = items.size
-        items.addAll(unique)
+        items.addAll(unique.map(likeStates::apply))
         notifyItemRangeInserted(start, unique.size)
     }
 
@@ -108,6 +115,7 @@ class VideoAdapter(
         if (released) return
         playbackEnabled = false
         released = true
+        likeSubscription.close()
         cancelIdlePreload()
         holders.toList().forEach { it.release() }
         holders.clear()
@@ -168,6 +176,8 @@ class VideoAdapter(
             holders.toList().forEach { if (it.bindingAdapterPosition == activePosition) it.restorePosition(restored.positionMs) }
         }
         playbackEnabled = true
+        items.forEach(likeStates::apply)
+        holders.toList().forEach { it.refreshLikeState() }
         applyDisplayPrefs()
         claimPlaybackOwnership(this)
         holders.toList().forEach { holder ->
@@ -1259,14 +1269,20 @@ class VideoAdapter(
             if (likeBusy) return
             if (!api.isLoggedIn()) { onNeedLogin(); return }
             likeBusy = true
+            val likeSnapshot = likeStates.snapshot()
+            val resultingCount = (item.likes + if (item.liked == desired) 0 else if (desired) 1 else -1).coerceAtLeast(0)
             val requestGeneration = generation
             if (desired) onAccepted?.invoke()
             api.likeVideo(item.id, desired) { result ->
                 itemView.post {
                     if (generation == requestGeneration) likeBusy = false
                     result.onSuccess {
-                        if (item.liked != desired) item.likes = (item.likes + if (desired) 1 else -1).coerceAtLeast(0)
+                        if (!likeStates.isCurrent(likeSnapshot)) return@onSuccess
+                        likeStates.confirm(likeSnapshot, item.id, desired, resultingCount)
+                        item.likes = resultingCount
                         item.liked = desired
+                        likeStates.apply(item)
+                        if (item.liked != desired) return@onSuccess
                         // 点赞等同于已看：下次生成推荐时要能被“排除已看视频”过滤掉。
                         if (desired) {
                             history.recordInteractionAsync(item, "like", 2.0)
@@ -1288,7 +1304,10 @@ class VideoAdapter(
             }
         }
 
+        fun refreshLikeState(videoId: String? = null) { bound?.takeIf { videoId == null || it.id == videoId }?.let { updateLikeUi(it) } }
+
         private fun updateLikeUi(item: VideoItem) {
+            likeStates.apply(item)
             like.setIcon(
                 if (item.liked) R.drawable.ic_heart_rounded else R.drawable.ic_heart_rounded_outline,
                 if (item.liked) 0xFFFF365D.toInt() else 0xFFFFFFFF.toInt()

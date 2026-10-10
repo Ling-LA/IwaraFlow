@@ -171,6 +171,55 @@ class ProfileUiDeviceTest {
         } finally { main { adapter.releaseAll(); cache.close(); history.close(); activity.finish() } }
     }
 
+    @Test fun acknowledgedLikesRefreshBothPageCardsWithoutResettingPausedPlayback() {
+        val context = instrumentation.targetContext
+        val activity = instrumentation.startActivitySync(Intent(context, AuthorActivity::class.java)
+            .putExtra(AuthorActivity.EXTRA_ID, "fixture").addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)) as AuthorActivity
+        val prefs = AppPrefs(activity)
+        val previousAccount = prefs.accountId
+        val histories = List(2) { HistoryStore(activity) }
+        val cache = MediaPreloadCache(activity)
+        val adapters = mutableListOf<VideoAdapter>()
+        val cards = mutableListOf<VideoAdapter.Holder>()
+        val videoId = "like-sync-${System.nanoTime()}"
+        try {
+            main {
+                val api = field(activity, "api").get(activity) as IwaraApi; api.close()
+                prefs.accountId = "ui-like-fixture"
+                histories.forEach { history ->
+                    val adapter = VideoAdapter(api, history, prefs, cache, { _, _ -> }, {}, {}, {})
+                    adapters += adapter
+                    adapter.replace(listOf(VideoItem(videoId, "同步状态示例", "示例作者", emptyList(), 10,
+                        resumePositionMs = 5000, resumePlayWhenReady = false)))
+                    cards += adapter.onCreateViewHolder(android.widget.FrameLayout(activity), 0).also { adapter.onBindViewHolder(it, 0) }
+                }
+                activity.setContentView(cards.last().itemView)
+            }
+            val states = VideoLikeStore(activity)
+            // A real API acknowledgement runs off the main thread, even if its original page is hidden.
+            states.confirm(states.snapshot(), videoId, true, 11)
+            instrumentation.waitForIdleSync()
+            main {
+                cards.forEach { card ->
+                    assertEquals(R.drawable.ic_heart_rounded, card.itemView.findViewById<android.widget.ImageView>(R.id.like).getTag(R.id.reaction_icon))
+                    assertEquals("11", card.itemView.findViewById<TextView>(R.id.likeCount).text.toString())
+                }
+            }
+            states.confirm(states.snapshot(), videoId, false, 10)
+            instrumentation.waitForIdleSync()
+            main {
+                cards.forEach { card ->
+                    assertEquals(R.drawable.ic_heart_rounded_outline, card.itemView.findViewById<android.widget.ImageView>(R.id.like).getTag(R.id.reaction_icon))
+                    assertEquals("10", card.itemView.findViewById<TextView>(R.id.likeCount).text.toString())
+                }
+                assertTrue(adapters.all { it.items.single().resumePositionMs == 5000L && !it.items.single().resumePlayWhenReady })
+            }
+        } finally { main {
+            adapters.forEach { it.releaseAll() }; cache.close(); histories.forEach { it.close() }
+            activity.finish(); prefs.accountId = previousAccount
+        } }
+    }
+
     @Test fun normalPlaybackGuideExcludesVisibleControls() {
         val context = instrumentation.targetContext
         val activity = instrumentation.startActivitySync(Intent(context, AuthorActivity::class.java).putExtra(AuthorActivity.EXTRA_ID, "fixture").addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)) as AuthorActivity

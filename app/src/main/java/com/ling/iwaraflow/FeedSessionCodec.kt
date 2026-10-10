@@ -12,7 +12,7 @@ internal object FeedSessionCodec {
             .put("paging", session.pagingEnabled).put("items", JSONArray(items.map { v ->
                 JSONObject().put("id", v.id).put("title", v.title.take(300)).put("author", v.author.take(120))
                     .put("authorId", v.authorId).put("username", v.authorUsername).put("tags", JSONArray(v.tags.take(30)))
-                    .put("likes", v.likes).put("views", v.views).put("created", v.createdAt).put("liked", v.liked)
+                    .put("likes", v.likes).put("views", v.views).put("created", v.createdAt).put("liked", v.liked).put("likeAccount", v.likeStateAccount)
                     .put("favorite", v.localFavorite).put("position", v.resumePositionMs).put("playWhenReady", v.resumePlayWhenReady).put("quality", v.selectedQuality)
             })).toString()
     }
@@ -23,7 +23,7 @@ internal object FeedSessionCodec {
             val row = rows.getJSONObject(i); val tags = row.getJSONArray("tags")
             VideoItem(row.getString("id"), row.getString("title"), row.getString("author"),
                 (0 until tags.length()).map(tags::getString), row.optInt("likes"), views = row.optInt("views"),
-                createdAt = row.optLong("created"), liked = row.optBoolean("liked"), localFavorite = row.optBoolean("favorite"),
+                createdAt = row.optLong("created"), liked = row.optBoolean("liked"), likeStateAccount = row.optString("likeAccount").takeIf { it.isNotBlank() }, localFavorite = row.optBoolean("favorite"),
                 authorId = row.optString("authorId"), authorUsername = row.optString("username"),
                 resumePositionMs = row.optLong("position").coerceAtLeast(0),
                 resumePlayWhenReady = row.optBoolean("playWhenReady", true),

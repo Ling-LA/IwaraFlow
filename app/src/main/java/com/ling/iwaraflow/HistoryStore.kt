@@ -30,6 +30,7 @@ class HistoryStore(context: Context, private val profileFile: String? = null) : 
     private val appPrefs = AppPrefs(context.applicationContext)
     fun invalidateInterests() = notifyInterestChanged()
     private val appContext = context.applicationContext
+    internal val likeStates = appPrefs.likeStates
     private val profiles = java.util.concurrent.ConcurrentHashMap<String, HistoryStore>()
     private val queuedScope = ThreadLocal<String>()
     private fun interestScope(): String = queuedScope.get() ?: if (appPrefs.isolateInterests) {
@@ -813,7 +814,7 @@ class HistoryStore(context: Context, private val profileFile: String? = null) : 
                 )
             }
         }
-        return out
+        return out.map(likeStates::apply)
     }
 
     @Synchronized
@@ -835,7 +836,7 @@ class HistoryStore(context: Context, private val profileFile: String? = null) : 
                 )
             }
         }
-        return out
+        return out.map(likeStates::apply)
     }
 
     /**

@@ -64,16 +64,23 @@ class PromoRecordingTest {
     }
     private fun record(name: String, seconds: Int, action: () -> Unit = {}) {
         ins.waitForIdleSync()
-        val descriptor = ins.uiAutomation.executeShellCommand(
-            "screenrecord --size 1080x1920 --bit-rate 9000000 --time-limit $seconds $export/$name.mp4")
+        ins.sendStatus(2, android.os.Bundle().apply { putString("promo_start", "$name,$seconds") })
+        val deadline = SystemClock.uptimeMillis() + 20000
+        while (!shell("ls $export/$name.ready").contains("$name.ready")) {
+            check(SystemClock.uptimeMillis() < deadline) { "Host recorder did not start" }
+            SystemClock.sleep(100)
+        }
         val start = SystemClock.elapsedRealtime()
         SystemClock.sleep(700)
         action()
-        val remaining = seconds * 1000L + 600 - (SystemClock.elapsedRealtime() - start)
+        val remaining = seconds * 1000L - (SystemClock.elapsedRealtime() - start)
         if (remaining > 0) SystemClock.sleep(remaining)
-        ParcelFileDescriptor.AutoCloseInputStream(descriptor).use { it.readBytes() }
-        val bytes = shell("wc -c $export/$name.mp4").trim().substringBefore(' ').toLongOrNull() ?: 0L
-        assertTrue("Recording $name is empty", bytes > 10_000)
+        ins.sendStatus(2, android.os.Bundle().apply { putString("promo_stop", name) })
+        val finish = SystemClock.uptimeMillis() + 20000
+        while (!shell("ls $export/$name.done").contains("$name.done")) {
+            check(SystemClock.uptimeMillis() < finish) { "Host recorder did not finish" }
+            SystemClock.sleep(100)
+        }
         val screenshot = ins.uiAutomation.takeScreenshot()
         val local = File(context.getExternalFilesDir(null), "$name.png")
         local.outputStream().use { screenshot.compress(Bitmap.CompressFormat.PNG, 100, it) }
@@ -81,12 +88,29 @@ class PromoRecordingTest {
         shell("cp ${local.absolutePath} $export/$name.png")
     }
     private fun gesture(x: Float, y: Float, x2: Float = x, y2: Float = y, duration: Long) {
-        shell("input touchscreen swipe ${x.toInt()} ${y.toInt()} ${x2.toInt()} ${y2.toInt()} $duration")
+        val start = SystemClock.uptimeMillis()
+        fun send(action: Int, progress: Float) = main {
+            val activity = androidx.test.runner.lifecycle.ActivityLifecycleMonitorRegistry.getInstance()
+                .getActivitiesInStage(androidx.test.runner.lifecycle.Stage.RESUMED).last()
+            val root = activity.window.decorView
+            val event=MotionEvent.obtain(start,SystemClock.uptimeMillis(),action,x+(x2-x)*progress,y+(y2-y)*progress,0)
+            event.source=android.view.InputDevice.SOURCE_TOUCHSCREEN
+            root.dispatchTouchEvent(event);event.recycle()
+        }
+        send(MotionEvent.ACTION_DOWN,0f)
+        val steps=(duration/20).toInt().coerceAtLeast(1)
+        repeat(steps) { SystemClock.sleep(20);send(MotionEvent.ACTION_MOVE,(it+1f)/steps) }
+        send(MotionEvent.ACTION_UP,1f)
     }
     private fun hold(view: View, duration: Long) {
-        val xy = IntArray(2); var x = 0f; var y = 0f
-        main { view.getLocationOnScreen(xy); x = xy[0]+view.width/2f; y = xy[1]+view.height/2f }
-        gesture(x, y, duration = duration)
+        val start=SystemClock.uptimeMillis()
+        fun send(action: Int)=main {
+            assertTrue("Pressed control must be visible",view.isShown)
+            val event=MotionEvent.obtain(start,SystemClock.uptimeMillis(),action,view.width/2f,view.height/2f,0)
+            view.dispatchTouchEvent(event);event.recycle()
+        }
+        send(MotionEvent.ACTION_DOWN);SystemClock.sleep(duration);send(MotionEvent.ACTION_UP)
+
     }
     private fun neutralApi(api: IwaraApi) {
         api.cancelPendingRequests()
@@ -167,7 +191,8 @@ class PromoRecordingTest {
             main { assertTrue("Reaction must like active example",items[1].liked);assertTrue("Reaction must save active example",items[1].localFavorite) }
         }
         record("03-danmaku",10) {
-            main { AppPrefs(context).danmakuEnabled=true; (get(home,"adapter") as VideoAdapter).applyDisplayPrefs() }
+            val danmakuHolder=currentHolder(home)
+            main { AppPrefs(context).danmakuEnabled=true; invoke(danmakuHolder,"loadDanmaku") }
             SystemClock.sleep(2100)
             main { currentHolderView(home).findViewById<View>(R.id.comments).performClick() }
             SystemClock.sleep(1500)

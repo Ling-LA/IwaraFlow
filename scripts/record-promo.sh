@@ -32,5 +32,5 @@ adb shell settings put global animator_duration_scale 1
 } > promo-recordings/device-proof.txt
 adb install -r app/build/outputs/apk/debug/app-debug.apk
 adb install -r app/build/outputs/apk/androidTest/debug/app-debug-androidTest.apk
-adb shell am instrument -w -r -e class com.ling.iwaraflow.PromoRecordingTest com.ling.iwaraflow.test/androidx.test.runner.AndroidJUnitRunner | tee promo-recordings/instrumentation.txt
+python3 scripts/record-promo-host.py
 grep -F 'OK (1 test)' promo-recordings/instrumentation.txt

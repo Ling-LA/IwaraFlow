@@ -269,10 +269,15 @@ class ProfileUiDeviceTest {
             screenshot("dislike-portrait")
             val sheetCapture = instrumentation.uiAutomation.takeScreenshot()
             try {
-                // Sample away from the system navigation icons / gesture pill.
-                val bottomColor = sheetCapture.getPixel(sheetCapture.width / 3, sheetCapture.height - 4)
-                assertTrue("Sheet background must extend through the navigation area",
-                    android.graphics.Color.red(bottomColor) > 220 && android.graphics.Color.green(bottomColor) > 220 && android.graphics.Color.blue(bottomColor) > 220)
+                // Use a strip, not one pixel: with hidden system bars a scrolling label
+                // can cross the bottom row. A black navigation strip has no light background.
+                val samples = sheetCapture.width / 10 until sheetCapture.width * 9 / 10
+                val lightPixels = samples.count { x ->
+                    val color = sheetCapture.getPixel(x, sheetCapture.height - 4)
+                    android.graphics.Color.red(color) > 220 && android.graphics.Color.green(color) > 220 && android.graphics.Color.blue(color) > 220
+                }
+                assertTrue("Sheet background must extend through the navigation area: $lightPixels/${samples.count()}",
+                    lightPixels > samples.count() * 0.7)
             } finally { sheetCapture.recycle() }
             instrumentation.sendKeyDownUpSync(android.view.KeyEvent.KEYCODE_BACK)
             main { PlaybackGuide.show(activity, false) }

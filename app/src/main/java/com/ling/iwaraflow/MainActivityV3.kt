@@ -211,7 +211,7 @@ class MainActivityV3 : AppCompatActivity(), PlaybackGuideHost {
             onNeedLogin = ::showLoginDialog,
             onOpenAuthor = { author -> openAuthor(author.id, author.name, author.username, author.avatarUrl) },
             onOpenChanged = { open -> closeCommentsOnBack.isEnabled = open },
-            onCommentPosted = { item -> history.recordInteraction(item, "comment", 1.5); rerankQueue() },
+            onCommentPosted = { item -> history.recordInteractionAsync(item, "comment", 1.5); rerankQueue() },
             onOpenTag = ::openTagSearch,
             // 简介里写清楚这条是怎么被推荐出来的；别的流（最新 / 流行 / 人气）没有理由可写。
             reasonFor = { videoId ->
@@ -599,6 +599,13 @@ class MainActivityV3 : AppCompatActivity(), PlaybackGuideHost {
         val before = adapter.itemCount
         adapter.append(list)
         noteImpressions(list, before)
+        pager.post {
+            if (!isFinishing && !isDestroyed) {
+                val current = pager.currentItem
+                val removed = adapter.trimConsumed(current)
+                if (removed > 0) pager.setCurrentItem(current - removed, false)
+            }
+        }
         if (adapter.itemCount == 0) return
         if (before == 0) {
             pendingAdvanceAfterLoad = false
@@ -810,7 +817,7 @@ class MainActivityV3 : AppCompatActivity(), PlaybackGuideHost {
     fun openAuthorProfile(view: View) {
         val item = adapter.items.getOrNull(pager.currentItem) ?: return
         // 专门点进作者主页：对这个作者有点兴趣。
-        history.recordInteraction(item, "author_visit", 0.3)
+        history.recordInteractionAsync(item, "author_visit", 0.3)
         if (item.authorId.isBlank() && item.authorUsername.isBlank() && item.id.isNotBlank()) {
             // 本地下载记录里没有作者 id：现拉一次详情再进。
             Toast.makeText(this, "正在读取作者资料…", Toast.LENGTH_SHORT).show()
@@ -863,7 +870,7 @@ class MainActivityV3 : AppCompatActivity(), PlaybackGuideHost {
     /** 简介页点了标签：收起面板去搜这个标签，并记一笔兴趣。 */
     private fun openTagSearch(tag: String) {
         if (tag.isBlank()) return
-        history.recordInteraction(VideoItem("tag:$tag", tag, "", listOf(tag), 0), HistoryStore.ACTION_SEARCH, HistoryStore.SEARCH_WEIGHT)
+        history.recordInteractionAsync(VideoItem("tag:$tag", tag, "", listOf(tag), 0), HistoryStore.ACTION_SEARCH, HistoryStore.SEARCH_WEIGHT)
         comments.close()
         launchSearch(tag, asTag = true)
     }
@@ -907,7 +914,7 @@ class MainActivityV3 : AppCompatActivity(), PlaybackGuideHost {
     private fun showMainMenu() {
         val account = if (api.isLoggedIn()) "退出 Iwara 登录" else "登录 Iwara"
         // 同步点赞记录和诊断信息都挪进了设置页：主菜单留常用入口就够了。
-        val items = arrayOf(account, "浏览历史", "我的", "已下载", "设置", "重新加载当前流")
+        val items = arrayOf(account, "浏览历史", "我的", "已下载", "设置", "重新加载当前流", "打开 Iwara 链接")
         val dialog = AlertDialog.Builder(this).setTitle("IwaraFlow").setItems(items) { _, which ->
             when (which) {
                 0 -> if (api.isLoggedIn()) { logOut() } else showLoginDialog()
@@ -916,9 +923,30 @@ class MainActivityV3 : AppCompatActivity(), PlaybackGuideHost {
                 3 -> openSavedVideos(SavedVideosActivity.KIND_DOWNLOADS)
                 4 -> showSettingsDialog()
                 5 -> loadFeed(reset = true)
+                6 -> showLinkInput()
             }
         }.create()
         dialog.setOnShowListener { styleDialogButtons(dialog) }; dialog.show()
+    }
+
+    private fun showLinkInput() {
+        val input = EditText(this).apply {
+            hint = "粘贴视频或作者的 Iwara 链接"
+            inputType = InputType.TYPE_CLASS_TEXT or InputType.TYPE_TEXT_VARIATION_URI
+            setPadding(dp(20), dp(12), dp(20), dp(12))
+        }
+        val dialog = AlertDialog.Builder(this).setTitle("打开 Iwara 链接").setView(input)
+            .setNegativeButton("取消", null).setPositiveButton("打开", null).create()
+        dialog.setOnShowListener {
+            dialog.getButton(AlertDialog.BUTTON_POSITIVE).setOnClickListener {
+                val text = input.text.toString()
+                if (IwaraSharedLink.parse(text) == null) { input.error = "请输入有效的视频或作者链接"; return@setOnClickListener }
+                intent.putExtra(IwaraSharedLink.EXTRA_URL, text)
+                dialog.dismiss()
+                consumeSharedLink()
+            }
+        }
+        dialog.show()
     }
 
     /** 手动把官方点赞补进“已看”，方便点赞很多的账号立刻生效。 */
@@ -1023,7 +1051,13 @@ class MainActivityV3 : AppCompatActivity(), PlaybackGuideHost {
 
     /** Consume each internal link intent once. Clipboard deduplication survives process restarts. */
     private fun consumeSharedLink(): Boolean {
-        val text = intent.getStringExtra(IwaraSharedLink.EXTRA_URL) ?: return false
+        val text = intent.getStringExtra(IwaraSharedLink.EXTRA_URL)
+            ?: when (intent.action) {
+                Intent.ACTION_VIEW -> intent.dataString
+                Intent.ACTION_SEND -> intent.getStringExtra(Intent.EXTRA_TEXT)
+                else -> null
+            } ?: return false
+        intent.action = null; intent.data = null; intent.removeExtra(Intent.EXTRA_TEXT)
         intent.removeExtra(IwaraSharedLink.EXTRA_URL)
         val link = IwaraSharedLink.parse(text) ?: run {
             if (adapter.items.isEmpty()) returnToRecommend()
@@ -1139,9 +1173,9 @@ class MainActivityV3 : AppCompatActivity(), PlaybackGuideHost {
                 .setNotificationVisibility(DownloadManager.Request.VISIBILITY_VISIBLE_NOTIFY_COMPLETED).setAllowedOverMetered(true).setAllowedOverRoaming(false)
                 .setDestinationInExternalPublicDir(Environment.DIRECTORY_DOWNLOADS, "IwaraFlow/${safeTitle}_${item.id}_${safeQuality}.mp4")
             val downloadId = (getSystemService(Context.DOWNLOAD_SERVICE) as DownloadManager).enqueue(request)
-            history.recordInteraction(item, "download", 1.1)
+            history.recordInteractionAsync(item, "download", 1.1)
             // 记一笔，"已下载"那一页要靠它把视频和系统下载对上号。
-            history.recordDownload(item, source.name, downloadId)
+            history.recordDownloadAsync(item, source.name, downloadId)
             Toast.makeText(this, "已加入系统下载：${source.name}", Toast.LENGTH_SHORT).show()
         } catch (e: Exception) { Toast.makeText(this, "下载创建失败：${e.message}", Toast.LENGTH_LONG).show() }
     }

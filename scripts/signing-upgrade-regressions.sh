@@ -25,3 +25,6 @@ grep -F 'INSTALL_FAILED_UPDATE_INCOMPATIBLE' "$RUNNER_TEMP/legacy-rejection.txt"
 adb install -r out/IwaraFlow-signed.apk
 test "$(adb shell cat /data/user/0/$package/files/signing-upgrade-marker | tr -d '\r')" = preserve-user-data
 echo 'PASS: old-to-new upgrade preserves data, private-key reinstall succeeds, old-key replacement is rejected.'
+
+# Validate the actual shipped R8 artifact, not just the debug build.
+bash scripts/release-smoke.sh

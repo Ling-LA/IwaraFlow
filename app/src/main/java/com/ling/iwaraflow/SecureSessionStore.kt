@@ -78,7 +78,10 @@ class SecureSessionStore(context: Context) {
 
     var refreshToken: String?
         get() = secret("refresh_token")
-        set(value) = putSecret("refresh_token", value)
+        set(value) {
+            if (value != refreshToken) putSecret("verified_user_id", null)
+            putSecret("refresh_token", value)
+        }
 
     var accessToken: String?
         get() = secret("access_token")
@@ -87,7 +90,7 @@ class SecureSessionStore(context: Context) {
     /** Account logout must preserve translation provider credentials. */
     fun clearAuthentication() = synchronized(accountLock) {
         accountRevision++
-        putSecret("refresh_token", null); putSecret("access_token", null)
+        putSecret("refresh_token", null); putSecret("access_token", null); putSecret("verified_user_id", null)
     }
 
     fun clear() = synchronized(accountLock) {

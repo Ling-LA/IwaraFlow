@@ -55,6 +55,7 @@ class AuthorActivity : AppCompatActivity(), PlaybackGuideHost {
     private fun playableWorks(): List<VideoItem> = works.filter { it.playbackIssue == null }
     private var author: IwaraAuthor? = null
     private var page = 0
+    private var worksBaseOffset = 0
     private var loadingPage = false
     private var noMore = false
     private var inFeed = false
@@ -133,7 +134,7 @@ class AuthorActivity : AppCompatActivity(), PlaybackGuideHost {
             gapPx = (20 * density).toInt(),
             onNeedLogin = { Toast.makeText(this, "请先在主页登录 Iwara", Toast.LENGTH_SHORT).show() },
             onOpenAuthor = ::openAnotherAuthor,
-            onCommentPosted = { history.recordInteraction(it, "comment", 1.5) },
+            onCommentPosted = { history.recordInteractionAsync(it, "comment", 1.5) },
             onOpenTag = ::openTagSearch
         )
         pager.registerOnPageChangeCallback(object : ViewPager2.OnPageChangeCallback() {
@@ -155,6 +156,14 @@ class AuthorActivity : AppCompatActivity(), PlaybackGuideHost {
         followButton.setOnClickListener { toggleFollow() }
         friendButton.setOnClickListener { toggleFriend() }
 
+        PagePlaybackState.read(savedInstanceState, prefs)?.let { restored ->
+            works += restored.items
+            worksBaseOffset = PagePlaybackState.start(savedInstanceState!!)
+            page = PagePlaybackState.end(savedInstanceState!!) / pageSize
+            listAdapter.notifyDataSetChanged()
+            if (savedInstanceState.getBoolean("page_in_feed")) openWork(works[restored.currentIndex])
+            else listView.scrollToPosition(restored.currentIndex)
+        }
         val username = intent.getStringExtra(EXTRA_USERNAME).orEmpty()
         val id = intent.getStringExtra(EXTRA_ID).orEmpty()
         val display = intent.getStringExtra(EXTRA_NAME).orEmpty()
@@ -231,9 +240,16 @@ class AuthorActivity : AppCompatActivity(), PlaybackGuideHost {
                     val start = works.size
                     val fresh = raw.distinctBy { it.id }.filter { incoming -> works.none { it.id == incoming.id } }
                     works += fresh
-                    listAdapter.notifyItemRangeInserted(start, fresh.size)
+                    val current = if (inFeed) works.indexOfFirst { it.id == feedAdapter.items.getOrNull(pager.currentItem)?.id }
+                        else (listView.layoutManager as? LinearLayoutManager)?.findFirstVisibleItemPosition() ?: 0
+                    val remove = minOf((works.size - 2000).coerceAtLeast(0), (current - 80).coerceAtLeast(0))
+                    if (remove > 0) {
+                        works.subList(0, remove).clear(); worksBaseOffset += remove
+                        listAdapter.notifyDataSetChanged()
+                        if (!inFeed) listView.scrollToPosition(current - remove)
+                    } else listAdapter.notifyItemRangeInserted(start, fresh.size)
                     page++
-                    noMore = fresh.isEmpty() || (batch.total >= 0 && works.size >= batch.total)
+                    noMore = fresh.isEmpty() || (batch.total >= 0 && worksBaseOffset + works.size >= batch.total)
                     loadingPage = false
                     verifying += 1
                     updateStatus()
@@ -244,13 +260,19 @@ class AuthorActivity : AppCompatActivity(), PlaybackGuideHost {
                         else if (!noMore) loadNextPage()
                     }
 
-                    gate.inspectAll(fresh, prefs.defaultQuality) { _ ->
+                    gate.inspectAll(fresh, prefs.defaultQuality) { checked ->
                         if (isFinishing || isDestroyed || exiting) return@inspectAll
                         runOnUiThread {
                             if (isFinishing || isDestroyed || exiting) return@runOnUiThread
+                            checked.forEach { verified ->
+                                fresh.firstOrNull { it.id == verified.id }?.apply {
+                                    playbackIssue = verified.playbackIssue; sources = verified.sources
+                                    streamUrl = verified.streamUrl; selectedQuality = verified.selectedQuality
+                                }
+                            }
                             verifying = (verifying - 1).coerceAtLeast(0)
                             // inspectAll 改的就是列表里那几个对象，重新绑定一次就能看到标记。
-                            listAdapter.notifyItemRangeChanged(start, fresh.size)
+                            listAdapter.notifyDataSetChanged()
                             if (inFeed) rebuildFeedKeepingCurrent()
                             updateStatus()
                         }
@@ -280,6 +302,11 @@ class AuthorActivity : AppCompatActivity(), PlaybackGuideHost {
 
     private fun rebuildFeed(currentId: String?) {
         val list = playableWorks()
+        if (feedAdapter.items.map { it.id } == list.take(feedAdapter.itemCount).map { it.id }) {
+            feedAdapter.append(list.drop(feedAdapter.itemCount))
+            return
+        }
+        feedAdapter.savePlaybackPosition()
         feedAdapter.replace(list)
         if (list.isEmpty()) return
         val desiredId = currentId ?: list.first().id
@@ -315,7 +342,7 @@ class AuthorActivity : AppCompatActivity(), PlaybackGuideHost {
     /** 简介页点了标签：开搜索页搜这个标签。 */
     private fun openTagSearch(tag: String) {
         if (tag.isBlank() || exiting) return
-        history.recordInteraction(VideoItem("tag:$tag", tag, "", listOf(tag), 0), HistoryStore.ACTION_SEARCH, HistoryStore.SEARCH_WEIGHT)
+        history.recordInteractionAsync(VideoItem("tag:$tag", tag, "", listOf(tag), 0), HistoryStore.ACTION_SEARCH, HistoryStore.SEARCH_WEIGHT)
         comments.close()
         feedAdapter.pauseAll()
         startActivity(Intent(this, SearchActivity::class.java)
@@ -417,7 +444,7 @@ class AuthorActivity : AppCompatActivity(), PlaybackGuideHost {
                     RecommendationEngine.notifyFollowChanged(a.id, desired)
                     // 关注是很强的兴趣信号（取关则反过来压一点）。
                     val card = VideoItem("author:${a.id}", a.name, a.name, emptyList(), 0, authorId = a.id)
-                    history.recordInteraction(card, if (desired) "follow" else "unfollow", if (desired) 1.5 else -1.0)
+                    history.recordInteractionAsync(card, if (desired) "follow" else "unfollow", if (desired) 1.5 else -1.0)
                 }
                     .onFailure { Toast.makeText(this, it.message ?: "关注操作失败", Toast.LENGTH_SHORT).show() }
             }
@@ -452,7 +479,7 @@ class AuthorActivity : AppCompatActivity(), PlaybackGuideHost {
 
     private fun refreshWorksAfterRelationshipChange() {
         works.clear(); verifying = 0; listAdapter.notifyDataSetChanged(); feedAdapter.replace(emptyList())
-        page = 0; noMore = false; loadingPage = false; loadNextPage()
+        page = 0; worksBaseOffset = 0; noMore = false; loadingPage = false; loadNextPage()
     }
 
     private fun refreshRelationUi() {
@@ -478,7 +505,7 @@ class AuthorActivity : AppCompatActivity(), PlaybackGuideHost {
                 .setNotificationVisibility(DownloadManager.Request.VISIBILITY_VISIBLE_NOTIFY_COMPLETED)
                 .setDestinationInExternalPublicDir(Environment.DIRECTORY_DOWNLOADS, "IwaraFlow/$fileName")
             val downloadId = (getSystemService(Context.DOWNLOAD_SERVICE) as DownloadManager).enqueue(request)
-            history.recordDownload(item, source.name, downloadId)
+            history.recordDownloadAsync(item, source.name, downloadId)
             Toast.makeText(this, "已加入下载", Toast.LENGTH_SHORT).show()
         } catch (e: Exception) {
             Toast.makeText(this, "下载失败：${e.message}", Toast.LENGTH_SHORT).show()
@@ -561,6 +588,14 @@ class AuthorActivity : AppCompatActivity(), PlaybackGuideHost {
             // 用户回到的还是刚才小窗里那条视频。
             else -> { feedAdapter.pauseAll(); NavigationDiagnostics.note(this, "作者页小窗被关闭：停播，页面留在后台") }
         }
+    }
+
+    override fun onSaveInstanceState(outState: Bundle) {
+        feedAdapter.savePlaybackPosition()
+        val index = if (inFeed) pager.currentItem else
+            (listView.layoutManager as? LinearLayoutManager)?.findFirstVisibleItemPosition()?.coerceAtLeast(0) ?: 0
+        PagePlaybackState.save(outState, prefs, if (inFeed) feedAdapter.items else works, index, inFeed, page, worksBaseOffset)
+        super.onSaveInstanceState(outState)
     }
 
     override fun onDestroy() {

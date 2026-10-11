@@ -45,12 +45,15 @@ class SavedVideosActivity : AppCompatActivity(), PlaybackGuideHost {
     private var listLoading = false
     private var listSerial = 0
     private var listOffset = 0
+    private var listBaseOffset = 0
     private var listQuery = ""
     private var ascending = false
     private var advanceAfterLoad = false
     private val listWorker = java.util.concurrent.Executors.newSingleThreadExecutor()
     private val listHandler = android.os.Handler(android.os.Looper.getMainLooper())
     private var searchTask: Runnable? = null
+    private var restoringVideo: VideoItem? = null
+    private var restoredListIndex = 0
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
@@ -105,7 +108,7 @@ class SavedVideosActivity : AppCompatActivity(), PlaybackGuideHost {
             gapPx = (20 * density).toInt(),
             onNeedLogin = { Toast.makeText(this, "请先在主页登录 Iwara", Toast.LENGTH_SHORT).show() },
             onOpenAuthor = ::openAuthor,
-            onCommentPosted = { history.recordInteraction(it, "comment", 1.5) },
+            onCommentPosted = { history.recordInteractionAsync(it, "comment", 1.5) },
             onOpenTag = ::openTagSearch
         )
         pager.registerOnPageChangeCallback(object : ViewPager2.OnPageChangeCallback() {
@@ -115,21 +118,30 @@ class SavedVideosActivity : AppCompatActivity(), PlaybackGuideHost {
                 if (position >= items.size - 5) loadLibraryPage()
             }
         })
-        EndOfFeedHint.install(pager) { listLoading || items.size < listTotal }
+        EndOfFeedHint.install(pager) { listLoading || listOffset < listTotal }
+        val restored = PagePlaybackState.read(savedInstanceState, prefs)
+        if (restored != null) {
+            listQuery = savedInstanceState!!.getString("library_query").orEmpty()
+            ascending = savedInstanceState.getBoolean("library_ascending")
+            listOffset = PagePlaybackState.start(savedInstanceState)
+            listBaseOffset = listOffset
+            listTotal = Int.MAX_VALUE
+            restoredListIndex = restored.currentIndex
+            if (savedInstanceState.getBoolean("page_in_feed")) restoringVideo = restored.items[restored.currentIndex]
+        }
         installLibraryControls()
-        loadLibraryPage(reset = true)
+        loadLibraryPage(reset = restored == null)
     }
 
     private fun installLibraryControls() {
-        if (kind == KIND_DOWNLOADS) return
         val header = findViewById<TextView>(R.id.savedSubtitle).parent as android.widget.LinearLayout
         val controls = android.widget.LinearLayout(this).apply { gravity = android.view.Gravity.CENTER_VERTICAL }
         val input = android.widget.EditText(this).apply {
             hint = "搜索标题、作者或标签"; textSize = 14f; setSingleLine()
-            contentDescription = "搜索本地列表"
+            contentDescription = "搜索本地列表"; setText(listQuery)
         }
         val sort = android.widget.Button(this).apply {
-            text = "最新在前"; setOnClickListener {
+            text = if (ascending) "最早在前" else "最新在前"; setOnClickListener {
                 ascending = !ascending; text = if (ascending) "最早在前" else "最新在前"
                 loadLibraryPage(reset = true)
             }
@@ -155,7 +167,7 @@ class SavedVideosActivity : AppCompatActivity(), PlaybackGuideHost {
 
     private fun loadLibraryPage(reset: Boolean = false) {
         if (closed) return
-        if (reset) { listSerial++; listOffset = 0; listLoading = false; listTotal = Int.MAX_VALUE }
+        if (reset) { listSerial++; listOffset = 0; listBaseOffset = 0; listLoading = false; listTotal = Int.MAX_VALUE }
         if (listLoading || listOffset >= listTotal) return
         val serial = listSerial
         val offset = listOffset
@@ -165,10 +177,14 @@ class SavedVideosActivity : AppCompatActivity(), PlaybackGuideHost {
         listWorker.execute {
             val result = runCatching {
                 if (kind == KIND_DOWNLOADS) {
-                    val entries = DownloadLibrary.entries(this, history)
-                    Triple(SavedLibrary.Page(entries.map { it.item }, entries.size), entries, true)
-                } else Triple(SavedLibrary.page(history.readableDatabase, kind == KIND_FAVORITES,
+                    val entries = DownloadLibrary.entries(this, history, offset, 48, query, order)
+                    Triple(SavedLibrary.Page(entries.map { it.item }, history.downloadCount(query)), entries, true)
+                } else Triple(SavedLibrary.page(history.libraryDatabase, kind == KIND_FAVORITES,
                     offset, 48, query, order), emptyList<DownloadLibrary.Entry>(), false)
+            }.mapCatching { triple ->
+                val statuses = history.loadStatuses(triple.first.items.map { it.id })
+                triple.first.items.forEach { it.localFavorite = it.id in statuses.favorites }
+                triple
             }
             runOnUiThread {
                 if (closed || serial != listSerial) return@runOnUiThread
@@ -186,7 +202,29 @@ class SavedVideosActivity : AppCompatActivity(), PlaybackGuideHost {
                     if (inFeed && !reset) feedAdapter.append(added.map { it.copy() })
                     findViewById<TextView>(R.id.savedSubtitle).text = if (downloaded) downloadsSubtitle()
                         else "共 ${page.total} 条 · 已加载 ${items.size} 条" + if (items.size < page.total) " · 下滑继续" else ""
-                    enrichMissingVideoDetails(from)
+                    val current = if (inFeed) pager.currentItem else
+                        (listView.layoutManager as LinearLayoutManager).findFirstVisibleItemPosition()
+                    val remove = minOf((items.size - 2000).coerceAtLeast(0), (current - 80).coerceAtLeast(0))
+                    if (remove > 0) {
+                        items.take(remove).forEach { downloads.remove(it.id) }
+                        items.subList(0, remove).clear(); listBaseOffset += remove
+                        adapter.notifyItemRangeRemoved(0, remove)
+                        if (inFeed) { feedAdapter.discardConsumed(remove); pager.setCurrentItem(current - remove, false) }
+                        else listView.scrollToPosition(current - remove)
+                    }
+                    enrichMissingVideoDetails((from - remove).coerceAtLeast(0))
+                    val restore = restoringVideo
+                    if (restore != null) {
+                        val found = items.firstOrNull { it.id == restore.id }
+                        if (found != null) {
+                            restoringVideo = null
+                            found.resumePositionMs = restore.resumePositionMs
+                            found.resumePlayWhenReady = restore.resumePlayWhenReady
+                            openVideo(found)
+                        }
+                    } else if (restoredListIndex > 0) {
+                        listView.scrollToPosition(restoredListIndex); restoredListIndex = 0
+                    }
                     if (advanceAfterLoad) {
                         advanceAfterLoad = false
                         if (pager.currentItem + 1 < feedAdapter.itemCount) pager.setCurrentItem(pager.currentItem + 1, true)
@@ -211,23 +249,24 @@ class SavedVideosActivity : AppCompatActivity(), PlaybackGuideHost {
         val ready = downloads.values.filter { it.state == DownloadLibrary.State.READY }
         val size = DownloadLibrary.formatSize(ready.sumOf { it.sizeBytes })
         return buildString {
-            append("共 ${items.size} 个")
+            append("共 $listTotal 个 · 已加载 ${items.size} 个")
             if (ready.size < items.size) append(" · ${ready.size} 个可播放")
-            if (size.isNotEmpty()) append(" · $size")
+            if (size.isNotEmpty()) append(" · 本页 $size")
         }
     }
 
     private fun enrichMissingVideoDetails(from: Int = 0) {
+        val serial = listSerial
         items.drop(from).forEachIndexed { relative, original ->
             val index = from + relative
             api.getVideo(original.id) { result ->
                 result.onSuccess { fresh ->
                     if (closed) return@onSuccess
                     runOnUiThread {
-                        if (closed || index !in items.indices || items[index].id != original.id) return@runOnUiThread
-                        val keepFavorite = original.localFavorite || history.isLocalFavorite(original.id)
+                        if (closed || serial != listSerial || index !in items.indices || items[index].id != original.id) return@runOnUiThread
+                        val keepFavorite = original.localFavorite
                         val keepPosition = original.resumePositionMs
-                        items[index] = fresh.copy(localFavorite = keepFavorite, resumePositionMs = keepPosition)
+                        items[index] = fresh.copy(localFavorite = keepFavorite, resumePositionMs = keepPosition, resumePlayWhenReady = original.resumePlayWhenReady)
                         adapter.notifyItemChanged(index)
                         // 播放页里已经放着这条的话，把作者 id、点赞数这些补进去。
                         feedAdapter.items.firstOrNull { it.id == original.id }?.let { shown ->
@@ -256,7 +295,7 @@ class SavedVideosActivity : AppCompatActivity(), PlaybackGuideHost {
         val feed = items.map { entry ->
             val local = downloads[entry.id]?.takeIf { it.state == DownloadLibrary.State.READY }?.localUri?.toString()
             entry.copy().also { copy ->
-                copy.localFavorite = history.isLocalFavorite(entry.id)
+                copy.localFavorite = entry.localFavorite
                 if (local != null) {
                     copy.sources = listOf(VideoSource(MainActivityV3.LOCAL_SOURCE_NAME, local, 10_000))
                     copy.streamUrl = local
@@ -303,7 +342,7 @@ class SavedVideosActivity : AppCompatActivity(), PlaybackGuideHost {
     private fun nextVideo(position: Int) {
         if (closed) return
         if (position + 1 < feedAdapter.itemCount) pager.setCurrentItem(position + 1, true)
-        else if (items.size < listTotal || listLoading) { advanceAfterLoad = true; loadLibraryPage() }
+        else if (listOffset < listTotal || listLoading) { advanceAfterLoad = true; loadLibraryPage() }
         else EndOfFeedHint.show(this)
     }
 
@@ -335,7 +374,7 @@ class SavedVideosActivity : AppCompatActivity(), PlaybackGuideHost {
     /** 简介页点了标签：开搜索页搜这个标签。 */
     private fun openTagSearch(tag: String) {
         if (tag.isBlank() || closed) return
-        history.recordInteraction(VideoItem("tag:$tag", tag, "", listOf(tag), 0), HistoryStore.ACTION_SEARCH, HistoryStore.SEARCH_WEIGHT)
+        history.recordInteractionAsync(VideoItem("tag:$tag", tag, "", listOf(tag), 0), HistoryStore.ACTION_SEARCH, HistoryStore.SEARCH_WEIGHT)
         comments.close()
         feedAdapter.pauseAll()
         startActivity(Intent(this, SearchActivity::class.java)
@@ -370,7 +409,7 @@ class SavedVideosActivity : AppCompatActivity(), PlaybackGuideHost {
                 .setNotificationVisibility(DownloadManager.Request.VISIBILITY_VISIBLE_NOTIFY_COMPLETED)
                 .setDestinationInExternalPublicDir(Environment.DIRECTORY_DOWNLOADS, "IwaraFlow/$fileName")
             val downloadId = (getSystemService(Context.DOWNLOAD_SERVICE) as DownloadManager).enqueue(request)
-            history.recordDownload(item, source.name, downloadId)
+            history.recordDownloadAsync(item, source.name, downloadId)
             Toast.makeText(this, "已加入下载", Toast.LENGTH_SHORT).show()
         } catch (e: Exception) {
             Toast.makeText(this, "下载失败：${e.message}", Toast.LENGTH_SHORT).show()
@@ -442,6 +481,15 @@ class SavedVideosActivity : AppCompatActivity(), PlaybackGuideHost {
             lifecycle.currentState.isAtLeast(Lifecycle.State.STARTED) -> PipRegistry.leave(this)
             else -> { feedAdapter.pauseAll(); NavigationDiagnostics.note(this, "${pageTitle()}小窗被关闭：停播，页面留在后台") }
         }
+    }
+
+    override fun onSaveInstanceState(outState: Bundle) {
+        feedAdapter.savePlaybackPosition()
+        val index = if (inFeed) pager.currentItem else
+            (listView.layoutManager as? LinearLayoutManager)?.findFirstVisibleItemPosition()?.coerceAtLeast(0) ?: 0
+        PagePlaybackState.save(outState, prefs, if (inFeed) feedAdapter.items else items, index, inFeed, base = listBaseOffset)
+        outState.putString("library_query", listQuery); outState.putBoolean("library_ascending", ascending)
+        super.onSaveInstanceState(outState)
     }
 
     override fun onDestroy() {

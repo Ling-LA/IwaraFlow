@@ -12,14 +12,14 @@ android {
         applicationId = "com.ling.iwaraflow"
         minSdk = 28
         targetSdk = 36
-        versionCode = 100
-        versionName = "0.16.11"
+        versionCode = 101
+        versionName = "0.16.12"
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
     }
 
     buildTypes {
         release {
-            isMinifyEnabled = providers.gradleProperty("optimizeRelease").orNull == "true"
+            isMinifyEnabled = providers.gradleProperty("optimizeRelease").orNull != "false"
             isShrinkResources = isMinifyEnabled
             proguardFiles(getDefaultProguardFile("proguard-android-optimize.txt"), "proguard-rules.pro")
         }
@@ -57,4 +57,12 @@ dependencies {
     androidTestImplementation("androidx.test.ext:junit:1.3.0")
     androidTestImplementation("com.squareup.okhttp3:mockwebserver:4.12.0")
     androidTestImplementation("com.squareup.okhttp3:okhttp-tls:4.12.0")
+}
+
+
+// Native Java agents cannot load their bootstrap JAR from some Unicode Windows temp paths.
+tasks.withType<Test>().configureEach {
+    val testTemp = rootProject.layout.projectDirectory.dir(".test-tmp")
+    systemProperty("java.io.tmpdir", testTemp.asFile.absolutePath)
+    doFirst { testTemp.asFile.mkdirs() }
 }

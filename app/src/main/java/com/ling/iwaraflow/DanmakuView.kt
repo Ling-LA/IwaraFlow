@@ -19,8 +19,21 @@ class DanmakuView(context: Context) : View(context) {
     override fun onAttachedToWindow() { super.onAttachedToWindow(); settings.registerOnSharedPreferenceChangeListener(settingsListener); invalidate() }
     override fun onDetachedFromWindow() { settings.unregisterOnSharedPreferenceChangeListener(settingsListener); cancelTranslations(); super.onDetachedFromWindow() }
     private val paint = Paint(Paint.ANTI_ALIAS_FLAG).apply { color = -1; setShadowLayer(2f, 1f, 1f, 0xFF000000.toInt()) }
+    private val playbackListener = object : Player.Listener {
+        override fun onPositionDiscontinuity(oldPosition: Player.PositionInfo, newPosition: Player.PositionInfo, reason: Int) {
+            baseline = newPosition.positionMs
+            invalidate()
+        }
+    }
     var player: Player? = null
-        set(value) { field = value; if (value == null) cancelTranslations() }
+        set(value) {
+            if (field === value) return
+            field?.removeListener(playbackListener)
+            field = value
+            value?.addListener(playbackListener)
+            baseline = value?.currentPosition ?: 0L
+            if (value == null) cancelTranslations()
+        }
     private var comments = emptyList<String>()
     private var postedComments = emptyList<String>()
     private var baseline = 0L
@@ -68,7 +81,6 @@ class DanmakuView(context: Context) : View(context) {
         val text = compact(value.body).takeIf { it.isNotBlank() } ?: return
         postedComments = (listOf(text) + postedComments.filter { it != text }).take(80)
         comments = (listOf(text) + comments.filter { it != text }).take(80)
-        baseline = player?.currentPosition ?: 0L
         invalidate()
     }
     override fun onDraw(canvas: Canvas) {

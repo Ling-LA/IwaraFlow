@@ -18,6 +18,47 @@ class PlayableVideoGate(
     private val probes = Executors.newFixedThreadPool(PROBE_THREADS)
     private val lifecycleLock = Any()
     @Volatile private var closed = false
+    @Volatile private var requestScope = RequestCancellation()
+    private val pending = java.util.concurrent.ConcurrentHashMap.newKeySet<Future<Pair<Int, VideoItem>>>()
+
+    private val scopes = java.util.concurrent.ConcurrentHashMap<Future<Pair<Int, VideoItem>>, RequestCancellation>()
+    private fun cancel(future: Future<Pair<Int, VideoItem>>) {
+        scopes.remove(future)?.cancel(); future.cancel(true); pending.remove(future)
+    }
+
+    /** A new query cancels old probes as well as its API requests. */
+    fun cancelPending() = synchronized(lifecycleLock) {
+        requestScope.cancel()
+        requestScope = RequestCancellation()
+        pending.toList().forEach(::cancel)
+    }
+
+    /** Result metadata is immediately usable; only the visible head is probed in the background. */
+    fun preview(items: List<VideoItem>, quality: String, changed: () -> Unit = {}, callback: (List<VideoItem>) -> Unit) {
+        if (closed) return
+        items.forEach { item -> cached(cacheKey(item, quality))?.let { apply(item, it) } }
+        callback(items)
+        val scope = requestScope
+        enqueue {
+            if (scope.cancelled) return@enqueue
+            val futures = inspectAsync(items.take(6).map { it.copy() }, quality)
+            val deadline = System.nanoTime() + TimeUnit.MILLISECONDS.toNanos(2000)
+            try {
+                futures.forEach { future ->
+                    val remaining = deadline - System.nanoTime()
+                    val result = if (remaining > 0) runCatching { future.get(remaining, TimeUnit.NANOSECONDS) }.getOrNull() else null
+                    if (result != null && !scope.cancelled && !closed) {
+                        android.os.Handler(android.os.Looper.getMainLooper()).post {
+                            if (!scope.cancelled && !closed) {
+                                cached(cacheKey(result.second, quality))?.let { apply(items[result.first], it) }
+                                changed()
+                            }
+                        }
+                    }
+                }
+            } finally { futures.forEach(::cancel) }
+        }
+    }
     private val client = OkHttpClient.Builder().addInterceptor(RequestScheduler)
         .connectTimeout(3, TimeUnit.SECONDS)
         .readTimeout(4, TimeUnit.SECONDS)
@@ -54,17 +95,21 @@ class PlayableVideoGate(
             }
             val accepted = collect(futures, maxItems, deadline, stopOnPending = false)
             if (!closed) callback(accepted)
+            futures.forEach(::cancel)
         }
     }
 
     /** Author pages keep every item so unavailable works can show the server/resource reason. */
     fun inspectAll(items: List<VideoItem>, quality: String, callback: (List<VideoItem>) -> Unit) {
         enqueue {
-            val futures = inspectAsync(items, quality)
-            val inspected: List<VideoItem> = futures
-                .mapNotNull { future -> runCatching { future.get() }.getOrNull() }
-                .sortedBy { pair -> pair.first }
-                .map { pair -> pair.second }
+            val futures = inspectAsync(items.map { it.copy() }, quality)
+            val deadline = System.nanoTime() + TimeUnit.MILLISECONDS.toNanos(2000)
+            val inspected = futures.mapIndexed { index, future ->
+                val remaining = deadline - System.nanoTime()
+                val value = if (remaining > 0) runCatching { future.get(remaining, TimeUnit.NANOSECONDS).second }.getOrNull() else null
+                value ?: items[index]
+            }
+            futures.forEach(::cancel)
             if (!closed) callback(inspected)
         }
     }
@@ -94,13 +139,18 @@ class PlayableVideoGate(
     }
 
     private fun enqueue(task: () -> Unit) = synchronized(lifecycleLock) {
-        if (!closed) coordinator.execute { if (!closed) task() }
+        val scope = requestScope
+        if (!closed) coordinator.execute { if (!closed && !scope.cancelled) scope.run(task) }
     }
 
     private fun inspectAsync(items: List<VideoItem>, quality: String): List<Future<Pair<Int, VideoItem>>> =
         items.mapIndexedNotNull { index, item ->
             synchronized(lifecycleLock) {
-                if (closed) null else probes.submit<Pair<Int, VideoItem>> { Pair(index, inspectOne(item, quality)) }
+                val parent = RequestCancellation.current.get() ?: requestScope
+                val scope = RequestCancellation()
+                if (closed || parent.cancelled) null else probes.submit<Pair<Int, VideoItem>> {
+                    scope.run { Pair(index, inspectOne(item, quality)) }
+                }.also { scopes[it] = scope; pending.add(it) }
             }
         }
 
@@ -109,7 +159,7 @@ class PlayableVideoGate(
         val key = cacheKey(item, quality)
         cached(key)?.let { return apply(item, it) }
         val checked = probeOne(item, quality)
-        remember(key, checked)
+        if (RequestCancellation.current.get()?.cancelled != true && !Thread.currentThread().isInterrupted) remember(key, checked)
         return checked
     }
 
@@ -234,6 +284,7 @@ class PlayableVideoGate(
         synchronized(lifecycleLock) {
             if (closed) return
             closed = true
+            cancelPending()
             coordinator.shutdownNow()
             probes.shutdownNow()
         }

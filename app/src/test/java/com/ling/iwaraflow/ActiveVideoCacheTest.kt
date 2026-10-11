@@ -13,7 +13,7 @@ import java.io.File
 @RunWith(RobolectricTestRunner::class)
 @Config(sdk = [36])
 class ActiveVideoCacheTest {
-    @Test fun activeVideoCanExceedIdleBudgetWithoutEvictingItsBeginning() {
+    @Test fun hardBudgetEvictsIdleFirstAndAlsoBoundsOversizedActiveVideo() {
         val context = RuntimeEnvironment.getApplication()
         val evictor = ActiveVideoCacheEvictor(10)
         val cache = SimpleCache(File(context.cacheDir, "cache-${java.util.UUID.randomUUID()}"), evictor, StandaloneDatabaseProvider(context))
@@ -30,7 +30,7 @@ class ActiveVideoCacheTest {
             evictor.owners[1] = setOf("current")
             write("current", 30)
             assertEquals(0L, cache.getCachedBytes("old", 0, 10))
-            assertEquals(30L, cache.getCachedLength("current", 0, 30))
+            assertTrue("当前视频同样遵守硬上限", cache.cacheSpace <= 10L)
             evictor.owners.remove(1)
             write("another", 10)
             assertEquals(0L, cache.getCachedBytes("current", 0, 30))

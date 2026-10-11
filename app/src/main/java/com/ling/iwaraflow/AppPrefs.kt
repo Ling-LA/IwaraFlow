@@ -32,6 +32,16 @@ class AppPrefs(context: Context) {
         get() = prefs.getBoolean("isolate_interests", false)
         set(value) { prefs.edit().putBoolean("isolate_interests", value).apply() }
 
+    var isolateLibrary: Boolean
+        get() = prefs.getBoolean("isolate_library", false)
+        set(value) = prefs.edit().putBoolean("isolate_library", value).apply()
+    var cacheBudgetMb: Int
+        get() = prefs.getInt("cache_budget_mb", 2048).coerceIn(256, 8192)
+        set(value) = prefs.edit().putInt("cache_budget_mb", value.coerceIn(256, 8192)).apply()
+    var meteredPreloadMb: Int
+        get() = prefs.getInt("metered_preload_mb", 0).coerceIn(0, 2048)
+        set(value) = prefs.edit().putInt("metered_preload_mb", value.coerceIn(0, 2048)).apply()
+
     var privateBrowsing: Boolean
         get() = prefs.getBoolean("private_browsing", false)
         set(value) = prefs.edit().putBoolean("private_browsing", value).apply()

@@ -19,3 +19,5 @@ app/build/
 *.pfx
 *keystore*.b64
 *password*.txt
+
+.test-tmp/

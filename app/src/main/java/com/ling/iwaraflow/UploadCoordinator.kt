@@ -16,10 +16,18 @@ class UploadCoordinator private constructor(private val app: Application) {
         private set
     private var owner = checkpoint.optString("owner")
     @Volatile private var completedVideoId = checkpoint.optString("videoId").takeUnless { it.isBlank() || it == "null" }
-    private fun account(): String = secrets.refreshToken?.let { token ->
+    private fun legacyAccount(): String = secrets.refreshToken?.let { token ->
         java.security.MessageDigest.getInstance("SHA-256").digest(token.toByteArray()).joinToString("") { "%02x".format(it) }
     }.orEmpty()
-    private fun validAccount() = owner.isNotBlank() && account() == owner
+    private fun account(): String = if (secrets.refreshToken.isNullOrBlank()) "" else
+        secrets.secret("verified_user_id")?.takeIf { it.isNotBlank() }?.let { "user:$it" }.orEmpty()
+    private fun validAccount(): Boolean {
+        val current = account()
+        if (current.isBlank()) return false
+        // Only migrate an old token-owned task while that exact credential is still present.
+        if (owner.isNotBlank() && owner == legacyAccount()) owner = current
+        return owner == current
+    }
     private fun persist(phase: String) {
         checkpoint = JSONObject().put("owner", owner).put("uri", uri?.toString()).put("filename", filename)
             .put("size", size).put("phase", phase).put("uncertain", publicationUncertain)
@@ -32,8 +40,8 @@ class UploadCoordinator private constructor(private val app: Application) {
     fun saveDraft(value: VideoUploadDraft) {
         if (busy) return
         draft = value
-        if (owner.isBlank()) owner = account()
-        runCatching { persist(state.value?.phase ?: "idle") }
+        if (owner.isBlank()) owner = account().ifBlank { legacyAccount() }
+        runCatching { persist(state.value?.phase ?: "idle") }.onFailure { state.postValue(UploadUiState("error", "草稿未能保存，请检查存储空间后重试")) }
     }
 
     fun recentTasks(): List<JSONObject> = runCatching {
@@ -52,8 +60,8 @@ class UploadCoordinator private constructor(private val app: Application) {
     private var client = newClient()
     private fun newClient(): IwaraUploadClient {
         val revision = SecureSessionStore.accountRevision
-        val expectedOwner = owner
         val allowed = validAccount()
+        val expectedOwner = owner
         fun valid() = allowed && revision == SecureSessionStore.accountRevision && owner == expectedOwner
         return IwaraUploadClient({ check(valid()) { "上传账号已改变，请切回原账号" }; api.uploadAccessToken() },
             authExpired = { if (valid()) api.uploadAuthExpired() }, sessionValid = ::valid)
@@ -80,7 +88,7 @@ class UploadCoordinator private constructor(private val app: Application) {
         IwaraRule.parse(JSONObject(rulesPrefs.getString("rules", "{}") ?: "{}"))
     }.getOrDefault(emptyList()))
     val rulesStatus = MutableLiveData(if (rules.value.isNullOrEmpty()) "正在读取官网规则…" else "已保存的官网规则 · 正在更新…")
-    init { loadRules() }
+    init { loadRules(); if (api.isLoggedIn()) api.getCurrentUser { } }
     fun loadRules() {
         rulesStatus.postValue(if (rules.value.isNullOrEmpty()) "正在读取官网规则…" else "已保存的官网规则 · 正在更新…")
         api.getUploadRules { result ->
@@ -104,9 +112,9 @@ class UploadCoordinator private constructor(private val app: Application) {
     fun select(value: Uri, name: String, bytes: Long) {
         check(!busy)
         uri = value; filename = name; size = bytes
-        ticket = null; processedFile = null; completedVideoId = null; publicationUncertain = false; owner = account()
+        ticket = null; processedFile = null; completedVideoId = null; publicationUncertain = false; owner = account().ifBlank { legacyAccount() }
         state.value = UploadUiState(message = "已选择 $name")
-        runCatching { persist("idle") }
+        runCatching { persist("idle") }.onFailure { state.value = UploadUiState("error", "文件选择未能保存，请检查存储空间后重试") }
     }
 
     fun submit(draft: VideoUploadDraft) {
@@ -168,7 +176,7 @@ class UploadCoordinator private constructor(private val app: Application) {
                 }
             } finally {
                 client.close(); running.set(false); busy = false
-                if (cancelled && completedVideoId == null) state.postValue(UploadUiState("paused", "任务已暂停，可返回上传页继续", uncertain = publicationUncertain))
+                if (cancelled && completedVideoId == null) state.postValue(UploadUiState("paused", "任务已暂停；未传完的文件再次继续时从头上传，已传完的文件无需重传", uncertain = publicationUncertain))
             }
         }
     }
@@ -179,7 +187,7 @@ class UploadCoordinator private constructor(private val app: Application) {
         if (checkpoint.optString("phase") == "publishing") publicationUncertain = true
         client.close()
         runCatching { persist(if (publicationUncertain) "publishing" else "paused") }
-        state.postValue(UploadUiState("paused", "任务已暂停，可返回上传页继续", uncertain = publicationUncertain))
+        state.postValue(UploadUiState("paused", "任务已暂停；未传完的文件再次继续时从头上传，已传完的文件无需重传", uncertain = publicationUncertain))
     }
 
     companion object {

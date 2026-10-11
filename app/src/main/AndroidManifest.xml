@@ -81,14 +81,19 @@
                 <action android:name="android.intent.action.MAIN" />
                 <category android:name="android.intent.category.LAUNCHER" />
             </intent-filter>
+            <intent-filter>
+                <action android:name="android.intent.action.VIEW" />
+                <category android:name="android.intent.category.DEFAULT" />
+                <category android:name="android.intent.category.BROWSABLE" />
+                <data android:scheme="https" android:host="www.iwara.tv" />
+                <data android:scheme="https" android:host="iwara.tv" />
+            </intent-filter>
+            <intent-filter>
+                <action android:name="android.intent.action.SEND" />
+                <category android:name="android.intent.category.DEFAULT" />
+                <data android:mimeType="text/plain" />
+            </intent-filter>
         </activity>
-        <activity
-            android:name=".MainActivity"
-            android:screenOrientation="portrait"
-            android:supportsPictureInPicture="true"
-            android:resizeableActivity="true"
-            android:configChanges="screenSize|smallestScreenSize|screenLayout|orientation"
-            android:exported="false" />
         <activity android:name=".UploadTasksActivity" android:exported="false" />
         <activity android:name=".DataManagementActivity" android:exported="false" />
         <activity android:name=".SettingsActivity" android:screenOrientation="portrait"

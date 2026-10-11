@@ -65,6 +65,7 @@ class PlaybackPolishTest {
                     VideoItem("filter-new", "New", "", emptyList(), 1)))
             }
             checkbox.isChecked = true
+            awaitSearchResults(activity)
             for (name in listOf("videoTab", "tagTab")) {
                 val state = field(activity, name).get(activity)!!
                 assertEquals(listOf("filter-new"), (field(state, "items").get(state) as List<VideoItem>).map { it.id })
@@ -72,6 +73,7 @@ class PlaybackPolishTest {
             }
             assertTrue(AppPrefs(activity).searchExcludeSeen)
             checkbox.isChecked = false
+            awaitSearchResults(activity)
             for (name in listOf("videoTab", "tagTab")) {
                 val state = field(activity, name).get(activity)!!
                 assertEquals(2, (field(state, "items").get(state) as List<VideoItem>).size)
@@ -94,8 +96,8 @@ class PlaybackPolishTest {
             val pages = mutableListOf<Int>()
             doAnswer { call ->
                 val rows = call.arguments[0] as List<VideoItem>
-                (call.arguments[2] as (List<VideoItem>) -> Unit)(rows); null
-            }.`when`(gate).inspectAll(anyList(), anyString(), any<(List<VideoItem>) -> Unit>() ?: {})
+                (call.arguments[3] as (List<VideoItem>) -> Unit)(rows); null
+            }.`when`(gate).preview(anyList(), anyString(), any<() -> Unit>() ?: {}, any<(List<VideoItem>) -> Unit>() ?: {})
             doAnswer { call ->
                 val page = call.arguments[1] as Int; pages += page
                 val rows = if (page == 0) (0 until 24).map { VideoItem("page-seen-$it", "animation", "", emptyList(), 1) }
@@ -103,7 +105,7 @@ class PlaybackPolishTest {
                 (call.arguments[4] as (Result<List<VideoItem>>) -> Unit)(Result.success(rows)); null
             }.`when`(api).searchVideos(anyString(), anyInt(), anyInt(), anyString(), any<(Result<List<VideoItem>>) -> Unit>() ?: {})
             activity.javaClass.getDeclaredMethod("runSearch", String::class.java).apply { isAccessible = true }.invoke(activity, "animation")
-            idle(1)
+            idle(1); awaitSearchResults(activity)
             assertEquals(listOf(0, 1), pages)
             val state = field(activity, "videoTab").get(activity)!!
             assertEquals(listOf("page-new"), (field(state, "items").get(state) as List<VideoItem>).map { it.id })

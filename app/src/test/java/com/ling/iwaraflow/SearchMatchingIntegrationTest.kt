@@ -28,9 +28,9 @@ class SearchMatchingIntegrationTest {
         doAnswer { call ->
             val items = call.arguments[0] as List<VideoItem>
             inspected += items.map { it.id }
-            (call.arguments[2] as (List<VideoItem>) -> Unit)(items)
+            (call.arguments[3] as (List<VideoItem>) -> Unit)(items)
             null
-        }.`when`(gate).inspectAll(anyList(), anyString(), any<(List<VideoItem>) -> Unit>() ?: {})
+        }.`when`(gate).preview(anyList(), anyString(), any<() -> Unit>() ?: {}, any<(List<VideoItem>) -> Unit>() ?: {})
         doAnswer { call ->
             val rows = listOf(
                 VideoItem("match", "Clara 原神", "author", emptyList(), 0),
@@ -44,7 +44,7 @@ class SearchMatchingIntegrationTest {
         try {
             SearchActivity::class.java.getDeclaredMethod("runSearch", String::class.java)
                 .apply { isAccessible = true }.invoke(activity, "克拉拉 原神")
-            shadowOf(Looper.getMainLooper()).idle()
+            awaitSearchResults(activity)
             assertTrue(inspected.isNotEmpty())
             assertEquals(setOf("match"), inspected.toSet())
         } finally { controller.pause().stop().destroy() }

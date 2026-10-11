@@ -1,3 +1,5 @@
+@file:androidx.annotation.OptIn(androidx.media3.common.util.UnstableApi::class)
+
 package com.ling.iwaraflow
 
 import android.app.AlertDialog
@@ -109,6 +111,20 @@ class VideoAdapter(
         val start = items.size
         items.addAll(unique.map(likeStates::apply))
         notifyItemRangeInserted(start, unique.size)
+    }
+
+    fun trimConsumed(current: Int): Int {
+        val remove = FeedWindow.removable(items.size, current)
+        return discardConsumed(remove)
+    }
+
+    fun discardConsumed(remove: Int): Int {
+        if (remove <= 0 || remove >= items.size) return 0
+        savePlaybackPosition()
+        activePosition -= remove
+        items.subList(0, remove).clear()
+        notifyItemRangeRemoved(0, remove)
+        return remove
     }
 
     fun releaseAll() {
@@ -289,6 +305,7 @@ class VideoAdapter(
             override fun run() {
                 if (!playbackEnabled || guideVisible || released || position != activePosition) return
                 val current = items.getOrNull(position) ?: return
+                for (item in items.drop(position).take(3)) mediaCache.registerSources(item.id, item.sources.orEmpty())
                 val currentUrl = current.streamUrl
                 val allowed = linkedSetOf<String>()
                 if (currentUrl != null) {
@@ -616,7 +633,15 @@ class VideoAdapter(
             tags.setOnClickListener(openInfo)
             tags.isClickable = onInfo != null
             resetWatchSignals()
-            item.localFavorite = history.isLocalFavorite(item.id)
+            val favoriteBindGeneration = generation
+            history.post {
+                val saved = history.isLocalFavorite(item.id)
+                itemView.post {
+                    if (generation == favoriteBindGeneration && bound === item && !favoriteBusy) {
+                        item.localFavorite = saved; updateLikeUi(item)
+                    }
+                }
+            }
             applyDisplayPrefs()
             skipBack.setOnClickListener { skipBy(-prefs.skipSeconds * 1000L) }
             skipForward.setOnClickListener { skipBy(prefs.skipSeconds * 1000L) }
@@ -634,17 +659,24 @@ class VideoAdapter(
                 }
             }
             favorite.setOnClickListener {
+                if (favoriteBusy) return@setOnClickListener
                 val desired = !item.localFavorite
-                history.setLocalFavoriteAsync(item, desired)
-                if (desired) {
-                    history.recordInteractionAsync(item, "favorite", 1.4)
-                    noteReaction(item, favorited = true)
-                    onSignal?.invoke(item, "favorite")
-                    reactionBurst.playOn(favorite, ReactionBurstView.Kind.FAVORITE)
-                } else {
-                    // 取消收藏：当初的兴趣不算数了，往回压一点。
-                    history.recordInteractionAsync(item, "unfavorite", -0.9)
-                    onSignal?.invoke(item, "unfavorite")
+                if (desired) reactionBurst.playOn(favorite, ReactionBurstView.Kind.FAVORITE)
+                favoriteBusy = true
+                history.setLocalFavoriteAsync(item, desired) { saved ->
+                    favoriteBusy = false
+                    if (bound === item) updateLikeUi(item)
+                    if (saved.isSuccess) {
+                        if (desired) {
+                            history.recordInteractionAsync(item, "favorite", 1.4)
+                            noteReaction(item, favorited = true)
+                            onSignal?.invoke(item, "favorite")
+                        } else {
+                            // 取消收藏：当初的兴趣不算数了，往回压一点。
+                            history.recordInteractionAsync(item, "unfavorite", -0.9)
+                            onSignal?.invoke(item, "unfavorite")
+                        }
+                    }
                 }
                 // 收藏有动画、取消有图标变化，不用再弹一层提示挡着视频。
                 updateLikeUi(item)
@@ -791,20 +823,30 @@ class VideoAdapter(
             } }
         }
 
+        private var favoriteBusy = false
+
         private fun doubleReaction() {
             val item = bound ?: return
-            if (!active || likeBusy) return
+            if (!active || likeBusy || favoriteBusy) return
             if (!api.isLoggedIn()) { onNeedLogin(); return }
             fun finishFavorite() {
                 if (!item.localFavorite) {
-                    item.localFavorite = true
-                    history.setLocalFavoriteAsync(item, true)
-                    history.recordInteractionAsync(item, "favorite", 1.4)
-                    noteReaction(item, favorited = true); onSignal?.invoke(item, "favorite")
+                    favoriteBusy = true
+                    history.setLocalFavoriteAsync(item, true) { saved ->
+                        favoriteBusy = false
+                        if (saved.isSuccess) {
+                            history.recordInteractionAsync(item, "favorite", 1.4)
+                            noteReaction(item, favorited = true); onSignal?.invoke(item, "favorite")
+                        }
+                        if (bound === item) {
+                            updateLikeUi(item)
+                            if (saved.isSuccess) Toast.makeText(itemView.context, "已点赞并收藏", Toast.LENGTH_SHORT).show()
+                        }
+                    }
                 }
                 if (bound?.id == item.id) {
                     updateLikeUi(item)
-                    Toast.makeText(itemView.context, "已点赞并收藏", Toast.LENGTH_SHORT).show()
+                    if (!favoriteBusy) Toast.makeText(itemView.context, "已点赞并收藏", Toast.LENGTH_SHORT).show()
                 }
             }
             if (item.liked) finishFavorite() else toggleRemoteLike(item, true, onSuccess = { finishFavorite() })
@@ -953,6 +995,7 @@ class VideoAdapter(
             item.streamUrl = source.url
             if (item.selectedQuality == null && preferred != "highest") item.selectedQuality = source.name
             quality.text = "画质\n" + (item.selectedQuality ?: if (preferred == "highest") "最高" else source.name)
+            mediaCache.registerSources(item.id, sources)
             p.setMediaSource(mediaCache.createMediaSource(source.url))
             if (oldPosition > 0L) p.seekTo(oldPosition)
             p.prepare()
@@ -1199,6 +1242,7 @@ class VideoAdapter(
                 ?: return
             p.stop()
             p.clearMediaItems()
+            mediaCache.registerSources(item.id, sources)
             p.setMediaSource(mediaCache.createMediaSource(source.url))
             p.prepare()
             if (position > 0L) p.seekTo(position)

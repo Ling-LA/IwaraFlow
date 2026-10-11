@@ -66,11 +66,8 @@ class UpdateManager(private val activity: Activity) {
 
     init {
         val filter = IntentFilter(DownloadManager.ACTION_DOWNLOAD_COMPLETE)
-        if (Build.VERSION.SDK_INT >= 33) activity.registerReceiver(receiver, filter, Context.RECEIVER_EXPORTED)
-        else {
-            @Suppress("DEPRECATION")
-            activity.registerReceiver(receiver, filter)
-        }
+        androidx.core.content.ContextCompat.registerReceiver(activity, receiver, filter,
+            androidx.core.content.ContextCompat.RECEIVER_EXPORTED)
         receiverRegistered = true
     }
 

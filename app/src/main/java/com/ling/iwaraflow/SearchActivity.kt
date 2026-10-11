@@ -88,6 +88,7 @@ class SearchActivity : AppCompatActivity(), PlaybackGuideHost {
         val items = mutableListOf<VideoItem>()
         val playable = mutableListOf<VideoItem>()
         val seenIds = mutableSetOf<String>()
+        var renderSerial = 0
 
         override fun reset(queries: List<String>) {
             super.reset(queries)
@@ -154,6 +155,7 @@ class SearchActivity : AppCompatActivity(), PlaybackGuideHost {
     private var feedTab: Tab? = null
     private var inFeed = false
     private var exiting = false
+    private val resultWorker = java.util.concurrent.Executors.newSingleThreadExecutor()
     private val pageSize = 24
     private lateinit var comments: CommentsHost
 
@@ -250,7 +252,7 @@ class SearchActivity : AppCompatActivity(), PlaybackGuideHost {
             gapPx = (20 * density).toInt(),
             onNeedLogin = { Toast.makeText(this, "请先在主页登录 Iwara", Toast.LENGTH_SHORT).show() },
             onOpenAuthor = ::openAuthor,
-            onCommentPosted = { history.recordInteraction(it, "comment", 1.5) },
+            onCommentPosted = { history.recordInteractionAsync(it, "comment", 1.5) },
             // 已经在搜索页了：点标签直接在本页重搜，落在「标签」那一栏。
             onOpenTag = { tag ->
                 comments.close()
@@ -282,7 +284,42 @@ class SearchActivity : AppCompatActivity(), PlaybackGuideHost {
         styleTabs()
         styleSort()
 
-        val initial = intent.getStringExtra(EXTRA_QUERY).orEmpty()
+        val restored = PagePlaybackState.read(savedInstanceState, prefs)
+        if (restored != null && savedInstanceState != null) {
+            query = savedInstanceState.getString("search_query").orEmpty()
+            currentTab = runCatching { Tab.valueOf(savedInstanceState.getString("search_tab").orEmpty()) }.getOrDefault(Tab.VIDEOS)
+            sortKey = runCatching { SearchSort.Key.valueOf(savedInstanceState.getString("search_sort").orEmpty()) }.getOrDefault(SearchSort.DEFAULT_KEY)
+            sortDescending = savedInstanceState.getBoolean("search_desc", true)
+            originalOnly = savedInstanceState.getBoolean("search_literal")
+            searchPlan = runCatching {
+                val groups = org.json.JSONArray(savedInstanceState.getString("search_plan"))
+                SearchQuery((0 until groups.length()).map { i -> groups.getJSONArray(i).let { a -> (0 until a.length()).map(a::getString) } })
+            }.getOrDefault(SearchQuery.local(query))
+            availablePlan = searchPlan; authorPlan = SearchQuery.literal(query); queries = searchPlan.seeds
+            videoTab.reset(queries); tagTab.reset(queries); authorTab.reset(authorPlan.seeds)
+            input.setText(query); styleTabs(); styleSort()
+            val state = videoState(currentTab)
+            if (state != null) {
+                state.loaded += restored.items; state.items += restored.items; state.playable += restored.items
+                state.seenIds += restored.items.map { it.id }
+                resultList.adapter = adapterFor(currentTab)
+                if (savedInstanceState.getBoolean("page_in_feed")) openWork(currentTab, restored.items[restored.currentIndex])
+                else resultList.scrollToPosition(restored.currentIndex)
+            }
+            updateStatus()
+            if (!inFeed) loadNextPage(currentTab)
+            return
+        }
+        val validSavedQuery = !prefs.privateBrowsing && savedInstanceState?.getString("search_owner") == prefs.accountId
+        if (validSavedQuery) {
+            currentTab = runCatching { Tab.valueOf(savedInstanceState!!.getString("search_tab")!!) }.getOrDefault(Tab.VIDEOS)
+            sortKey = runCatching { SearchSort.Key.valueOf(savedInstanceState!!.getString("search_sort")!!) }.getOrDefault(SearchSort.Key.DATE)
+            sortDescending = savedInstanceState!!.getBoolean("search_desc", true)
+            originalOnly = savedInstanceState.getBoolean("search_literal")
+            resultList.adapter = if (currentTab == Tab.AUTHORS) authorAdapter else adapterFor(currentTab)
+            styleTabs(); styleSort()
+        }
+        val initial = if (validSavedQuery) savedInstanceState!!.getString("search_query").orEmpty() else intent.getStringExtra(EXTRA_QUERY).orEmpty()
         input.setText(initial)
         // 从简介页的标签点进来的：直接落在「标签」那一页。
         if (intent.getBooleanExtra(EXTRA_AS_TAG, false)) showTab(Tab.TAGS)
@@ -301,17 +338,17 @@ class SearchActivity : AppCompatActivity(), PlaybackGuideHost {
         expansionStarted = false
         translationTasks.forEach { it.cancel() }; translationTasks.clear()
         expansionSerial++
-        api.cancelPendingRequests()
+        api.cancelPendingRequests(); gate.cancelPending()
         querySerial++
         // 主动搜什么就是对什么感兴趣：关键词按标签记进画像。
         val terms = trimmed.split(Regex("[\\s,，、]+")).filter { it.isNotBlank() }.take(6)
-        if (terms.isNotEmpty()) history.recordInteraction(VideoItem("search:$trimmed", trimmed, "", terms, 0), HistoryStore.ACTION_SEARCH, HistoryStore.SEARCH_WEIGHT)
+        if (terms.isNotEmpty()) history.recordInteractionAsync(VideoItem("search:$trimmed", trimmed, "", terms, 0), HistoryStore.ACTION_SEARCH, HistoryStore.SEARCH_WEIGHT)
         // 已经翻过的词直接用四种写法开搜；没翻过的先按原词搜着，译文回来再补进去。
         // 作者名只按输入的原词搜：作者的用户名就是他自己起的那一个，翻成别的语言反而搜偏。
         matchingNote = if (!originalOnly && prefs.aiSearchMatching) {
             if (Translator.aiReady()) "AI 正在核对匹配词…" else "AI 精准匹配需先在设置配置 AI 翻译"
         } else ""
-        searchPlan = if (originalOnly) SearchQuery.literal(trimmed) else SearchQuery.local(trimmed, prefs.aiSearchMatching)
+        searchPlan = if (originalOnly) SearchQuery.literal(trimmed) else ManualSearchTerms(this).merge(SearchQuery.local(trimmed, prefs.aiSearchMatching))
         availablePlan = searchPlan
         authorPlan = SearchQuery.literal(trimmed)
         val start = searchPlan.seeds
@@ -332,7 +369,7 @@ class SearchActivity : AppCompatActivity(), PlaybackGuideHost {
         if (query.isBlank() || inFeed || exiting) { finishRefresh(); return }
         if (refreshingTab != null) return
         querySerial++
-        api.cancelPendingRequests()
+        api.cancelPendingRequests(); gate.cancelPending()
         refreshingTab = currentTab; refreshingSerial = querySerial
         refreshLayout.isRefreshing = true
         videoTab.reset(queries); tagTab.reset(queries); authorTab.reset(authorPlan.seeds)
@@ -363,9 +400,9 @@ class SearchActivity : AppCompatActivity(), PlaybackGuideHost {
                 groups[index] = expanded.ifEmpty { listOf(term) }
                 remaining--
                 if (remaining != 0) return@expand
-                if (matchingNote == "AI 正在核对匹配词…") matchingNote = "AI 已核对匹配词，可在调整匹配词中查看"
+                if (matchingNote == "AI 正在核对匹配词…") matchingNote = "AI 建议匹配词，请在调整匹配词中核对"
                 updateStatus()
-                val updated = SearchQuery(groups.toList())
+                val updated = ManualSearchTerms(this).merge(SearchQuery(groups.toList()))
                 if (updated == searchPlan) return@expand
                 availablePlan = updated
                 searchPlan = updated
@@ -390,15 +427,37 @@ class SearchActivity : AppCompatActivity(), PlaybackGuideHost {
             val (group, word) = entries[i]
             word in searchPlan.groups[group]
         }
+        val extra = android.widget.LinearLayout(this).apply {
+            orientation = android.widget.LinearLayout.VERTICAL
+            setPadding(24, 8, 24, 8)
+        }
+        extra.addView(TextView(this).apply { text = "以下为词库、翻译或 AI 建议；可取消错误词。手动补充的别名会保存在本机。" })
+        val groupChoice = android.widget.Spinner(this).apply {
+            adapter = android.widget.ArrayAdapter(this@SearchActivity, android.R.layout.simple_spinner_dropdown_item, terms)
+        }
+        val customWord = EditText(this).apply { hint = "补充该关键词的别名，用逗号分隔"; setSingleLine() }
+        extra.addView(groupChoice); extra.addView(customWord)
         androidx.appcompat.app.AlertDialog.Builder(this).setTitle("匹配词：同组任一，不同关键词全部匹配")
+            .setView(extra)
             .setMultiChoiceItems(entries.map { (index, word) -> "${terms[index]} → $word" }.toTypedArray(), checked) { _, which, enabled -> checked[which] = enabled }
             .setNeutralButton(if (originalOnly) "启用多语言" else "仅使用原词") { _, _ -> originalOnly = !originalOnly; runSearch(query) }
             .setNegativeButton("取消", null).setPositiveButton("应用") { _, _ ->
                 expansionSerial++; translationTasks.forEach { it.cancel() }; translationTasks.clear()
                 val removed = entries.filterIndexed { index, _ -> !checked[index] }.toSet()
-                querySerial++; api.cancelPendingRequests()
+                querySerial++; api.cancelPendingRequests(); gate.cancelPending()
                 authorTab.variants.forEach { it.loading = false }
-                searchPlan = SearchQuery(optionPlan.groups.mapIndexed { index, aliases -> aliases.filterIndexed { aliasIndex, word -> aliasIndex == 0 || (index to word) !in removed } })
+                val custom = ManualSearchTerms(this)
+                val selectedGroup = groupChoice.selectedItemPosition.coerceAtLeast(0)
+                val added = customWord.text.toString().split(',', '，', '、').map(String::trim).filter { it.isNotBlank() && it.length <= 80 }.take(10)
+                searchPlan = SearchQuery(optionPlan.groups.mapIndexed { index, aliases ->
+                    val selected = aliases.filterIndexed { aliasIndex, word -> aliasIndex == 0 || (index to word) !in removed }
+                    val additions = if (index == selectedGroup) added else emptyList()
+                    custom.set(terms[index], custom.get(terms[index]).filter { it in selected } + additions)
+                    (selected + additions).distinctBy(SearchQuery::normalize)
+                })
+                availablePlan = SearchQuery(optionPlan.groups.mapIndexed { index, aliases ->
+                    (aliases + custom.get(terms[index])).distinctBy(SearchQuery::normalize)
+                })
                 queries = searchPlan.seeds
                 listOf(Tab.VIDEOS, Tab.TAGS).forEach { tab -> videoState(tab)?.let { state ->
                     // Keep successful cursor positions, but stop querying disabled aliases.
@@ -474,6 +533,7 @@ class SearchActivity : AppCompatActivity(), PlaybackGuideHost {
         if (inFeed) showList()
         if (query.isBlank()) { updateStatus(); return }
         querySerial++
+        api.cancelPendingRequests(); gate.cancelPending()
         // 几种写法（中英日韩）保持不变，只是各自从第一页按新排序重新翻。
         authorTab.variants.forEach { it.loading = false }
         val words = queries.ifEmpty { listOf(query) }
@@ -498,17 +558,36 @@ class SearchActivity : AppCompatActivity(), PlaybackGuideHost {
     }
 
     /** 按当前排序重建展示用的列表；适配器和 playable 都指着这两个 list。 */
-    private fun resort(state: VideoTab, tab: Tab) {
+    private fun resort(state: VideoTab, tab: Tab, complete: (() -> Unit)? = null) {
         val currentId = if (inFeed && feedTab == tab) feedAdapter.items.getOrNull(pager.currentItem)?.id else null
-        state.items.clear()
-        val seen = if (prefs.searchExcludeSeen) history.loadStatuses(state.loaded.map { it.id }).seen else emptySet()
-        // A playing queue stays stable; refresh watched filtering when returning to the results.
         val keep = if (inFeed && feedTab == tab) feedAdapter.items.map { it.id }.toSet() else emptySet()
-        state.items += SearchSort.sorted(state.loaded.filter { it.id !in seen || it.id in keep }, sortKey, sortDescending)
-        state.playable.clear()
-        state.playable += state.items.filter { it.playbackIssue == null }
-        if (currentTab == tab) adapterFor(tab).notifyDataSetChanged()
-        if (inFeed && feedTab == tab) rebuildFeed(currentId)
+        val snapshot = state.loaded.toList()
+        val serial = querySerial
+        val render = ++state.renderSerial
+        val key = sortKey; val descending = sortDescending; val exclude = prefs.searchExcludeSeen
+        resultWorker.execute {
+            val statuses = runCatching { history.loadStatuses(snapshot.map { it.id }) }
+                .getOrDefault(VideoStatuses(emptySet(), emptySet()))
+            val sorted = SearchSort.sorted(snapshot.filter { !exclude || it.id !in statuses.seen || it.id in keep }, key, descending)
+            runOnUiThread {
+                if (isStale(serial) || render != state.renderSerial) return@runOnUiThread
+                val lm = resultList.layoutManager as? LinearLayoutManager
+                val anchor = lm?.findFirstVisibleItemPosition() ?: -1
+                val anchorId = if (currentTab == tab) state.items.getOrNull(anchor)?.id else null
+                val top = lm?.findViewByPosition(anchor)?.top ?: 0
+                sorted.forEach { it.localFavorite = it.id in statuses.favorites }
+                state.items.clear(); state.items += sorted
+                state.playable.clear(); state.playable += sorted.filter { it.playbackIssue == null }
+                if (currentTab == tab) {
+                    adapterFor(tab).notifyDataSetChanged()
+                    val index = state.items.indexOfFirst { it.id == anchorId }
+                    if (index >= 0) lm?.scrollToPositionWithOffset(index, top)
+                }
+                if (inFeed && feedTab == tab) rebuildFeed(currentId)
+                updateStatus()
+                complete?.invoke()
+            }
+        }
     }
 
     private fun currentCount(): Int = when (currentTab) {
@@ -528,12 +607,20 @@ class SearchActivity : AppCompatActivity(), PlaybackGuideHost {
         if (tab == Tab.AUTHORS) loadAuthorPage() else loadVideoPage(tab)
     }
 
+    private fun refreshAvailability(state: VideoTab, tab: Tab, serial: Int) {
+        if (isStale(serial)) return
+        state.playable.clear()
+        state.playable += state.items.filter { it.playbackIssue == null }
+        if (currentTab == tab) adapterFor(tab).notifyDataSetChanged()
+        updateStatus()
+    }
+
     private fun revalidateCandidates(tab: Tab, state: VideoTab) {
         val plan = searchPlan
         val serial = querySerial
         val raw = synchronized(state.rawCandidates) { state.rawCandidates.values.toList() }
         val matched = raw.filter { if (tab == Tab.TAGS) plan.matchesTags(it.tags) else plan.matchesTitle(it.title) }
-        gate.inspectAll(matched, prefs.defaultQuality) { checked -> runOnUiThread {
+        gate.preview(matched, prefs.defaultQuality, changed = { refreshAvailability(state, tab, serial) }) { checked -> runOnUiThread {
             if (isStale(serial) || searchPlan != plan) return@runOnUiThread
             val merged = (state.loaded + checked).distinctBy { it.id }.filter {
                 if (tab == Tab.TAGS) plan.matchesTags(it.tags) else plan.matchesTitle(it.title)
@@ -572,29 +659,26 @@ class SearchActivity : AppCompatActivity(), PlaybackGuideHost {
                     val matched = raw.filter {
                         if (tab == Tab.TAGS) searchPlan.matchesTags(it.tags) else searchPlan.matchesTitle(it.title)
                     }
-                    gate.inspectAll(matched, prefs.defaultQuality) { checked ->
-                        if (isStale(serial)) return@inspectAll
+                    gate.preview(matched, prefs.defaultQuality, changed = { refreshAvailability(state, tab, serial) }) { checked ->
+                        if (isStale(serial)) return@preview
                         runOnUiThread {
                             if (isStale(serial)) return@runOnUiThread
                             val fresh = checked.filter { state.seenIds.add(it.id) }
-                            // 一次问清这一批的本地收藏，不是一条查一次库。
-                            val favorites = runCatching { history.loadStatuses(fresh.map { it.id }).favorites }.getOrNull()
-                            fresh.forEach {
-                                it.localFavorite = favorites?.contains(it.id) ?: history.isLocalFavorite(it.id)
-                            }
                             state.loaded += fresh
+                            if (state.loaded.size > 2000) state.loaded.subList(0, state.loaded.size - 2000).clear()
+                            if (state.seenIds.size > 5000) { state.seenIds.clear(); state.seenIds.addAll(state.loaded.map { it.id }) }
                             variant.page += 1
                             variant.noMore = raw.size < pageSize
                             variant.loading = false
                             // 新一页进来后整份结果重排一次，排序才是对整批结果生效的。
-                            resort(state, tab)
-                            updateStatus()
-                            // 这一页全是别的写法搜过的重复结果：接着翻，别让列表停在原地。
-                            val visibleIds = state.items.map { it.id }.toSet()
-                            val noVisibleNew = fresh.none { it.id in visibleIds }
-                            state.chain = if (noVisibleNew) state.chain + 1 else 0
-                            if (state.variants.any { !it.attempted } ||
-                                (noVisibleNew && !state.noMore && state.chain <= MAX_CHAINED_PAGES)) loadVideoPage(tab)
+                            resort(state, tab) {
+                                // 这一页全是别的写法搜过的重复结果：接着翻，别让列表停在原地。
+                                val visibleIds = state.items.map { it.id }.toSet()
+                                val noVisibleNew = fresh.none { it.id in visibleIds }
+                                state.chain = if (noVisibleNew) state.chain + 1 else 0
+                                if (state.variants.any { !it.attempted } ||
+                                    (noVisibleNew && !state.noMore && state.chain <= MAX_CHAINED_PAGES)) loadVideoPage(tab)
+                            }
                         }
                     }
                 }
@@ -633,6 +717,8 @@ class SearchActivity : AppCompatActivity(), PlaybackGuideHost {
                 result.onSuccess { users ->
                     val fresh = users.filter { authorPlan.matchesAuthor(it) && state.seenIds.add(it.id.ifBlank { it.username }) }
                     state.loaded += fresh
+                    if (state.loaded.size > 2000) state.loaded.subList(0, state.loaded.size - 2000).clear()
+                    if (state.seenIds.size > 5000) { state.seenIds.clear(); state.seenIds.addAll(state.loaded.map { it.id }) }
                     // 作者名固定按关注数多的优先：每来一页都把整份结果重排。
                     state.items.clear()
                     state.items += SearchSort.sortedAuthors(state.loaded)
@@ -691,6 +777,7 @@ class SearchActivity : AppCompatActivity(), PlaybackGuideHost {
             append("$subject · $label · $sortHint")
             if (currentTab != Tab.AUTHORS && prefs.searchExcludeSeen) append(" · 已排除看过的视频")
             if (currentTab != Tab.AUTHORS && matchingNote.isNotBlank()) append(" · $matchingNote")
+            if (currentTab != Tab.AUTHORS) append(" · 按已加载结果排序")
             when {
                 failure != null && count == 0 -> append("  ·  加载失败：$failure")
                 failure != null -> append("  ·  $count 条 · 后续加载失败：$failure")
@@ -715,9 +802,10 @@ class SearchActivity : AppCompatActivity(), PlaybackGuideHost {
     private fun openWork(tab: Tab, item: VideoItem) {
         if (exiting) return
         val state = videoState(tab) ?: return
+        item.playbackIssue?.let { Toast.makeText(this, it, Toast.LENGTH_SHORT).show(); return }
         val index = state.playable.indexOfFirst { it.id == item.id }
         // 从搜索结果里点开的：比刷到的更能说明兴趣。
-        history.recordInteraction(item, "search_open", HistoryStore.SEARCH_OPEN_WEIGHT)
+        history.recordInteractionAsync(item, "search_open", HistoryStore.SEARCH_OPEN_WEIGHT)
         if (index < 0) return
         // Keep this result set stable while the user is watching it.
         expansionSerial++
@@ -733,6 +821,15 @@ class SearchActivity : AppCompatActivity(), PlaybackGuideHost {
 
     private fun rebuildFeed(currentId: String?) {
         val state = videoState(feedTab ?: return) ?: return
+        // Keep the current playback session and its queue order; new search pages only append.
+        if (feedAdapter.items.any { it.id == currentId }) {
+            feedAdapter.append(state.playable)
+            val current = pager.currentItem
+            val removed = feedAdapter.trimConsumed(current)
+            if (removed > 0) pager.setCurrentItem(current - removed, false)
+            return
+        }
+        feedAdapter.savePlaybackPosition()
         val list = state.playable.toList()
         feedAdapter.replace(list)
         if (list.isEmpty()) return
@@ -907,6 +1004,22 @@ class SearchActivity : AppCompatActivity(), PlaybackGuideHost {
         }
     }
 
+    override fun onSaveInstanceState(outState: Bundle) {
+        feedAdapter.savePlaybackPosition()
+        val state = videoState(currentTab)
+        val index = if (inFeed) pager.currentItem else
+            (resultList.layoutManager as? LinearLayoutManager)?.findFirstVisibleItemPosition()?.coerceAtLeast(0) ?: 0
+        PagePlaybackState.save(outState, prefs, if (inFeed) feedAdapter.items else state?.items.orEmpty(), index, inFeed)
+        if (!prefs.privateBrowsing) {
+            outState.putString("search_owner", prefs.accountId)
+            outState.putString("search_query", query); outState.putString("search_tab", currentTab.name)
+            outState.putString("search_sort", sortKey.name); outState.putBoolean("search_desc", sortDescending)
+            outState.putBoolean("search_literal", originalOnly)
+            outState.putString("search_plan", org.json.JSONArray(searchPlan.groups.map { org.json.JSONArray(it) }).toString())
+        }
+        super.onSaveInstanceState(outState)
+    }
+
     override fun onDestroy() {
         translationTasks.forEach { it.cancel() }; translationTasks.clear()
         PipRegistry.leave(this)
@@ -914,6 +1027,7 @@ class SearchActivity : AppCompatActivity(), PlaybackGuideHost {
         exiting = true
         feedAdapter.releaseAll()
         gate.close()
+        resultWorker.shutdownNow()
         mediaCache.close()
         api.close()
         history.close()

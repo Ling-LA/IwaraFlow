@@ -1,3 +1,5 @@
+@file:androidx.annotation.OptIn(androidx.media3.common.util.UnstableApi::class)
+
 package com.ling.iwaraflow
 
 import androidx.media3.datasource.cache.Cache
@@ -5,8 +7,8 @@ import androidx.media3.datasource.cache.CacheEvictor
 import androidx.media3.datasource.cache.CacheSpan
 import java.util.TreeSet
 
-/** Active downloads may exceed the idle budget; evict old videos before the current video. */
-internal class ActiveVideoCacheEvictor(private val idleBudget: Long) : CacheEvictor {
+/** Evict idle videos first; the user budget is a hard cap even for protected videos. */
+internal class ActiveVideoCacheEvictor(@Volatile var budget: Long) : CacheEvictor {
     private val spans = TreeSet<CacheSpan>(compareBy<CacheSpan> { it.lastTouchTimestamp }.thenBy { it.key }.thenBy { it.position })
     private var bytes = 0L
     val owners = java.util.concurrent.ConcurrentHashMap<Int, Set<String>>()
@@ -20,8 +22,8 @@ internal class ActiveVideoCacheEvictor(private val idleBudget: Long) : CacheEvic
     }
     private fun evict(cache: Cache, incoming: Long) {
         val protected = owners.values.flatMap { it }.toHashSet()
-        while (bytes + incoming > idleBudget) {
-            val oldest = spans.firstOrNull { it.key !in protected } ?: break
+        while (bytes + incoming > budget) {
+            val oldest = spans.firstOrNull { it.key !in protected } ?: spans.firstOrNull() ?: break
             cache.removeSpan(oldest)
         }
     }

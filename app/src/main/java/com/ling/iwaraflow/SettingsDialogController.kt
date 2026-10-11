@@ -92,10 +92,10 @@ class SettingsDialogController(
         }
         val preload = CheckBox(activity).apply { text = "网络稳定时提前加载后续视频"; isChecked = prefs.preloadNext }
         panel.addView(preload)
-        panel.addView(CheckBox(activity).apply {
+        val preloadOnMetered = CheckBox(activity).apply {
             text = "移动 / 计量网络也预加载后续视频"; isChecked = prefs.preloadOnMetered
-            setOnCheckedChangeListener { _, checked -> prefs.preloadOnMetered = checked }
-        })
+        }
+        panel.addView(preloadOnMetered)
         panel.addView(autoNext); panel.addView(autoPip); panel.addView(pauseIcon); panel.addView(tapPause)
         panel.addView(TextView(activity).apply {
             text = "关掉后点一下画面不再暂停：只在「标题 / 标签 / 操作栏」和「进度条 / 快进后退 / 剩余时长」之间切换，播放和暂停状态均保持不变；暂停后也能单击切换界面，播放 / 暂停请点控件里的按钮。"
@@ -228,10 +228,10 @@ class SettingsDialogController(
         panel.addView(actionRow("数据与存储", "管理缓存、收藏和兴趣备份，清理历史及推荐画像。") {
             activity.startActivity(android.content.Intent(activity, DataManagementActivity::class.java))
         })
-        panel.addView(CheckBox(activity).apply {
+        val privateBrowsing = CheckBox(activity).apply {
             text = "不记录浏览与推荐行为（收藏仍可保存）"; isChecked = prefs.privateBrowsing
-            setOnCheckedChangeListener { _, checked -> prefs.privateBrowsing = checked }
-        })
+        }
+        panel.addView(privateBrowsing)
         panel.addView(actionRow("同步点赞记录", "把在网页端点过的赞补进“已看”，刷新推荐后生效。") { onSyncLikes() })
         panel.addView(actionRow("兴趣管理", "主动添加感兴趣或不感兴趣的标签，调整推荐机会；也可恢复已屏蔽内容。不影响主动搜索。") { onInterestManager() })
         panel.addView(actionRow("诊断信息", "最近的异常、退出原因和加载线索、推荐质量指标，只存在本机，不会上传。") {
@@ -272,6 +272,14 @@ class SettingsDialogController(
         page.body.addView(content, LinearLayout.LayoutParams(-1, -1))
         cancel.setOnClickListener { activity.finish() }
         save.setOnClickListener {
+            val newType = proxyTypes[proxyType.selectedItemPosition]
+            val newHost = proxyHost.text.toString().trim()
+            val newPort = proxyPort.text.toString().trim().toIntOrNull() ?: 0
+            if (newType != NetworkProxy.TYPE_NONE && NetworkProxy.proxyFor(newType, newHost, newPort) == null) {
+                Toast.makeText(activity, "代理主机或端口不完整，请修正后保存；本次设置尚未保存", Toast.LENGTH_LONG).show()
+                return@setOnClickListener
+            }
+            val proxyChanged = newType != prefs.proxyType || newHost != prefs.proxyHost || newPort != prefs.proxyPort
             // 只有“排除已看视频”和“老片穿插”会改变推荐候选，也只有推荐流受它们影响；
             // 其它几项重拉一遍列表只会把用户刷到一半的位置冲掉。
             val newClassics = classicsValues[classics.selectedItemPosition]
@@ -285,20 +293,14 @@ class SettingsDialogController(
             prefs.recommendDebug = recommendDebug.isChecked
             prefs.autoOpenClipboardLinks = clipboardLinks.isChecked
             prefs.preloadNext = preload.isChecked
+            prefs.preloadOnMetered = preloadOnMetered.isChecked
+            prefs.privateBrowsing = privateBrowsing.isChecked
             prefs.showPauseIndicator = pauseIcon.isChecked
             prefs.tapToPause = tapPause.isChecked
             prefs.skipSeconds = skipValues[skip.selectedItemPosition]
             prefs.defaultQuality = qualityValues[spinner.selectedItemPosition]
-            val newType = proxyTypes[proxyType.selectedItemPosition]
-            val newHost = proxyHost.text.toString().trim()
-            val newPort = proxyPort.text.toString().trim().toIntOrNull() ?: 0
-            val proxyChanged = newType != prefs.proxyType || newHost != prefs.proxyHost || newPort != prefs.proxyPort
-            if (newType != NetworkProxy.TYPE_NONE && NetworkProxy.proxyFor(newType, newHost, newPort) == null) {
-                Toast.makeText(activity, "代理主机或端口不完整，代理设置未保存", Toast.LENGTH_LONG).show()
-            } else {
-                prefs.proxyType = newType; prefs.proxyHost = newHost; prefs.proxyPort = newPort
-                if (proxyChanged) NetworkProxy.apply(prefs)
-            }
+            prefs.proxyType = newType; prefs.proxyHost = newHost; prefs.proxyPort = newPort
+            if (proxyChanged) NetworkProxy.apply(prefs)
             val provider = providerIds[providerSpinner.selectedItemPosition]
             val newTranslation = TranslationConfig(
                 provider = provider,

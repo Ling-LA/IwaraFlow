@@ -106,14 +106,23 @@ object DislikeSheet {
             })
         }
 
-        row("减少推荐：当前视频", strong = true) { apply(activity, item, history, Kind.VIDEO, "", onApplied) }
+        fun choose(kind: Kind, tag: String = "") {
+            history.post {
+                runCatching { apply(activity, item, history, kind, tag, onApplied) }.onFailure {
+                    activity.runOnUiThread {
+                        Toast.makeText(activity, "未能保存不感兴趣设置，请检查存储空间后重试", Toast.LENGTH_LONG).show()
+                    }
+                }
+            }
+        }
+        row("减少推荐：当前视频", strong = true) { choose(Kind.VIDEO) }
         if (item.author.isNotBlank()) {
             divider()
-            row("屏蔽作者 @${item.author}") { apply(activity, item, history, Kind.AUTHOR, "", onApplied) }
+            row("屏蔽作者 @${item.author}") { choose(Kind.AUTHOR) }
         }
         item.tags.take(MAX_TAGS).forEach { tag ->
             divider()
-            row("屏蔽标签 #$tag") { apply(activity, item, history, Kind.TAG, tag, onApplied) }
+            row("屏蔽标签 #$tag") { choose(Kind.TAG, tag) }
         }
         divider()
         row("取消") { }
@@ -190,28 +199,38 @@ object DislikeSheet {
                     VideoItem(item.id, item.title, "", emptyList(), 0),
                     HistoryStore.ACTION_DISLIKE_VIDEO, VIDEO_WEIGHT
                 )
-                Toast.makeText(context, "已跳过这条视频", Toast.LENGTH_SHORT).show()
             }
             Kind.AUTHOR -> {
                 // 两笔都要记：行为表那条负责压分（会衰减），muted_entities 那条是永久硬屏蔽。
                 history.muteAuthor(item.author, item.authorId)
-                Toast.makeText(context, "不再推荐 @${item.author}", Toast.LENGTH_SHORT).show()
             }
             Kind.TAG -> {
                 history.mute(HistoryStore.MUTE_TAG, tag)
-                Toast.makeText(context, "不再推荐 #$tag", Toast.LENGTH_SHORT).show()
             }
         }
         history.markSeen(item.id)
-        onApplied?.invoke(item, kind)
-        hostActivity(context)?.let { activity -> UndoNotice.show(activity, if (kind == Kind.VIDEO) "已减少此视频的推荐" else "已屏蔽，搜索不受影响") {
-            when (kind) {
-                Kind.VIDEO -> history.interestDatabase.delete("interactions", "video_id=? AND action=? AND created_at>=?", arrayOf(item.id, HistoryStore.ACTION_DISLIKE_VIDEO, at.toString()))
-                Kind.AUTHOR -> if (item.authorId !in before.authorIds && item.author.lowercase() !in before.authors) history.unmuteAuthor(item.author)
-                Kind.TAG -> if (SearchQuery.canonicalTag(tag) !in before.tags.map(SearchQuery::canonicalTag)) history.unmute(HistoryStore.MUTE_TAG, tag)
-            }
-            history.invalidateInterests()
-        } }
+        val showResult = Runnable {
+            val activity = hostActivity(context)
+            if (activity != null && (activity.isFinishing || activity.isDestroyed)) return@Runnable
+            Toast.makeText(context, when (kind) {
+                Kind.VIDEO -> "已跳过这条视频"
+                Kind.AUTHOR -> "不再推荐 @" + item.author
+                Kind.TAG -> "不再推荐 #" + tag
+            }, Toast.LENGTH_SHORT).show()
+            onApplied?.invoke(item, kind)
+            activity?.let { UndoNotice.show(it, if (kind == Kind.VIDEO) "已减少此视频的推荐" else "已屏蔽，搜索不受影响") {
+                history.post {
+                    when (kind) {
+                        Kind.VIDEO -> history.interestDatabase.delete("interactions", "video_id=? AND action=? AND created_at>=?", arrayOf(item.id, HistoryStore.ACTION_DISLIKE_VIDEO, at.toString()))
+                        Kind.AUTHOR -> if (item.authorId !in before.authorIds && item.author.lowercase() !in before.authors) history.unmuteAuthor(item.author)
+                        Kind.TAG -> if (SearchQuery.canonicalTag(tag) !in before.tags.map(SearchQuery::canonicalTag)) history.unmute(HistoryStore.MUTE_TAG, tag)
+                    }
+                    history.invalidateInterests()
+                }
+            } }
+        }
+        if (android.os.Looper.myLooper() == android.os.Looper.getMainLooper()) showResult.run()
+        else android.os.Handler(android.os.Looper.getMainLooper()).post(showResult)
     }
 
     /** 和评论面板同一套手势：面板跟着手指走，松手时拖得够远或够快就收起，否则弹回。 */

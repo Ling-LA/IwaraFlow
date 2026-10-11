@@ -41,9 +41,9 @@ class SearchVariantsTest {
         }
         val requests = mutableListOf<Pair<String, Int>>()
         doAnswer { call ->
-            (call.arguments[2] as (List<VideoItem>) -> Unit)(call.arguments[0] as List<VideoItem>)
+            (call.arguments[3] as (List<VideoItem>) -> Unit)(call.arguments[0] as List<VideoItem>)
             null
-        }.`when`(gate).inspectAll(anyList(), anyString(), any<(List<VideoItem>) -> Unit>() ?: {})
+        }.`when`(gate).preview(anyList(), anyString(), any<() -> Unit>() ?: {}, any<(List<VideoItem>) -> Unit>() ?: {})
         doAnswer { call ->
             val word = call.arguments[0] as String; val page = call.arguments[1] as Int
             requests += word to page
@@ -62,7 +62,7 @@ class SearchVariantsTest {
         }.`when`(api).searchVideos(anyString(), anyInt(), anyInt(), anyString(), any<(Result<List<VideoItem>>) -> Unit>() ?: {})
         try {
             invoke(activity, "runSearch", "长风")
-            shadowOf(Looper.getMainLooper()).idle()
+            awaitSearchResults(activity)
             block(activity, requests)
         } finally { controller.pause().stop().destroy() }
     }
@@ -85,9 +85,9 @@ class SearchVariantsTest {
             val dialog = options(activity)
             dialog.listView.performItemClick(null, 0, 0)
             dialog.getButton(AlertDialog.BUTTON_POSITIVE).performClick()
-            shadowOf(Looper.getMainLooper()).idle()
+            awaitSearchResults(activity)
             deferred.single().invoke()
-            shadowOf(Looper.getMainLooper()).idle()
+            awaitSearchResults(activity)
             assertFalse(results(activity).any { it.id == "en" })
             assertTrue(results(activity).any { it.id == "ja" })
         }
@@ -97,14 +97,14 @@ class SearchVariantsTest {
         assertTrue(dialog.listView.isItemChecked(0))
         dialog.listView.performItemClick(null, 0, 0)
         dialog.getButton(AlertDialog.BUTTON_POSITIVE).performClick()
-        shadowOf(Looper.getMainLooper()).idle()
+        awaitSearchResults(activity)
         assertFalse(results(activity).any { it.id == "en" })
         val reopened = options(activity)
         assertEquals(2, reopened.listView.count)
         assertFalse(reopened.listView.isItemChecked(0))
         reopened.listView.performItemClick(null, 0, 0)
         reopened.getButton(AlertDialog.BUTTON_POSITIVE).performClick()
-        shadowOf(Looper.getMainLooper()).idle()
+        awaitSearchResults(activity)
         assertTrue(results(activity).any { it.id == "en" })
         assertEquals(2, requests.count { it.first == "changfeng" })
     }

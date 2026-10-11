@@ -39,9 +39,9 @@ object DownloadLibrary {
         }
     }
 
-    fun entries(context: Context, history: HistoryStore): List<Entry> {
+    fun entries(context: Context, history: HistoryStore, offset: Int = 0, limit: Int = 48, query: String = "", ascending: Boolean = false): List<Entry> {
         importLegacyDownloads(context, history)
-        val records = history.downloadRecords()
+        val records = history.downloadRecords(limit, offset, query, ascending)
         if (records.isEmpty()) return emptyList()
         val status = queryStatus(context, records.map { it.downloadId })
         return records.map { record ->
@@ -64,9 +64,14 @@ object DownloadLibrary {
      */
     internal fun importLegacyDownloads(context: Context, history: HistoryStore) {
         val manager = context.getSystemService(Context.DOWNLOAD_SERVICE) as? DownloadManager ?: return
-        val known = history.downloadRecords(limit = 5000).map { it.downloadId }.toHashSet()
+        val migration = context.getSharedPreferences("download_migration", Context.MODE_PRIVATE)
+        if (migration.getBoolean("completed_v2", false)) return
+        val known = hashSetOf<Long>()
+        history.readableDatabase.query("downloads", arrayOf("download_id"), null, null, null, null, null).use { c ->
+            while (c.moveToNext()) known += c.getLong(0)
+        }
         runCatching {
-            manager.query(DownloadManager.Query())?.use { c ->
+            (manager.query(DownloadManager.Query()) ?: return).use { c ->
                 val idIndex = c.getColumnIndex(DownloadManager.COLUMN_ID)
                 val titleIndex = c.getColumnIndex(DownloadManager.COLUMN_TITLE)
                 val uriIndex = c.getColumnIndex(DownloadManager.COLUMN_LOCAL_URI)
@@ -84,6 +89,7 @@ object DownloadLibrary {
                     )
                 }
             }
+            migration.edit().putBoolean("completed_v2", true).apply()
         }
     }
 

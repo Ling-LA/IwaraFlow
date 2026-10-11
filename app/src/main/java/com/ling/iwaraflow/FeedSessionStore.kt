@@ -23,7 +23,8 @@ class FeedSessionStore {
 
     fun save(mode: String, session: Session) {
         if (mode !in HOME_MODES) return
-        sessions[mode] = session
+        val remove = FeedWindow.removable(session.items.size, session.currentIndex)
+        sessions[mode] = session.copy(items = session.items.drop(remove), currentIndex = session.currentIndex - remove)
     }
 
     /** 这个流有没有存着可用的现场（空列表不算）。 */

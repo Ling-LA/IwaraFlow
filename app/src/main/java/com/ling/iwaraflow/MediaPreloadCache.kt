@@ -29,9 +29,12 @@ import java.util.concurrent.atomic.AtomicInteger
  * built on a background thread while the first feed request is already in flight; callers join
  * only when a video really needs a media source.
  */
-@OptIn(UnstableApi::class)
+@androidx.annotation.OptIn(UnstableApi::class)
 class MediaPreloadCache(context: Context) {
     private val appContext = context.applicationContext
+    private val prefs = AppPrefs(appContext)
+    private val budget = PreloadBudget(appContext)
+    private class BudgetReached : java.io.IOException()
     private val pending: Future<SharedState> = warmUp(appContext)
     @Volatile private var closed = false
     @Volatile private var desiredUrls: Set<String>? = null
@@ -47,13 +50,15 @@ class MediaPreloadCache(context: Context) {
     }
     private val jobs = java.util.concurrent.ConcurrentHashMap<String, Job>()
 
+    fun registerSources(videoId: String, sources: List<VideoSource>) = MediaCacheIdentity.register(videoId, sources)
+
     fun progress(url: String?): Progress = if (url == null) Progress() else jobs[url]?.progress ?: Progress()
 
     /** At most current + one lookahead transfer. A new owner cancels obsolete requests. */
     @Synchronized fun keepPreloads(urls: Set<String>) {
         desiredUrls = urls.toSet()
         if (pending.isDone) runCatching {
-            if (urls.isEmpty()) shared.evictor.owners.remove(ownerId) else shared.evictor.owners[ownerId] = urls
+            if (urls.isEmpty()) shared.evictor.owners.remove(ownerId) else shared.evictor.owners[ownerId] = urls.mapTo(hashSetOf(), MediaCacheIdentity::key)
         }
         jobs.keys.filter { it !in urls }.forEach { url ->
             jobs.remove(url)?.let { it.cancelled = true; it.writer?.cancel() }
@@ -61,14 +66,14 @@ class MediaPreloadCache(context: Context) {
     }
 
     fun prefetchFull(url: String, primary: Boolean = true) {
-        if (closed || !url.startsWith("https://") || !hasDiskRoom()) return
+        if (closed || !url.startsWith("https://") || !hasDiskRoom() || (NetworkProfile.isMetered(appContext) && !budget.allowed())) return
         jobs[url]?.let { it.primary = primary; return }
         val job = Job().apply { this.primary = primary }
         if (jobs.putIfAbsent(url, job) != null) return
         initExecutor.execute prepare@{
         if (closed || job.cancelled || desiredUrls?.contains(url) == false) { jobs.remove(url, job); return@prepare }
         val state = runCatching { shared }.getOrElse { jobs.remove(url, job); return@prepare }
-        state.evictor.owners.compute(ownerId) { _, keys -> keys.orEmpty() + url }
+        state.evictor.owners.compute(ownerId) { _, keys -> keys.orEmpty() + MediaCacheIdentity.key(url) }
         state.executor.execute {
             var sampleAt = android.os.SystemClock.elapsedRealtime()
             var sampleBytes = 0L
@@ -77,13 +82,17 @@ class MediaPreloadCache(context: Context) {
             val throttleStart = sampleAt
             try {
                 val writer = CacheWriter(state.cacheFactory.createDataSourceForDownloading(), DataSpec.Builder().setUri(url).build(), null) { length, cached, added ->
+                    val metered = NetworkProfile.isMetered(appContext)
+                    if (metered && added > 0) budget.record(added)
+                    if (cached >= prefs.cacheBudgetMb.toLong() * 1024 * 1024 ||
+                        (metered && !budget.allowed())) throw BudgetReached()
                     val now = android.os.SystemClock.elapsedRealtime()
                     sampleBytes += added
                     if (now - sampleAt >= 1000) {
                         measuredRate = sampleBytes * 1000 / (now - sampleAt)
                         sampleBytes = 0; sampleAt = now
                     }
-                    val contiguous = if (length > 0) state.cache.getCachedLength(url, 0, length).coerceAtLeast(0) else cached
+                    val contiguous = if (length > 0) state.cache.getCachedLength(MediaCacheIdentity.key(url), 0, length).coerceAtLeast(0) else cached
                     job.progress = Progress(length, contiguous, measuredRate)
                     if (job.cancelled || closed || !hasDiskRoom()) throw java.io.InterruptedIOException()
                     if (!job.primary && added > 0) {
@@ -103,14 +112,16 @@ class MediaPreloadCache(context: Context) {
                 if (!job.cancelled && !closed) {
                     writer.cache()
                     // The final fragment is committed on close, after the last progress callback.
-                    val length = androidx.media3.datasource.cache.ContentMetadata.getContentLength(state.cache.getContentMetadata(url))
+                    val length = androidx.media3.datasource.cache.ContentMetadata.getContentLength(state.cache.getContentMetadata(MediaCacheIdentity.key(url)))
                         .takeIf { it > 0 } ?: job.progress.total
                     if (length > 0) job.progress = job.progress.copy(total = length,
-                        cached = state.cache.getCachedLength(url, 0, length).coerceAtLeast(0))
+                        cached = state.cache.getCachedLength(MediaCacheIdentity.key(url), 0, length).coerceAtLeast(0))
                 }
+            } catch (_: BudgetReached) {
+                // Retain the stopped job until the video changes; do not retry every second.
             } catch (_: Exception) {
                 jobs.remove(url, job) // Allow retry after a transient network failure.
-            } finally { job.writer = null }
+            } finally { job.writer = null; budget.flush() }
         }
         }
     }
@@ -129,6 +140,11 @@ class MediaPreloadCache(context: Context) {
         .setDefaultRequestProperties(mapOf("Referer" to "https://www.iwara.tv/"))
         .setTransferListener(PlaybackMetrics.transfer(androidx.media3.exoplayer.upstream.DefaultBandwidthMeter.getSingletonInstance(appContext)))) }
     private fun hasDiskRoom(): Boolean = appContext.cacheDir.usableSpace > MIN_FREE_BYTES
+    fun applyBudget() {
+        if (!pending.isDone) return
+        shared.evictor.budget = prefs.cacheBudgetMb.toLong() * 1024 * 1024
+        clearIdleCache()
+    }
     fun cacheBytes(): Long = if (pending.isDone) runCatching { shared.cache.cacheSpace }.getOrDefault(0L) else 0L
     fun clearIdleCache() {
         if (!pending.isDone) return
@@ -175,6 +191,7 @@ class MediaPreloadCache(context: Context) {
         closed = true
         jobs.values.forEach { it.cancelled = true; it.writer?.cancel() }
         jobs.clear()
+        budget.flush()
         initExecutor.execute {
             if (runCatching { pending.get() }.isSuccess) {
                 state?.evictor?.owners?.remove(ownerId)
@@ -213,7 +230,7 @@ class MediaPreloadCache(context: Context) {
             }
 
             val databaseProvider = StandaloneDatabaseProvider(context)
-            val evictor = ActiveVideoCacheEvictor(2L * 1024L * 1024L * 1024L)
+            val evictor = ActiveVideoCacheEvictor(AppPrefs(context).cacheBudgetMb.toLong() * 1024L * 1024L)
             val cache = SimpleCache(
                 File(context.cacheDir, "video_preload"),
                 evictor,
@@ -227,6 +244,7 @@ class MediaPreloadCache(context: Context) {
                 .setReadTimeoutMs(20_000)
             val cacheFactory = CacheDataSource.Factory()
                 .setCache(cache)
+                .setCacheKeyFactory { spec -> spec.key ?: MediaCacheIdentity.key(spec.uri.toString()) }
                 .setEventListener(object : CacheDataSource.EventListener {
                     override fun onCachedBytesRead(cacheSizeBytes: Long, cachedBytesRead: Long) = PlaybackMetrics.cached(cachedBytesRead)
                     override fun onCacheIgnored(reason: Int) {}

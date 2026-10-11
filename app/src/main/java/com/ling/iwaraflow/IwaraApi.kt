@@ -482,9 +482,15 @@ class IwaraApi(context: Context, private val apiRoot: String = DEFAULT_API_ROOT)
 
     fun getCurrentUserBlocking(): IwaraAuthor {
         if (!isLoggedIn()) throw IOException("请先登录 Iwara")
+        val revision = SecureSessionStore.accountRevision
         val root = getJsonObject("$apiRoot/user", requireAuth = true)
         val user = root.optJSONObject("user") ?: throw IOException("无法读取当前账号")
-        return parseAuthor(user, root.optJSONObject("profile")?.optString("body").orEmpty())
+        val author = parseAuthor(user, root.optJSONObject("profile")?.optString("body").orEmpty())
+        synchronized(SecureSessionStore.accountLock) {
+            check(revision == SecureSessionStore.accountRevision && isLoggedIn()) { "登录状态已改变" }
+            if (author.id.isNotBlank()) session.putSecret("verified_user_id", author.id)
+        }
+        return author
     }
 
     fun getFollowingUsers(userId: String, page: Int = 0, callback: (Result<FollowingPage>) -> Unit) {

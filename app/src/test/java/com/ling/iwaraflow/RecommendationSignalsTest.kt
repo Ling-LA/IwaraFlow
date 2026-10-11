@@ -34,14 +34,14 @@ class RecommendationSignalsTest {
     }
 
     @Test fun persistentSkipsOfAnAuthorAddALongTermPenalty() {
-        repeat(HistoryStore.LONG_TERM_SKIPS - 1) { history.recordInteraction(video("v$it", "Dull", listOf("t")), "skip", -0.5) }
+        repeat(HistoryStore.LONG_TERM_SKIPS - 1) { history.recordInteraction(video("v$it", "Dull", listOf("t")), "skip", -0.2) }
         val before = history.preferenceProfile()
-        history.recordInteraction(video("vx", "Dull", listOf("t")), "skip", -0.5)
+        history.recordInteraction(video("vx", "Dull", listOf("t")), "skip", -0.2)
         val after = history.preferenceProfile()
         val authorDrop = before.authorWeights["dull"]!! - after.authorWeights["dull"]!!
         assertTrue("第 ${HistoryStore.LONG_TERM_SKIPS} 次划走后作者要多压一层：$authorDrop", authorDrop > 0 && after.authorWeights.getValue("dull") >= -6.0)
         val tagDrop = before.tagWeights["t"]!! - after.tagWeights["t"]!!
-        assertTrue("标签同样多压一层：$tagDrop", tagDrop > HistoryStore.LONG_TERM_TAG_PENALTY)
+        assertTrue("标签惩罚平滑增长且有上限：$tagDrop", tagDrop > 0 && after.tagWeights.getValue("t") >= -6.0)
     }
 
     @Test fun unlikeAndUnfavoriteAreNegative() {

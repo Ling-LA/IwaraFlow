@@ -42,6 +42,17 @@ class HistoryStore(context: Context, private val profileFile: String? = null) : 
         return if (profileFile != null || scope.isBlank()) writableDatabase
         else profiles.computeIfAbsent(scope) { HistoryStore(appContext, "interest_$scope.db") }.writableDatabase
     }
+    private val queuedLibrary = ThreadLocal<String?>()
+    private fun libraryScope(): String = queuedLibrary.get() ?: if (appPrefs.isolateLibrary) {
+        java.security.MessageDigest.getInstance("SHA-256").digest(accountId.ifBlank { "anonymous" }.toByteArray())
+            .joinToString("") { "%02x".format(it) }
+    } else ""
+    internal val libraryDatabase: SQLiteDatabase get() {
+        val scope = libraryScope()
+        return if (profileFile != null || scope.isBlank()) writableDatabase
+        else profiles.computeIfAbsent("library_$scope") { HistoryStore(appContext, "library_$scope.db") }.writableDatabase
+    }
+
     private val systemAdjustments get() = appContext.getSharedPreferences(
         "system_interest_adjustments" + interestScope().let { if (it.isBlank()) "" else "_$it" }, Context.MODE_PRIVATE)
     private val interestMetadata = context.getSharedPreferences("interest_metadata", Context.MODE_PRIVATE)
@@ -73,24 +84,34 @@ class HistoryStore(context: Context, private val profileFile: String? = null) : 
      * 当前登录的 Iwara 账号 id，页面在启动和登录时写进来（见 [AppPrefs.accountId]）。
      *
      * 决定云端点赞和已看标记的范围；开启按账号隔离兴趣后，也选择该账号的兴趣库。
-     * 本机收藏与浏览历史仍为设备级。空串表示未登录，隔离模式下使用独立的匿名兴趣库。
+     * 收藏与浏览历史默认设备共享，可独立开启账号隔离。空串使用匿名库。
      * 构造时直接从偏好里读一份，这样每个页面各自 new 出来的库都已经知道现在是谁。
      */
-    @Volatile var accountId: String = runCatching {
+    private val queuedAccount = ThreadLocal<String>()
+    @Volatile private var activeAccount: String = runCatching {
         context.getSharedPreferences(AppPrefs.FILE, Context.MODE_PRIVATE)
             .getString(AppPrefs.KEY_ACCOUNT_ID, "").orEmpty()
     }.getOrDefault("")
+    var accountId: String
+        get() = queuedAccount.get() ?: activeAccount
+        set(value) { activeAccount = value }
 
     /** 把一次写库交给写线程。页面已经销毁（写队列关掉了）就丢掉，不抛异常。 */
     fun post(block: () -> Unit) {
         if (closed) return
         // shutdown 之后排队的写照旧跑完（close 会等它们），只有新来的才丢。
         val scope = interestScope()
+        val library = libraryScope()
+        val account = accountId
         runCatching { writes.execute {
-            queuedScope.set(scope)
-            try { runCatching { block() } }
-            finally { queuedScope.remove() }
-        } }
+            queuedScope.set(scope); queuedLibrary.set(library); queuedAccount.set(account)
+            try { runCatching { block() }.onFailure { reportWriteFailure(it) } }
+            finally { queuedScope.remove(); queuedLibrary.remove(); queuedAccount.remove() }
+        } }.onFailure { reportWriteFailure(it) }
+    }
+
+    private fun reportWriteFailure(error: Throwable) {
+        NavigationDiagnostics.note(appContext, "local write failed: ${error.javaClass.simpleName}")
     }
 
     /** 划走 / 点赞这些都发生在 UI 线程上，写库交给写线程。 */
@@ -103,9 +124,37 @@ class HistoryStore(context: Context, private val profileFile: String? = null) : 
     fun markSeenAsync(videoId: String) { if (!appPrefs.privateBrowsing) post { markSeen(videoId) } }
 
     /** 收藏状态 UI 立刻就要用，所以先在调用线程上改好，落库再排队。 */
-    fun setLocalFavoriteAsync(item: VideoItem, enabled: Boolean) {
+    fun setLocalFavoriteAsync(item: VideoItem, enabled: Boolean, complete: (Result<Unit>) -> Unit = {}) {
+        val old = item.localFavorite
         item.localFavorite = enabled
-        post { setLocalFavorite(item, enabled) }
+        val main = android.os.Handler(android.os.Looper.getMainLooper())
+        fun deliver(result: Result<Unit>) { main.post {
+            if (result.isFailure) {
+                item.localFavorite = old
+                android.widget.Toast.makeText(appContext, "收藏未能保存，请检查存储空间后重试", android.widget.Toast.LENGTH_LONG).show()
+            }
+            complete(result)
+        } }
+        if (closed) { deliver(Result.failure(IllegalStateException("storage closed"))); return }
+        val scope = interestScope()
+        val library = libraryScope()
+        val account = accountId
+        runCatching { writes.execute {
+            queuedScope.set(scope); queuedLibrary.set(library); queuedAccount.set(account)
+            val result = try { runCatching { setLocalFavorite(item, enabled) } }
+                finally { queuedScope.remove(); queuedLibrary.remove(); queuedAccount.remove() }
+            result.onFailure { reportWriteFailure(it) }
+            deliver(result)
+        } }.onFailure { reportWriteFailure(it); deliver(Result.failure(it)) }
+    }
+
+    fun recordDownloadAsync(item: VideoItem, quality: String, id: Long) = post {
+        runCatching { recordDownload(item, quality, id) }.onFailure { error ->
+            reportWriteFailure(error)
+            android.os.Handler(android.os.Looper.getMainLooper()).post {
+                android.widget.Toast.makeText(appContext, "下载已开始，但记录未能保存，可在系统下载器查看", android.widget.Toast.LENGTH_LONG).show()
+            }
+        }
     }
 
     /** 等写队列清空。关库前和用例里要用：不等的话读到的是写之前的状态。 */
@@ -323,7 +372,10 @@ class HistoryStore(context: Context, private val profileFile: String? = null) : 
             put("created_at", at)
             put("alias", alias)
         }
-        db.insertWithOnConflict("muted_entities", null, values, SQLiteDatabase.CONFLICT_IGNORE)
+        if (db.insertWithOnConflict("muted_entities", null, values, SQLiteDatabase.CONFLICT_IGNORE) == -1L) {
+            check(db.query("muted_entities", arrayOf("entity_key"), "type=? AND entity_key=?",
+                arrayOf(type, key), null, null, null, "1").use { it.moveToFirst() }) { "mute write failed" }
+        }
     }
 
     /**
@@ -431,7 +483,7 @@ class HistoryStore(context: Context, private val profileFile: String? = null) : 
             put("author_username", item.authorUsername)
             put("description", item.description)
         }
-        writableDatabase.insertWithOnConflict("downloads", null, values, SQLiteDatabase.CONFLICT_REPLACE)
+        check(writableDatabase.insertWithOnConflict("downloads", null, values, SQLiteDatabase.CONFLICT_REPLACE) != -1L) { "download write failed" }
     }
 
     /**
@@ -450,12 +502,16 @@ class HistoryStore(context: Context, private val profileFile: String? = null) : 
     }
 
     @Synchronized
-    fun downloadRecords(limit: Int = 300): List<DownloadRecord> {
+    fun downloadRecords(limit: Int = 300, offset: Int = 0, query: String = "", ascending: Boolean = false): List<DownloadRecord> {
+        require(limit > 0 && offset >= 0)
+        val selection = if (query.isBlank()) null else "instr(lower(title || ' ' || author || ' ' || tags), lower(?)) > 0"
+        val args = selection?.let { arrayOf(query.trim()) }
+        val direction = if (ascending) "ASC" else "DESC"
         val out = ArrayList<DownloadRecord>()
         readableDatabase.query(
             "downloads",
             arrayOf("video_id", "quality", "title", "author", "tags", "download_id", "author_id", "author_username", "description"),
-            null, null, null, null, "created_at DESC", limit.toString()
+            selection, args, null, null, "created_at $direction, download_id $direction", "$offset,$limit"
         ).use { c ->
             while (c.moveToNext()) {
                 out += DownloadRecord(
@@ -477,6 +533,16 @@ class HistoryStore(context: Context, private val profileFile: String? = null) : 
         return out
     }
 
+    fun downloadedQualities(videoId: String): List<String> =
+        readableDatabase.query("downloads", arrayOf("quality"), "video_id=?", arrayOf(videoId), null, null, null)
+            .use { cursor -> buildList { while (cursor.moveToNext()) add(cursor.getString(0)) } }
+
+    fun downloadCount(query: String = ""): Int {
+        val where = if (query.isBlank()) null else "instr(lower(title || ' ' || author || ' ' || tags), lower(?)) > 0"
+        return readableDatabase.query("downloads", arrayOf("COUNT(*)"), where, where?.let { arrayOf(query.trim()) }, null, null, null)
+            .use { it.moveToFirst(); it.getInt(0) }
+    }
+
     @Synchronized
     fun forgetDownload(videoId: String, quality: String) {
         writableDatabase.delete("downloads", "video_id=? AND quality=?", arrayOf(videoId, quality))
@@ -496,7 +562,7 @@ class HistoryStore(context: Context, private val profileFile: String? = null) : 
             put("watched_at", now)
             put("completed", if (completed) 1 else 0)
         }
-        writableDatabase.insertWithOnConflict("history", null, values, SQLiteDatabase.CONFLICT_REPLACE)
+        check(libraryDatabase.insertWithOnConflict("history", null, values, SQLiteDatabase.CONFLICT_REPLACE) != -1L) { "history write failed" }
         markSeen(item.id, now)
     }
 
@@ -504,7 +570,7 @@ class HistoryStore(context: Context, private val profileFile: String? = null) : 
     fun markSeen(videoId: String, timestamp: Long = System.currentTimeMillis()) {
         if (appPrefs.privateBrowsing) return
         if (videoId.isBlank()) return
-        insertSeen(writableDatabase, videoId, timestamp, "")
+        insertSeen(libraryDatabase, videoId, timestamp, "")
     }
 
     /**
@@ -521,7 +587,7 @@ class HistoryStore(context: Context, private val profileFile: String? = null) : 
         db.insertWithOnConflict("seen_videos", null, initial, SQLiteDatabase.CONFLICT_IGNORE)
         val update = ContentValues().apply { put("last_seen_at", timestamp) }
         // 只更新时间：本机看过的那一行不该被后来的同步改成账号级，反过来也一样。
-        db.update("seen_videos", update, "video_id=?", arrayOf(videoId))
+        check(db.update("seen_videos", update, "video_id=?", arrayOf(videoId)) > 0) { "seen write failed" }
     }
 
     /** 一次写入一批已看 ID：同步几百条官方点赞时按单条写会很慢。 */
@@ -533,7 +599,7 @@ class HistoryStore(context: Context, private val profileFile: String? = null) : 
     ) {
         val ids = videoIds.filter { it.isNotBlank() }
         if (ids.isEmpty()) return
-        val db = writableDatabase
+        val db = libraryDatabase
         db.beginTransaction()
         try {
             ids.forEach { id -> insertSeen(db, id, timestamp, account) }
@@ -545,12 +611,12 @@ class HistoryStore(context: Context, private val profileFile: String? = null) : 
 
     @Synchronized
     fun isSeen(videoId: String): Boolean {
-        readableDatabase.query(
+        libraryDatabase.query(
             "seen_videos", arrayOf("video_id"), "video_id=? AND $ACCOUNT_SCOPE",
             arrayOf(videoId, accountId), null, null, null, "1"
         ).use { if (it.moveToFirst()) return true }
 
-        readableDatabase.query(
+        libraryDatabase.query(
             "history", arrayOf("video_id"), "video_id=?", arrayOf(videoId),
             null, null, null, "1"
         ).use { return it.moveToFirst() }
@@ -558,6 +624,9 @@ class HistoryStore(context: Context, private val profileFile: String? = null) : 
 
     @Synchronized
     fun setLocalFavorite(item: VideoItem, enabled: Boolean) {
+        val db = libraryDatabase
+        db.beginTransaction()
+        try {
         if (enabled) {
             val values = ContentValues().apply {
                 put("video_id", item.id)
@@ -566,11 +635,13 @@ class HistoryStore(context: Context, private val profileFile: String? = null) : 
                 put("tags", item.tags.joinToString("\u001F"))
                 put("created_at", System.currentTimeMillis())
             }
-            writableDatabase.insertWithOnConflict("favorites", null, values, SQLiteDatabase.CONFLICT_REPLACE)
+            check(db.insertWithOnConflict("favorites", null, values, SQLiteDatabase.CONFLICT_REPLACE) != -1L) { "favorite write failed" }
             markSeen(item.id)
         } else {
-            writableDatabase.delete("favorites", "video_id=?", arrayOf(item.id))
+            db.delete("favorites", "video_id=?", arrayOf(item.id))
         }
+        db.setTransactionSuccessful()
+        } finally { db.endTransaction() }
         item.localFavorite = enabled
     }
 
@@ -587,7 +658,7 @@ class HistoryStore(context: Context, private val profileFile: String? = null) : 
         if (ids.isEmpty()) return VideoStatuses(emptySet(), emptySet())
         val seen = HashSet<String>()
         val favorites = HashSet<String>()
-        val db = readableDatabase
+        val db = libraryDatabase
         ids.chunked(STATUS_BATCH).forEach { batch ->
             val placeholders = batch.joinToString(",") { "?" }
             val args = batch.toTypedArray()
@@ -608,7 +679,7 @@ class HistoryStore(context: Context, private val profileFile: String? = null) : 
 
     @Synchronized
     fun isLocalFavorite(videoId: String): Boolean {
-        readableDatabase.query(
+        libraryDatabase.query(
             "favorites", arrayOf("video_id"), "video_id=?", arrayOf(videoId),
             null, null, null, "1"
         ).use { return it.moveToFirst() }
@@ -627,7 +698,7 @@ class HistoryStore(context: Context, private val profileFile: String? = null) : 
             arrayOf(item.id, action, (now - 86_400_000L).toString())).use { it.moveToFirst(); it.getInt(0) }
         if (recent >= 3) return
         val boundedWeight = weight.coerceIn(-3.0, 3.0)
-        db.insert("interactions", null, interactionValues(item, action, boundedWeight, now))
+        db.insertOrThrow("interactions", null, interactionValues(item, action, boundedWeight, now))
         // 同一笔行为还要累加进长期画像，见 [PREFERENCE_TABLE]。
         if (countsTowardLongTerm(action)) {
             applyPreferenceDeltas(db, item.author, item.authorId, item.tags, boundedWeight, now)
@@ -665,7 +736,7 @@ class HistoryStore(context: Context, private val profileFile: String? = null) : 
         author.lowercase().takeIf { it.isNotBlank() }?.let { bumpPreference(db, PREF_AUTHOR, it, weight, now) }
         authorId.takeIf { it.isNotBlank() }?.let { bumpPreference(db, PREF_AUTHOR_ID, it, weight, now) }
         val uniqueTags = tags.map(SearchQuery::canonicalTag).filter { it.isNotBlank() }.distinct()
-        val share = if (weight > 0) TAG_SHARE / kotlin.math.sqrt(uniqueTags.size.coerceAtLeast(1).toDouble()) else TAG_SHARE
+        val share = TAG_SHARE / kotlin.math.sqrt(uniqueTags.size.coerceAtLeast(1).toDouble())
         uniqueTags.forEach { tag -> bumpPreference(db, PREF_TAG, tag, weight * share, now) }
     }
 
@@ -689,7 +760,7 @@ class HistoryStore(context: Context, private val profileFile: String? = null) : 
             put("score", score)
             put("updated_at", now)
         }
-        db.insertWithOnConflict("preference_entities", null, values, SQLiteDatabase.CONFLICT_REPLACE)
+        check(db.insertWithOnConflict("preference_entities", null, values, SQLiteDatabase.CONFLICT_REPLACE) != -1L) { "preference write failed" }
     }
 
     /** 读聚合画像，读的时候再按时间衰减一次（上次写入之后又过去了一段时间）。 */
@@ -767,7 +838,7 @@ class HistoryStore(context: Context, private val profileFile: String? = null) : 
                     null, null, null, "1"
                 ).use { it.moveToFirst() }
                 if (exists) return@forEach
-                db.insert("interactions", null,
+                db.insertOrThrow("interactions", null,
                     interactionValues(item, ACTION_CLOUD_LIKE, CLOUD_LIKE_WEIGHT, now, accountId))
                 added++
             }
@@ -799,7 +870,7 @@ class HistoryStore(context: Context, private val profileFile: String? = null) : 
     @Synchronized
     fun recentHistory(limit: Int = 100): List<VideoItem> {
         val out = ArrayList<VideoItem>()
-        readableDatabase.query(
+        libraryDatabase.query(
             "history",
             arrayOf("video_id", "title", "author", "tags"),
             null, null, null, null, "watched_at DESC", limit.toString()
@@ -820,7 +891,7 @@ class HistoryStore(context: Context, private val profileFile: String? = null) : 
     @Synchronized
     fun localFavorites(limit: Int = 200): List<VideoItem> {
         val out = ArrayList<VideoItem>()
-        readableDatabase.query(
+        libraryDatabase.query(
             "favorites",
             arrayOf("video_id", "title", "author", "tags"),
             null, null, null, null, "created_at DESC", limit.toString()
@@ -856,9 +927,9 @@ class HistoryStore(context: Context, private val profileFile: String? = null) : 
         val videos = HashMap<String, Double>()
         val positiveTags = HashMap<String, Double>()
         // 长期持续快速划走：同一作者 / 标签攒够 [LONG_TERM_SKIPS] 次划走，再额外压一层。
-        val authorSkips = HashMap<String, Int>()
-        val authorIdSkips = HashMap<String, Int>()
-        val tagSkips = HashMap<String, Int>()
+        val authorSkips = HashMap<String, Double>()
+        val authorIdSkips = HashMap<String, Double>()
+        val tagSkips = HashMap<String, Double>()
         // 明确点过「不感兴趣：作者 / 标签」的：这类内容在打分之前就被剔掉，连探索位都不给。
         // 读的是独立的 muted_entities 表，不是下面这个滚动窗口——拉黑是永久的。
         val muted = mutedEntities()
@@ -891,9 +962,10 @@ class HistoryStore(context: Context, private val profileFile: String? = null) : 
                     else -> 0.0
                 }
                 if (action in setOf("like", "favorite", "follow", "complete", ACTION_CLOUD_LIKE) && c.getDouble(2) > 0) {
-                    splitTags(c.getString(1)).forEach { tag ->
-                        val key = SearchQuery.canonicalTag(tag)
-                        positiveTags[key] = ((positiveTags[key] ?: 0.0) + c.getDouble(2).coerceAtMost(3.0) * decay).coerceAtMost(8.0)
+                    val positive = splitTags(c.getString(1)).map(SearchQuery::canonicalTag).distinct()
+                    val evidenceShare = 1.0 / kotlin.math.sqrt(positive.size.coerceAtLeast(1).toDouble())
+                    positive.forEach { key ->
+                        positiveTags[key] = ((positiveTags[key] ?: 0.0) + c.getDouble(2).coerceAtMost(3.0) * decay * evidenceShare).coerceAtMost(8.0)
                     }
                 }
                 if (share == 0.0 && action != ACTION_SKIP) continue
@@ -909,18 +981,19 @@ class HistoryStore(context: Context, private val profileFile: String? = null) : 
                 val itemTags = splitTags(c.getString(1)).map(SearchQuery::canonicalTag).distinct()
                 if (a.isNotBlank()) author[a] = (author[a] ?: 0.0) + w
                 if (id.isNotBlank()) authorIds[id] = (authorIds[id] ?: 0.0) + w
-                val tagShare = if (w > 0) TAG_SHARE / kotlin.math.sqrt(itemTags.size.coerceAtLeast(1).toDouble()) else TAG_SHARE
+                val tagShare = TAG_SHARE / kotlin.math.sqrt(itemTags.size.coerceAtLeast(1).toDouble())
                 itemTags.forEach { key -> tags[key] = (tags[key] ?: 0.0) + w * tagShare }
                 if (action == ACTION_SKIP) {
-                    if (a.isNotBlank()) authorSkips[a] = (authorSkips[a] ?: 0) + 1
-                    if (id.isNotBlank()) authorIdSkips[id] = (authorIdSkips[id] ?: 0) + 1
-                    itemTags.forEach { key -> tagSkips[key] = (tagSkips[key] ?: 0) + 1 }
+                    val evidence = kotlin.math.exp(-kotlin.math.ln(2.0) * ageDays / 30.0)
+                    if (a.isNotBlank()) authorSkips[a] = (authorSkips[a] ?: 0.0) + evidence
+                    if (id.isNotBlank()) authorIdSkips[id] = (authorIdSkips[id] ?: 0.0) + evidence
+                    itemTags.forEach { key -> tagSkips[key] = (tagSkips[key] ?: 0.0) + evidence / kotlin.math.sqrt(itemTags.size.coerceAtLeast(1).toDouble()) }
                 }
             }
         }
-        authorSkips.forEach { (key, n) -> if (n >= LONG_TERM_SKIPS) author[key] = (author[key] ?: 0.0) - LONG_TERM_AUTHOR_PENALTY }
-        authorIdSkips.forEach { (key, n) -> if (n >= LONG_TERM_SKIPS) authorIds[key] = (authorIds[key] ?: 0.0) - LONG_TERM_AUTHOR_PENALTY }
-        tagSkips.forEach { (key, n) -> if (n >= LONG_TERM_SKIPS) tags[key] = (tags[key] ?: 0.0) - LONG_TERM_TAG_PENALTY }
+        authorSkips.forEach { (key, n) -> author[key] = (author[key] ?: 0.0) - LONG_TERM_AUTHOR_PENALTY * (n / LONG_TERM_SKIPS).coerceAtMost(1.0) }
+        authorIdSkips.forEach { (key, n) -> authorIds[key] = (authorIds[key] ?: 0.0) - LONG_TERM_AUTHOR_PENALTY * (n / LONG_TERM_SKIPS).coerceAtMost(1.0) }
+        tagSkips.forEach { (key, n) -> tags[key] = (tags[key] ?: 0.0) - LONG_TERM_TAG_PENALTY * (n / LONG_TERM_SKIPS).coerceAtMost(1.0) }
         val multipliers = if (applySystemAdjustments) systemTagMultipliers() else emptyMap()
         val evidence = tagEvidence()
         val boundedTags = tags.entries.groupBy { SearchQuery.canonicalTag(it.key) }.mapValues { (key, entries) ->
@@ -960,9 +1033,9 @@ class HistoryStore(context: Context, private val profileFile: String? = null) : 
                 // An explicit new choice supersedes older hard mutes for the same tag.
                 val oldMutes = mutedEntities().tags.filter { SearchQuery.canonicalTag(it) == tag }
                 oldMutes.forEach { forgetDislike(DislikeSheet.Kind.TAG, it) }
-                db.insertWithOnConflict("manual_tag_preferences", null, ContentValues().apply {
+                check(db.insertWithOnConflict("manual_tag_preferences", null, ContentValues().apply {
                     put("tag", tag); put("preference", preference)
-                }, SQLiteDatabase.CONFLICT_REPLACE)
+                }, SQLiteDatabase.CONFLICT_REPLACE) != -1L) { "manual preference write failed" }
             }
             db.setTransactionSuccessful()
         } finally { db.endTransaction() }

@@ -30,16 +30,27 @@ class CommentListAdapter(
     private val loading = HashSet<String>()
     /** 每条评论的翻译状态，按评论 id（没有 id 的按正文）记。 */
     private val translations = HashMap<String, Translator.State>()
+    private val translationRequests = HashMap<String, RequestCancellation?>()
+    private var translationGeneration = 0
+
+    private fun cancelTranslations() {
+        translationGeneration++
+        translationRequests.values.forEach { it?.cancel() }
+        translationRequests.clear()
+        translations.entries.removeAll { it.value is Translator.State.Loading }
+    }
 
     /** 面板开着才翻译；关了就不再发请求，避免白白触发接口风控。 */
     var translationEnabled = false
         set(value) {
             if (field == value) return
             field = value
+            if (!value) cancelTranslations()
             if (value) notifyDataSetChanged()
         }
 
     fun replaceAll(comments: List<IwaraComment>) {
+        cancelTranslations()
         rows.clear(); expanded.clear(); loading.clear(); translations.clear()
         comments.forEach { rows += Row(it, 0) }
         notifyDataSetChanged()
@@ -114,9 +125,15 @@ class CommentListAdapter(
     private fun keyOf(c: IwaraComment): String = c.id.ifBlank { "body:${c.body.hashCode()}" }
 
     private fun requestTranslation(c: IwaraComment) {
+        if (!translationEnabled) return
         val key = keyOf(c)
+        if (translationRequests.containsKey(key)) return
+        val token = translationGeneration
         translations[key] = Translator.State.Loading
-        Translator.translate(c.body) { result ->
+        translationRequests[key] = null
+        val request = Translator.translate(c.body) { result ->
+            if (!translationEnabled || token != translationGeneration) return@translate
+            translationRequests.remove(key)
             translations[key] = result.fold(
                 onSuccess = { Translator.State.Done(it) },
                 onFailure = { Translator.State.Failed(Translator.explain(it)) }
@@ -124,6 +141,7 @@ class CommentListAdapter(
             val index = rows.indexOfFirst { keyOf(it.comment) == key }
             if (index >= 0) notifyItemChanged(index)
         }
+        if (translationRequests.containsKey(key)) translationRequests[key] = request
     }
 
     private fun toggleOriginal(c: IwaraComment) {

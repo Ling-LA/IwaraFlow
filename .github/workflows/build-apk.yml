@@ -35,6 +35,9 @@ jobs:
       - name: Unit lifecycle regressions
         if: matrix.api == 36
         run: gradle :app:testDebugUnitTest --no-daemon
+      - name: Lint errors gate
+        if: matrix.api == 36
+        run: gradle :app:lintDebug --no-daemon
       - name: Enable KVM for the test emulator
         run: |
           echo 'KERNEL=="kvm", GROUP="kvm", MODE="0666", OPTIONS+="static_node=kvm"' | sudo tee /etc/udev/rules.d/99-kvm4all.rules
@@ -57,6 +60,7 @@ jobs:
           path: |
             app/build/reports/ui-checks/
             app/build/reports/tests/
+            app/build/reports/lint-results-debug.*
             app/build/reports/androidTests/
             app/build/outputs/androidTest-results/
 
@@ -147,6 +151,13 @@ jobs:
           path: out/IwaraFlow-signed.apk
           if-no-files-found: error
 
+      - name: Archive R8 mapping for this release
+        uses: actions/upload-artifact@v4
+        with:
+          name: IwaraFlow-R8-mapping
+          path: app/build/outputs/mapping/release/
+          if-no-files-found: error
+
   signing-upgrade:
     needs: build
     strategy:
@@ -193,6 +204,12 @@ jobs:
           emulator-options: -no-window -gpu swiftshader -noaudio -no-boot-anim -camera-back none
           disable-animations: true
           script: bash scripts/signing-upgrade-regressions.sh
+      - name: Upload optimized release smoke and performance baseline
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: release-smoke-api-${{ matrix.api }}
+          path: out/release-smoke/
 
   publish:
     needs: [navigation, build, signing-upgrade]

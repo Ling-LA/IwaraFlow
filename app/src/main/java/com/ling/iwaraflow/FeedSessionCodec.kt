@@ -8,7 +8,7 @@ internal object FeedSessionCodec {
     fun encode(session: FeedSessionStore.Session): String {
         val start = (session.currentIndex - 2).coerceAtLeast(0)
         val items = session.items.drop(start).take(40)
-        return JSONObject().put("index", session.currentIndex - start).put("page", session.currentPage)
+        return JSONObject().put("start", start).put("end", start + items.size).put("index", session.currentIndex - start).put("page", session.currentPage)
             .put("paging", session.pagingEnabled).put("items", JSONArray(items.map { v ->
                 JSONObject().put("id", v.id).put("title", v.title.take(300)).put("author", v.author.take(120))
                     .put("authorId", v.authorId).put("username", v.authorUsername).put("tags", JSONArray(v.tags.take(30)))

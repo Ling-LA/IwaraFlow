@@ -38,30 +38,30 @@ class SearchRefreshTest {
         try {
             (field(activity, "api").get(activity) as IwaraApi).close(); field(activity, "api").set(activity, api)
             (field(activity, "gate").get(activity) as PlayableVideoGate).close(); field(activity, "gate").set(activity, gate)
-            doAnswer { call -> (call.arguments[2] as (List<VideoItem>) -> Unit)(call.arguments[0] as List<VideoItem>); null }
-                .`when`(gate).inspectAll(anyList(), anyString(), any<(List<VideoItem>) -> Unit>() ?: {})
+            doAnswer { call -> (call.arguments[3] as (List<VideoItem>) -> Unit)(call.arguments[0] as List<VideoItem>); null }
+                .`when`(gate).preview(anyList(), anyString(), any<() -> Unit>() ?: {}, any<(List<VideoItem>) -> Unit>() ?: {})
             doAnswer { call -> requests += Request(call.arguments[0] as String, call.arguments[1] as Int, call.arguments[3] as String,
                 call.arguments[4] as (Result<List<VideoItem>>) -> Unit); null }
                 .`when`(api).searchVideos(anyString(), anyInt(), anyInt(), anyString(), any<(Result<List<VideoItem>>) -> Unit>() ?: {})
             start(activity)
-            requests.last().respond(Result.success(List(24) { VideoItem("old-$it", "animation", "", emptyList(), 1) })); idle()
+            requests.last().respond(Result.success(List(24) { VideoItem("old-$it", "animation", "", emptyList(), 1) })); idle(); awaitSearchResults(activity)
             activity.findViewById<CheckBox>(R.id.searchExcludeSeen).isChecked = true
             activity.findViewById<TextView>(R.id.sortLikes).performClick()
-            requests.last().respond(Result.success(List(24) { VideoItem("liked-$it", "animation", "", emptyList(), 1) })); idle()
+            requests.last().respond(Result.success(List(24) { VideoItem("liked-$it", "animation", "", emptyList(), 1) })); idle(); awaitSearchResults(activity)
             activity.findViewById<TextView>(R.id.searchStatus).performClick()
             val stalePage = requests.last(); assertEquals(1, stalePage.page)
             val selected = SearchQuery(listOf(listOf("animation", "motion")))
             field(activity, "searchPlan").set(activity, selected); field(activity, "queries").set(activity, selected.seeds)
-            invoke(activity, "refreshResults"); idle()
+            invoke(activity, "refreshResults"); idle(); awaitSearchResults(activity)
             val refresh = activity.findViewById<SwipeRefreshLayout>(R.id.searchRefresh)
             assertTrue(refresh.isRefreshing)
             assertEquals(0, requests.last().page); assertEquals(SearchSort.Key.LIKES.api, requests.last().sort)
             assertEquals(selected, field(activity, "searchPlan").get(activity))
             assertTrue(AppPrefs(activity).searchExcludeSeen)
             stalePage.respond(Result.success(listOf(VideoItem("stale", "animation", "", emptyList(), 1))))
-            requests.last().respond(Result.success(listOf(VideoItem("new", "animation", "", emptyList(), 1)))); idle()
+            requests.last().respond(Result.success(listOf(VideoItem("new", "animation", "", emptyList(), 1)))); idle(); awaitSearchResults(activity)
             assertEquals("motion", requests.last().word); assertTrue(refresh.isRefreshing)
-            requests.last().respond(Result.failure(IllegalStateException("temporary failure"))); idle()
+            requests.last().respond(Result.failure(IllegalStateException("temporary failure"))); idle(); awaitSearchResults(activity)
             assertFalse(refresh.isRefreshing)
             val state = field(activity, "videoTab").get(activity)!!
             assertEquals(listOf("new"), (field(state, "items").get(state) as List<VideoItem>).map { it.id })
@@ -78,11 +78,11 @@ class SearchRefreshTest {
             doAnswer { call -> pages += call.arguments[1] as Int; replies += call.arguments[3] as (Result<List<IwaraAuthor>>) -> Unit; null }
                 .`when`(api).searchUsers(anyString(), anyInt(), anyInt(), any<(Result<List<IwaraAuthor>>) -> Unit>() ?: {})
             activity.findViewById<TextView>(R.id.tabAuthors).performClick(); start(activity)
-            replies.last()(Result.success(emptyList())); idle()
+            replies.last()(Result.success(emptyList())); idle(); awaitSearchResults(activity)
             val refresh = activity.findViewById<SwipeRefreshLayout>(R.id.searchRefresh)
             invoke(activity, "refreshResults"); assertTrue(refresh.isRefreshing)
-            replies.last()(Result.failure(IllegalStateException("offline"))); idle(); assertFalse(refresh.isRefreshing)
-            invoke(activity, "refreshResults"); replies.last()(Result.success(emptyList())); idle()
+            replies.last()(Result.failure(IllegalStateException("offline"))); idle(); awaitSearchResults(activity); assertFalse(refresh.isRefreshing)
+            invoke(activity, "refreshResults"); replies.last()(Result.success(emptyList())); idle(); awaitSearchResults(activity)
             assertFalse(refresh.isRefreshing); assertEquals(listOf(0, 0, 0), pages)
             assertEquals("AUTHORS", field(activity, "currentTab").get(activity).toString())
         } finally { controller.pause().stop().destroy() }
@@ -106,9 +106,9 @@ class SearchRefreshTest {
             doAnswer { call -> pages += call.arguments[1] as Int; replies += call.arguments[4] as (Result<List<VideoItem>>) -> Unit; null }
                 .`when`(api).getVideosByTag(anyString(), anyInt(), anyInt(), anyString(), any<(Result<List<VideoItem>>) -> Unit>() ?: {})
             activity.findViewById<TextView>(R.id.tabTags).performClick(); start(activity)
-            replies.last()(Result.success(emptyList())); idle()
+            replies.last()(Result.success(emptyList())); idle(); awaitSearchResults(activity)
             invoke(activity, "refreshResults")
-            replies.last()(Result.success(emptyList())); idle()
+            replies.last()(Result.success(emptyList())); idle(); awaitSearchResults(activity)
             assertEquals(listOf(0, 0), pages)
             assertFalse(activity.findViewById<SwipeRefreshLayout>(R.id.searchRefresh).isRefreshing)
             assertEquals("TAGS", field(activity, "currentTab").get(activity).toString())

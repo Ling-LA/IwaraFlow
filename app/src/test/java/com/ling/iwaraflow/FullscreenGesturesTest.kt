@@ -75,7 +75,8 @@ class FullscreenGesturesTest {
     private fun fixture(block: (VideoAdapter, VideoAdapter.Holder, VideoItem, ExoPlayer) -> Unit) {
         val context = RuntimeEnvironment.getApplication()
         val api = mock(IwaraApi::class.java); `when`(api.isLoggedIn()).thenReturn(true)
-        val adapter = VideoAdapter(api, mock(HistoryStore::class.java), AppPrefs(context), mock(MediaPreloadCache::class.java), { _, _ -> }, {}, {}, {})
+        val history = HistoryStore(context)
+        val adapter = VideoAdapter(api, history, AppPrefs(context), mock(MediaPreloadCache::class.java), { _, _ -> }, {}, {}, {})
         val item = VideoItem("fixture", "测试作品", "作者", emptyList(), 60, liked = true)
         adapter.replace(listOf(item))
         val holder = adapter.onCreateViewHolder(FrameLayout(context), 0); adapter.onBindViewHolder(holder, 0)
@@ -84,7 +85,7 @@ class FullscreenGesturesTest {
         holder.itemView.layout(0, 0, 900, 450)
         val player = mock(ExoPlayer::class.java); `when`(player.playbackState).thenReturn(Player.STATE_READY)
         set(holder, "active", true); set(holder, "player", player)
-        try { block(adapter, holder, item, player) } finally { adapter.releaseAll() }
+        try { block(adapter, holder, item, player) } finally { adapter.releaseAll(); history.close() }
     }
     private fun screenHold(holder: VideoAdapter.Holder) = holder.javaClass.getDeclaredField("screenReactionHold")
         .apply { isAccessible = true }.get(holder) as ScreenReactionHold

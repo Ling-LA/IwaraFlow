@@ -74,6 +74,16 @@ object LocalDataBackup {
                     }
                     require(values.size() > 0)
                     if (target.insertWithOnConflict(table, null, values, SQLiteDatabase.CONFLICT_IGNORE) != -1L) count++
+                    else {
+                        val keys = when (table) {
+                            "favorites" -> listOf("video_id")
+                            "manual_tag_preferences" -> listOf("tag")
+                            else -> listOf("type", "entity_key")
+                        }
+                        val duplicate = target.query(table, arrayOf(keys.first()), keys.joinToString(" AND ") { "$it=?" },
+                            keys.map { values.getAsString(it) }.toTypedArray(), null, null, null, "1").use { it.moveToFirst() }
+                        check(duplicate) { "备份条目未能保存，请检查存储空间后重试" }
+                    }
                 }
             }
             db.setTransactionSuccessful()

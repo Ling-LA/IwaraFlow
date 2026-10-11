@@ -914,7 +914,7 @@ class MainActivityV3 : AppCompatActivity(), PlaybackGuideHost {
     private fun showMainMenu() {
         val account = if (api.isLoggedIn()) "退出 Iwara 登录" else "登录 Iwara"
         // 同步点赞记录和诊断信息都挪进了设置页：主菜单留常用入口就够了。
-        val items = arrayOf(account, "浏览历史", "我的", "已下载", "设置", "重新加载当前流", "打开 Iwara 链接")
+        val items = arrayOf(account, "浏览历史", "我的", "已下载", "设置", "重新加载当前流")
         val dialog = AlertDialog.Builder(this).setTitle("IwaraFlow").setItems(items) { _, which ->
             when (which) {
                 0 -> if (api.isLoggedIn()) { logOut() } else showLoginDialog()
@@ -923,30 +923,9 @@ class MainActivityV3 : AppCompatActivity(), PlaybackGuideHost {
                 3 -> openSavedVideos(SavedVideosActivity.KIND_DOWNLOADS)
                 4 -> showSettingsDialog()
                 5 -> loadFeed(reset = true)
-                6 -> showLinkInput()
             }
         }.create()
         dialog.setOnShowListener { styleDialogButtons(dialog) }; dialog.show()
-    }
-
-    private fun showLinkInput() {
-        val input = EditText(this).apply {
-            hint = "粘贴视频或作者的 Iwara 链接"
-            inputType = InputType.TYPE_CLASS_TEXT or InputType.TYPE_TEXT_VARIATION_URI
-            setPadding(dp(20), dp(12), dp(20), dp(12))
-        }
-        val dialog = AlertDialog.Builder(this).setTitle("打开 Iwara 链接").setView(input)
-            .setNegativeButton("取消", null).setPositiveButton("打开", null).create()
-        dialog.setOnShowListener {
-            dialog.getButton(AlertDialog.BUTTON_POSITIVE).setOnClickListener {
-                val text = input.text.toString()
-                if (IwaraSharedLink.parse(text) == null) { input.error = "请输入有效的视频或作者链接"; return@setOnClickListener }
-                intent.putExtra(IwaraSharedLink.EXTRA_URL, text)
-                dialog.dismiss()
-                consumeSharedLink()
-            }
-        }
-        dialog.show()
     }
 
     /** 手动把官方点赞补进“已看”，方便点赞很多的账号立刻生效。 */

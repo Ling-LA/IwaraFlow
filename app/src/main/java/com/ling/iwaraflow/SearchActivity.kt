@@ -16,6 +16,7 @@ import android.widget.Toast
 import androidx.activity.OnBackPressedCallback
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.appcompat.app.AppCompatActivity
+import androidx.core.widget.doAfterTextChanged
 import androidx.lifecycle.Lifecycle
 import androidx.recyclerview.widget.LinearLayoutManager
 import androidx.recyclerview.widget.RecyclerView
@@ -274,7 +275,18 @@ class SearchActivity : AppCompatActivity(), PlaybackGuideHost {
         onBackPressedDispatcher.addCallback(this, object : OnBackPressedCallback(true) {
             override fun handleOnBackPressed() = handleBack()
         })
-        findViewById<Button>(R.id.searchSubmit).setOnClickListener { runSearch(input.text.toString()) }
+        val submit = findViewById<Button>(R.id.searchSubmit)
+        submit.setOnClickListener { runSearch(input.text.toString()) }
+        input.doAfterTextChanged { text ->
+            val link = IwaraSharedLink.parse(text.toString())
+            submit.text = if (link == null) "搜索" else "打开"
+            submit.contentDescription = when (link?.kind) {
+                IwaraSharedLink.Kind.VIDEO -> "打开 Iwara 视频"
+                IwaraSharedLink.Kind.AUTHOR -> "打开 Iwara 作者主页"
+                null -> "搜索关键词"
+            }
+            input.error = null
+        }
         input.setOnEditorActionListener { _, actionId, _ ->
             if (actionId == EditorInfo.IME_ACTION_SEARCH) { runSearch(input.text.toString()); true } else false
         }
@@ -323,13 +335,32 @@ class SearchActivity : AppCompatActivity(), PlaybackGuideHost {
         input.setText(initial)
         // 从简介页的标签点进来的：直接落在「标签」那一页。
         if (intent.getBooleanExtra(EXTRA_AS_TAG, false)) showTab(Tab.TAGS)
-        if (initial.isNotBlank()) runSearch(initial) else statusView.text = "输入关键词后搜索视频名、标签或作者名"
+        if (initial.isNotBlank()) runSearch(initial) else statusView.text = "输入关键词搜索，或粘贴 Iwara 视频 / 作者链接后打开"
     }
 
     private fun runSearch(raw: String) {
+        if (exiting) return
         val trimmed = raw.trim()
+        // Resolve links before keyword expansion, so share text never becomes a search or interest signal.
+        IwaraSharedLink.parse(trimmed)?.let { link ->
+            hideKeyboard()
+            comments.close()
+            exiting = true
+            feedAdapter.pauseAll()
+            api.cancelPendingRequests(); gate.cancelPending()
+            translationTasks.forEach { it.cancel() }; translationTasks.clear()
+            startActivity(Intent(this, MainActivityV3::class.java)
+                .addFlags(Intent.FLAG_ACTIVITY_CLEAR_TOP or Intent.FLAG_ACTIVITY_SINGLE_TOP)
+                .putExtra(IwaraSharedLink.EXTRA_URL, link.url))
+            finish()
+            return
+        }
+        if (trimmed.contains(Regex("https?://", RegexOption.IGNORE_CASE))) {
+            input.error = "请输入有效的 Iwara 视频或作者主页链接"
+            return
+        }
         if (SearchQuery.terms(trimmed).isEmpty()) {
-            Toast.makeText(this, "请输入搜索关键词", Toast.LENGTH_SHORT).show()
+            Toast.makeText(this, "请输入关键词或 Iwara 链接", Toast.LENGTH_SHORT).show()
             return
         }
         hideKeyboard()

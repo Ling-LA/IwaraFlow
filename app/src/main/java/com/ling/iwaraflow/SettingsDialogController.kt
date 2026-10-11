@@ -15,7 +15,7 @@ import android.widget.Toast
 import androidx.core.content.ContextCompat
 
 /**
- * 设置弹窗：推荐 / 播放 / 默认清晰度 / 网络 / 翻译 / 维护六段，加上自己摆的底部按钮栏。
+ * 设置页面：按功能分组的滚动内容，加上常驻底部的保存 / 取消按钮。
  *
  * 从 [MainActivityV3] 里独立出来的一块：这三百行全是搭界面和存偏好，
  * 和页面的播放、导航、下载没有关系，混在同一个类里只会让那个类更难读。
@@ -31,7 +31,8 @@ class SettingsDialogController(
     private val onSaved: (reload: Boolean) -> Unit,
     private val onSyncLikes: () -> Unit,
     private val onInterestManager: () -> Unit,
-    private val onDiagnostics: () -> Unit
+    private val onDiagnostics: () -> Unit,
+    private val onCheckUpdate: () -> Unit
 ) {
     private fun dp(value: Int): Int = (value * activity.resources.displayMetrics.density).toInt()
 
@@ -237,8 +238,11 @@ class SettingsDialogController(
             onDiagnostics()
         })
 
-        // 多了“维护”这一段，矮屏幕上放不下，内容区要能滚动。
-        // 限高：和主菜单差不多大，内容多出来的部分滚动看，弹窗不顶到屏幕上下沿。
+        panel.addView(sectionTitle("应用信息"))
+        panel.addView(actionRow("检查更新", "检查新版本、查看更新说明并下载安装包。") { onCheckUpdate() })
+        panel.addView(actionRow("关于", "版本、作者和 GitHub 项目地址。") { AboutDialog.show(activity) })
+
+        // 设置分组随页面滚动，保存 / 取消按钮固定在底部。
         PageLayout.styleSections(panel)
         val scroll = ScrollView(activity).apply {
             addView(panel)

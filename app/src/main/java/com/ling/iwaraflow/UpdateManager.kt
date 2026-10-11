@@ -42,6 +42,8 @@ class UpdateManager(private val activity: Activity) {
     private var downloadId = prefs.getLong(KEY_PENDING_DOWNLOAD_ID, -1L)
     private var downloadedUri: Uri? = null
     private var receiverRegistered = false
+    @Volatile private var closed = false
+    private var activeDialog: AlertDialog? = null
 
     data class ReleaseInfo(
         val version: String,
@@ -81,7 +83,8 @@ class UpdateManager(private val activity: Activity) {
     }
 
     fun check(manual: Boolean = true) {
-        val waiting = if (manual) showCheckingDialog() else null
+        if (closed || activity.isFinishing || activity.isDestroyed) return
+        val waiting = if (manual) showCheckingDialog().also { activeDialog = it } else null
         executor.execute {
             val current = currentVersionName()
             val result = runCatching {
@@ -96,6 +99,8 @@ class UpdateManager(private val activity: Activity) {
             result.onFailure { NavigationDiagnostics.note(activity, "检查更新失败：${it.message?.take(200)}") }
             activity.runOnUiThread {
                 waiting?.dismiss()
+                if (activeDialog === waiting) activeDialog = null
+                if (closed || activity.isFinishing || activity.isDestroyed) return@runOnUiThread
                 result.onSuccess { release ->
                     if (isNewer(release.version, current)) showUpdateDialog(release, current)
                     else if (manual) Toast.makeText(activity, "当前已是最新版本 v$current", Toast.LENGTH_SHORT).show()
@@ -294,6 +299,7 @@ class UpdateManager(private val activity: Activity) {
             }
             dialog.getButton(AlertDialog.BUTTON_NEGATIVE)?.setTextColor(0xFF6C879A.toInt())
         }
+        activeDialog = dialog
         dialog.show()
     }
 
@@ -427,6 +433,9 @@ class UpdateManager(private val activity: Activity) {
     private fun dp(value: Int): Int = (value * activity.resources.displayMetrics.density).toInt()
 
     fun close() {
+        closed = true
+        activeDialog?.dismiss()
+        activeDialog = null
         if (receiverRegistered) {
             runCatching { activity.unregisterReceiver(receiver) }
             receiverRegistered = false

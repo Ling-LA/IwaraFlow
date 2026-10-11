@@ -907,7 +907,7 @@ class MainActivityV3 : AppCompatActivity(), PlaybackGuideHost {
     private fun showMainMenu() {
         val account = if (api.isLoggedIn()) "退出 Iwara 登录" else "登录 Iwara"
         // 同步点赞记录和诊断信息都挪进了设置页：主菜单留常用入口就够了。
-        val items = arrayOf(account, "浏览历史", "我的", "已下载", "设置", "检查更新", "重新加载当前流", "关于")
+        val items = arrayOf(account, "浏览历史", "我的", "已下载", "设置", "重新加载当前流")
         val dialog = AlertDialog.Builder(this).setTitle("IwaraFlow").setItems(items) { _, which ->
             when (which) {
                 0 -> if (api.isLoggedIn()) { logOut() } else showLoginDialog()
@@ -915,9 +915,7 @@ class MainActivityV3 : AppCompatActivity(), PlaybackGuideHost {
                 2 -> { adapter.suspendPlayback(); startActivity(Intent(this, MyActivity::class.java)) }
                 3 -> openSavedVideos(SavedVideosActivity.KIND_DOWNLOADS)
                 4 -> showSettingsDialog()
-                5 -> updates.check(manual = true)
-                6 -> loadFeed(reset = true)
-                7 -> AboutDialog.show(this)
+                5 -> loadFeed(reset = true)
             }
         }.create()
         dialog.setOnShowListener { styleDialogButtons(dialog) }; dialog.show()

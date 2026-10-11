@@ -229,11 +229,13 @@ data class PreferenceProfile(
         val pool = (explicit + learned).distinctBy(SearchQuery::canonicalTag)
         if (random == null) return pool.take(count)
         // Sample the whole pool. Neither lexical order nor one saturated tag owns recall slots.
-        return pool.sortedByDescending { tag ->
+        // Draw once per tag: a sort selector is evaluated repeatedly during comparisons.
+        // Drawing inside it changes the ordering mid-sort and can make TimSort throw.
+        return pool.map { tag ->
             val weight = (tagWeights[tag] ?: 0.0).coerceIn(0.0, 8.0) / 8.0 +
                 if (tag in explicit) 1.5 else 1.0
-            kotlin.math.ln(random.nextDouble().coerceAtLeast(1e-12)) / weight
-        }.take(count)
+            tag to (kotlin.math.ln(random.nextDouble().coerceAtLeast(1e-12)) / weight)
+        }.sortedByDescending { it.second }.take(count).map { it.first }
     }
 
     fun topAuthorIds(count: Int, minWeight: Double): List<String> =

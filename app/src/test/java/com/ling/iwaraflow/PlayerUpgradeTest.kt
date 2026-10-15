@@ -17,13 +17,13 @@ import java.util.Random
 @RunWith(RobolectricTestRunner::class)
 @Config(sdk = [36])
 class PlayerUpgradeTest {
-    @Test fun holdRequiresTwoSecondsAndDoesNotClickOnRelease() {
+    @Test fun holdRequiresOneAndAHalfSecondsAndDoesNotClickOnRelease() {
         val view = ImageView(RuntimeEnvironment.getApplication())
         var doubles = 0; var clicks = 0
         view.setOnClickListener { clicks++ }
         val hold = HoldReaction(view, -1) { doubles++ }
         touch(view, MotionEvent.ACTION_DOWN)
-        shadowOf(Looper.getMainLooper()).idleFor(Duration.ofMillis(1999))
+        shadowOf(Looper.getMainLooper()).idleFor(Duration.ofMillis(1499))
         assertEquals(0, doubles)
         shadowOf(Looper.getMainLooper()).idleFor(Duration.ofMillis(1))
         assertEquals(1, doubles)
@@ -41,7 +41,7 @@ class PlayerUpgradeTest {
         HoldReaction(view, -1) { doubles++ }
         HoldReaction(other, -1) { otherDoubles++ }
         touch(view, MotionEvent.ACTION_DOWN)
-        shadowOf(Looper.getMainLooper()).idleFor(Duration.ofMillis(1500))
+        shadowOf(Looper.getMainLooper()).idleFor(Duration.ofMillis(1499))
         touch(view, MotionEvent.ACTION_UP)
         shadowOf(Looper.getMainLooper()).idleFor(Duration.ofSeconds(4))
         assertEquals(0, doubles); assertEquals(0, clicks); assertEquals(0, otherDoubles)
@@ -56,7 +56,7 @@ class PlayerUpgradeTest {
         var completed = 0
         val hold = HoldReaction(like, 0xFFFF365D.toInt(), favorite, 0xFFFFD54F.toInt()) { completed++ }
         touch(like, MotionEvent.ACTION_DOWN)
-        shadowOf(Looper.getMainLooper()).idleFor(Duration.ofMillis(1000))
+        shadowOf(Looper.getMainLooper()).idleFor(Duration.ofMillis(750))
         fun arc(name: String): Pair<Float, Int> {
             val ring = hold.javaClass.getDeclaredField(name).apply { isAccessible = true }.get(hold) as android.graphics.drawable.Drawable
             val canvas = org.mockito.Mockito.mock(android.graphics.Canvas::class.java)
@@ -66,7 +66,9 @@ class PlayerUpgradeTest {
             return (draw.arguments[5] as Float) to (draw.arguments[7] as android.graphics.Paint).color
         }
         val first = arc("ring"); val second = arc("partnerRing")
-        assertEquals(first.first, second.first, .01f); assertEquals(180f, first.first, 2f)
+        assertEquals(first.first, second.first, .01f)
+        // One 16 ms animation frame spans up to 3.84 degrees at 1.5 seconds.
+        assertEquals(180f, first.first, 4f)
         assertEquals(0xFFFF365D.toInt(), first.second); assertEquals(0xFFFFD54F.toInt(), second.second)
         touch(like, MotionEvent.ACTION_CANCEL)
         shadowOf(Looper.getMainLooper()).idleFor(Duration.ofSeconds(4))

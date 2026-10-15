@@ -21,6 +21,10 @@ class DanmakuView(context: Context) : View(context) {
     private val paint = Paint(Paint.ANTI_ALIAS_FLAG).apply { color = -1; setShadowLayer(2f, 1f, 1f, 0xFF000000.toInt()) }
     private val playbackListener = object : Player.Listener {
         override fun onPositionDiscontinuity(oldPosition: Player.PositionInfo, newPosition: Player.PositionInfo, reason: Int) {
+            val fromStart = newPosition.positionMs <= 250L &&
+                (reason == Player.DISCONTINUITY_REASON_AUTO_TRANSITION ||
+                    (reason == Player.DISCONTINUITY_REASON_SEEK && oldPosition.positionMs > newPosition.positionMs))
+            if (fromStart) timeline.reset() else timeline.rebase()
             baseline = newPosition.positionMs
             invalidate()
         }
@@ -32,10 +36,12 @@ class DanmakuView(context: Context) : View(context) {
             field = value
             value?.addListener(playbackListener)
             baseline = value?.currentPosition ?: 0L
+            timeline.rebase()
             if (value == null) cancelTranslations()
         }
-    private var comments = emptyList<String>()
-    private var postedComments = emptyList<String>()
+    private val timeline = DanmakuTimeline()
+    private var comments = emptyList<DanmakuTimeline.Comment>()
+    private var postedComments = emptyList<DanmakuTimeline.Comment>()
     private var baseline = 0L
     private val widths = HashMap<String, Float>()
     private var measuredSize = 0f
@@ -70,17 +76,27 @@ class DanmakuView(context: Context) : View(context) {
     }
     private fun compact(text: String) = android.text.Html.fromHtml(text, 0).toString()
         .replace(Regex("\\s+"), " ").trim().take(90)
+    private fun entry(value: IwaraComment): DanmakuTimeline.Comment? {
+        val text = compact(value.body).takeIf { it.isNotBlank() } ?: return null
+        return DanmakuTimeline.Comment(value.id.ifBlank { "text:$text" }, text)
+    }
     fun setComments(values: List<IwaraComment>) {
         cancelTranslations(); translated.clear()
-        comments = (postedComments + values.map { compact(it.body) }).filter { it.isNotBlank() }.distinct().take(80)
+        comments = (postedComments + values.mapNotNull(::entry)).distinctBy { it.key }.take(80)
+        timeline.setComments(comments)
         widths.clear()
-        baseline = player?.currentPosition ?: 0L
         invalidate()
     }
     fun appendComment(value: IwaraComment) {
-        val text = compact(value.body).takeIf { it.isNotBlank() } ?: return
-        postedComments = (listOf(text) + postedComments.filter { it != text }).take(80)
-        comments = (listOf(text) + comments.filter { it != text }).take(80)
+        val comment = entry(value) ?: return
+        postedComments = (listOf(comment) + postedComments).distinctBy { it.key }.take(80)
+        comments = (listOf(comment) + comments).distinctBy { it.key }.take(80)
+        timeline.setComments(comments)
+        invalidate()
+    }
+    fun restart() {
+        timeline.reset()
+        baseline = player?.currentPosition ?: 0L
         invalidate()
     }
     override fun onDraw(canvas: Canvas) {
@@ -98,22 +114,18 @@ class DanmakuView(context: Context) : View(context) {
             val duration = prefs.danmakuDuration * 1000L
             val clock = (p.currentPosition - baseline).coerceAtLeast(0L)
             canvas.save(); canvas.clipRect(0, paddingTop, width, height - paddingBottom)
-            repeat(lanes) { lane ->
-                val shifted = clock - lane * duration / lanes
-                if (shifted >= 0) {
-                    val cycle = shifted / duration
-                    val text = displayText(comments[((cycle * lanes + lane) % comments.size).toInt()])
-                    val w = widths.getOrPut(text) { paint.measureText(text) }
-                    val fraction = shifted % duration / duration.toFloat()
-                    canvas.drawText(text, horizontalPosition(width.toFloat(), w, fraction), top + line * (lane + 1), paint)
-                }
+            timeline.frames(clock, lanes, duration).forEach { frame ->
+                val text = displayText(frame.comment.text)
+                val w = widths.getOrPut(text) { paint.measureText(text) }
+                canvas.drawText(text, horizontalPosition(width.toFloat(), w, frame.fraction),
+                    top + line * (frame.lane + 1), paint)
             }
             canvas.restore()
         }
-        if (isAttachedToWindow && isShown && prefs.danmakuEnabled && comments.isNotEmpty() && p.isPlaying)
+        if (isAttachedToWindow && isShown && prefs.danmakuEnabled && timeline.hasRemaining() && p.isPlaying)
             postInvalidateOnAnimation()
     }
-    fun clear() { cancelTranslations(); translated.clear(); postedComments = emptyList(); comments = emptyList(); player = null; invalidate() }
+    fun clear() { cancelTranslations(); translated.clear(); postedComments = emptyList(); comments = emptyList(); timeline.clear(); player = null; invalidate() }
     companion object {
         internal fun horizontalPosition(width: Float, textWidth: Float, fraction: Float) =
             width - fraction.coerceIn(0f, 1f) * (width + textWidth)

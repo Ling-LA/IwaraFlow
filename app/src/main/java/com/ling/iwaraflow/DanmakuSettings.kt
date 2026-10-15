@@ -14,7 +14,7 @@ object DanmakuSettings {
             text = "显示评论弹幕"; isChecked = prefs.danmakuEnabled
             setOnCheckedChangeListener { _, value -> prefs.danmakuEnabled = value }
         })
-        panel.addView(TextView(context).apply { text = "当前视频评论从右向左滚动，设置即时保存。" })
+        panel.addView(TextView(context).apply { text = "评论从右向左滚动，每条只显示一次；重新打开视频或从头播放时重新显示。设置即时保存。" })
         panel.addView(CheckBox(context).apply {
             text = "将弹幕翻译为中文"; isChecked = prefs.translateDanmaku
             setOnCheckedChangeListener { _, value -> prefs.translateDanmaku = value }

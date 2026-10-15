@@ -318,7 +318,27 @@ class IwaraApi(context: Context, private val apiRoot: String = DEFAULT_API_ROOT)
             .addQueryParameter("sort", sort)
             .addQueryParameter("page", page.toString())
             .addQueryParameter("limit", limit.coerceAtMost(MAX_PAGE_LIMIT).toString()).build()
-        return parseVideoPage(getJsonObject(url.toString(), optionalAuth = true))
+        return try {
+            parseVideoPage(getJsonObject(url.toString(), optionalAuth = true))
+        } catch (error: ApiHttpException) {
+            // Some unknown tags produce a server error on /videos. Only an explicit
+            // missing-tag response from the official exact-tag endpoint proves zero results.
+            if (error.status in setOf(400, 404, 500) &&
+                tag.split(',').map(String::trim).filter(String::isNotEmpty).take(6).any(::isMissingTag)) emptyList()
+            else throw error
+        }
+    }
+
+    private fun isMissingTag(tag: String): Boolean {
+        val url = "$apiRoot/tags".toHttpUrl().newBuilder().addPathSegment(tag).build()
+        return try {
+            getJsonObject(url.toString(), optionalAuth = true)
+            false
+        } catch (error: ApiHttpException) {
+            error.status == 404 && error.message in setOf("errors.notFound", "errors.tagNotFound")
+        } catch (_: Exception) {
+            false // Offline, rate-limited or malformed lookup responses are not evidence of absence.
+        }
     }
 
     fun getFavoriteVideos(callback: (Result<List<VideoItem>>) -> Unit) {
@@ -594,6 +614,8 @@ class IwaraApi(context: Context, private val apiRoot: String = DEFAULT_API_ROOT)
         }
     }
 
+    private class ApiHttpException(val status: Int, message: String) : IOException(message)
+
     private fun getJsonObject(url: String, optionalAuth: Boolean = false, requireAuth: Boolean = false): JSONObject {
         if (requireAuth && ensureAccessTokenBlocking().isNullOrBlank()) throw IOException("登录已失效，请重新登录")
         val shouldAuthenticate = requireAuth || (optionalAuth && isLoggedIn())
@@ -604,7 +626,7 @@ class IwaraApi(context: Context, private val apiRoot: String = DEFAULT_API_ROOT)
             val raw = response.body?.string().orEmpty()
             if (!response.isSuccessful) {
                 if (response.code == 401 && (optionalAuth || requireAuth)) session.accessToken = null
-                throw IOException(extractMessage(raw, "HTTP ${response.code}"))
+                throw ApiHttpException(response.code, extractMessage(raw, "HTTP ${response.code}"))
             }
             likeRead.set(LikeRead(snapshot, request.header("Authorization") != null,
                 request.url.encodedPath.matches(Regex(".*/video/[^/]+"))))

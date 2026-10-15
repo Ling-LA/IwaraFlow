@@ -152,4 +152,71 @@ class SearchApiTest {
             )
         } finally { api.close() }
     }
+    private fun tagFailureFixture(lookup: MockResponse, listStatus: Int = 500) {
+        server.dispatcher = object : Dispatcher() {
+            override fun dispatch(request: RecordedRequest): MockResponse {
+                requests += request
+                return if (request.requestUrl!!.encodedPath.startsWith("/tags/")) lookup
+                else MockResponse().setResponseCode(listStatus).setBody("""{"message":"errors.serverError"}""")
+            }
+        }
+    }
+
+    @Test fun unknownTagServerErrorBecomesEmptyOnlyAfterConfirmedNotFound() {
+        tagFailureFixture(MockResponse().setResponseCode(404).setBody("""{"message":"errors.notFound"}"""))
+        val api = api()
+        try {
+            assertTrue(api.getVideosByTagBlocking("aa").isEmpty())
+            assertEquals(listOf("/videos", "/tags/aa"), requests.map { it.requestUrl!!.encodedPath })
+        } finally { api.close() }
+    }
+
+    @Test fun existingTagServerFailureRemainsAnError() {
+        tagFailureFixture(MockResponse().setBody("""{"id":"dance","type":"general"}"""))
+        val api = api()
+        try {
+            val failure = runCatching { api.getVideosByTagBlocking("dance") }.exceptionOrNull()
+            assertEquals("errors.serverError", failure?.message)
+        } finally { api.close() }
+    }
+
+    @Test fun unavailableOrMalformedTagLookupDoesNotPretendThereAreNoResults() {
+        listOf(
+            MockResponse().setResponseCode(503).setBody("""{"message":"errors.maintenance"}"""),
+            MockResponse().setResponseCode(404).setBody("<html>gateway not found</html>"),
+            MockResponse().setResponseCode(200).setBody("invalid json")
+        ).forEach { lookup ->
+            tagFailureFixture(lookup)
+            val api = api()
+            try { assertNotNull(runCatching { api.getVideosByTagBlocking("aa") }.exceptionOrNull()) }
+            finally { api.close() }
+        }
+    }
+
+    @Test fun authorizationAndRateLimitFailuresDoNotTriggerMissingTagFallback() {
+        for (status in listOf(401, 403, 429, 503)) {
+            requests.clear()
+            tagFailureFixture(MockResponse().setResponseCode(404).setBody("""{"message":"errors.notFound"}"""), status)
+            val api = api()
+            try {
+                assertNotNull(runCatching { api.getVideosByTagBlocking("aa") }.exceptionOrNull())
+                assertEquals(1, requests.size)
+            } finally { api.close() }
+        }
+    }
+
+    @Test fun aSuccessfulEmptyVideoPageNeedsNoTagLookup() {
+        server.dispatcher = object : Dispatcher() {
+            override fun dispatch(request: RecordedRequest): MockResponse {
+                requests += request
+                return MockResponse().setBody("""{"count":0,"results":[]}""")
+            }
+        }
+        val api = api()
+        try {
+            assertTrue(api.getVideosByTagBlocking("empty").isEmpty())
+            assertEquals(1, requests.size)
+        } finally { api.close() }
+    }
+
 }

@@ -148,6 +148,9 @@ class VideoAdapter(
             // replace 一次，那些位置变化只记正面信号，绝不能被判成“不感兴趣”。
             holders.toList().forEach { if (it.bindingAdapterPosition == activePosition) it.noteSwipedAway() }
         }
+        if (position != activePosition) {
+            holders.toList().forEach { if (it.bindingAdapterPosition == position) it.restartDanmaku() }
+        }
         activePosition = position
         if (!playbackEnabled) return
         claimPlaybackOwnership(this)
@@ -423,6 +426,7 @@ class VideoAdapter(
         fun appendDanmaku(videoId: String, comment: IwaraComment) {
             if (bound?.id == videoId) danmaku.appendComment(comment)
         }
+        fun restartDanmaku() = danmaku.restart()
         private var danmakuLoaded = false
         private var player: ExoPlayer? = null
         private var resumeAfterGuide = false

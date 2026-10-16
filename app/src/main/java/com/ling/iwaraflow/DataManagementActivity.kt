@@ -51,7 +51,7 @@ class DataManagementActivity : AppCompatActivity() {
             val bytes = directory.walkTopDown().filter { it.isFile }.sumOf { it.length() }
             runOnUiThread { size.text = "视频缓存：${DownloadLibrary.formatSize(bytes)}\n低于 256 MiB 可用空间时停止额外缓存，继续在线播放。" }
         }
-        card.addView(page.action("清理未在播放的视频缓存") { cache.clearIdleCache(); Toast.makeText(this, "已安排后台清理，当前视频保留", Toast.LENGTH_SHORT).show() })
+        card.addView(page.action("清理未在播放的视频缓存") { WarmRecommendationStore.clear(this); cache.clearIdleCache(); Toast.makeText(this, "已安排后台清理，当前视频保留", Toast.LENGTH_SHORT).show() })
         val prefs = AppPrefs(this)
         fun budgetChoice(label: String, values: List<Int>, current: () -> Int, apply: (Int) -> Unit) {
             card.addView(page.action(label) {
@@ -88,6 +88,7 @@ class DataManagementActivity : AppCompatActivity() {
         card.addView(page.action("清除浏览历史") { confirm("清除浏览历史", "会清除本机浏览记录与本机已看标记，收藏和兴趣保留。") {
             history.libraryDatabase.delete("history", null, null)
             history.libraryDatabase.delete("seen_videos", "account_id=''", null)
+            WarmRecommendationStore.clear(this)
             "浏览历史已清除"
         } })
         card.addView(page.action("重置系统推荐画像") { confirm("重置系统推荐画像", "会清除系统学习和推荐统计，手动兴趣与屏蔽保留。") {

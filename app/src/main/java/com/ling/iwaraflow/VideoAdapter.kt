@@ -51,6 +51,7 @@ class VideoAdapter(
 ) : RecyclerView.Adapter<VideoAdapter.Holder>() {
 
     var onQuickComment: ((VideoItem) -> Unit)? = null
+    var onUpcomingChanged: ((List<VideoItem>) -> Unit)? = null
     fun appendDanmaku(videoId: String, comment: IwaraComment) {
         holders.forEach { it.appendDanmaku(videoId, comment) }
     }
@@ -152,6 +153,7 @@ class VideoAdapter(
             holders.toList().forEach { if (it.bindingAdapterPosition == position) it.restartDanmaku() }
         }
         activePosition = position
+        onUpcomingChanged?.invoke(items.drop(position + 1).take(2))
         if (!playbackEnabled) return
         claimPlaybackOwnership(this)
         holders.toList().forEach { holder ->
@@ -345,6 +347,7 @@ class VideoAdapter(
                         mediaCache.prefetchFull(it, primary = progress.fraction >= 1.0 && offset == 1)
                     }
                 }
+                onUpcomingChanged?.invoke(items.drop(position + 1).take(2))
                 preloadHandler.postDelayed(this, 1000L)
             }
         }
@@ -1373,11 +1376,16 @@ class VideoAdapter(
 
         private fun showQualityChooser(item: VideoItem, forDownload: Boolean) {
             val cached = item.sources
-            if (!cached.isNullOrEmpty()) { openSourceDialog(item, cached, forDownload); return }
+            if (!cached.isNullOrEmpty() && !item.refreshSourcesForSelection) { openSourceDialog(item, cached, forDownload); return }
+            val bindGeneration = generation
             Toast.makeText(itemView.context, "正在读取清晰度…", Toast.LENGTH_SHORT).show()
             api.resolveSources(item.id) { result ->
                 itemView.post {
-                    result.onSuccess { sources -> item.sources = sources; openSourceDialog(item, sources, forDownload) }
+                    if (released || generation != bindGeneration || bound?.id != item.id) return@post
+                    result.onSuccess { sources ->
+                        item.sources = sources; item.refreshSourcesForSelection = false
+                        openSourceDialog(item, sources, forDownload)
+                    }
                         .onFailure { Toast.makeText(itemView.context, "清晰度获取失败：${it.message}", Toast.LENGTH_SHORT).show() }
                 }
             }

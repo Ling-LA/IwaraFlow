@@ -54,6 +54,16 @@ class MediaPreloadCache(context: Context) {
 
     fun progress(url: String?): Progress = if (url == null) Progress() else jobs[url]?.progress ?: Progress()
 
+    /** Read persisted contiguous bytes, including after the downloading facade/process is gone.
+     * Call only from a worker; cache initialization is bounded so startup can fall back. */
+    internal fun storedProgress(url: String): Progress = runCatching {
+        val state = pending.get(1200, java.util.concurrent.TimeUnit.MILLISECONDS)
+        val key = MediaCacheIdentity.key(url)
+        val length = androidx.media3.datasource.cache.ContentMetadata.getContentLength(state.cache.getContentMetadata(key))
+        val cached = state.cache.getCachedLength(key, 0, if (length > 0) length else Long.MAX_VALUE).coerceAtLeast(0)
+        Progress(length, cached)
+    }.getOrDefault(Progress())
+
     /** At most current + one lookahead transfer. A new owner cancels obsolete requests. */
     @Synchronized fun keepPreloads(urls: Set<String>) {
         desiredUrls = urls.toSet()
@@ -141,17 +151,21 @@ class MediaPreloadCache(context: Context) {
         .setTransferListener(PlaybackMetrics.transfer(androidx.media3.exoplayer.upstream.DefaultBandwidthMeter.getSingletonInstance(appContext)))) }
     private fun hasDiskRoom(): Boolean = appContext.cacheDir.usableSpace > MIN_FREE_BYTES
     fun applyBudget() {
-        if (!pending.isDone) return
-        shared.evictor.budget = prefs.cacheBudgetMb.toLong() * 1024 * 1024
-        clearIdleCache()
+        initExecutor.execute {
+            runCatching { shared }.getOrNull()?.let {
+                it.evictor.resize(it.cache, prefs.cacheBudgetMb.toLong() * 1024 * 1024)
+            }
+        }
     }
     fun cacheBytes(): Long = if (pending.isDone) runCatching { shared.cache.cacheSpace }.getOrDefault(0L) else 0L
     fun clearIdleCache() {
-        if (!pending.isDone) return
-        val state = runCatching { shared }.getOrNull() ?: return
-        state.executor.execute {
-            val protected = state.evictor.owners.values.flatMap { it }.toSet()
-            state.cache.keys.filterNot { it in protected }.forEach { runCatching { state.cache.removeResource(it) } }
+        // Initialization and deletion are ordered; a click during startup must not be lost.
+        initExecutor.execute {
+            val state = runCatching { shared }.getOrNull() ?: return@execute
+            synchronized(state.cache) {
+                val protected = state.evictor.owners.values.flatMap { it }.toSet()
+                state.cache.keys.filterNot { it in protected }.forEach { runCatching { state.cache.removeResource(it) } }
+            }
         }
     }
     fun measuredBytesPerSecond(): Long =
@@ -163,8 +177,11 @@ class MediaPreloadCache(context: Context) {
         if (scheme == "content" || scheme == "file") {
             return localFactory.createMediaSource(MediaItem.fromUri(url))
         }
-        if (!hasDiskRoom() || !pending.isDone) return uncachedFactory.createMediaSource(MediaItem.fromUri(url))
-        return runCatching { shared.mediaSourceFactory.createMediaSource(MediaItem.fromUri(url)) }
+        if (!pending.isDone) return uncachedFactory.createMediaSource(MediaItem.fromUri(url))
+        return runCatching {
+            val factory = if (hasDiskRoom()) shared.mediaSourceFactory else DefaultMediaSourceFactory(shared.readOnlyCacheFactory)
+            factory.createMediaSource(MediaItem.fromUri(url))
+        }
             .getOrElse { uncachedFactory.createMediaSource(MediaItem.fromUri(url)) }
     }
 
@@ -205,6 +222,7 @@ class MediaPreloadCache(context: Context) {
         val evictor: ActiveVideoCacheEvictor,
         val cacheFactory: CacheDataSource.Factory,
         val mediaSourceFactory: DefaultMediaSourceFactory,
+        val readOnlyCacheFactory: CacheDataSource.Factory,
         val executor: ExecutorService
     )
 
@@ -256,6 +274,12 @@ class MediaPreloadCache(context: Context) {
                 evictor = evictor,
                 cacheFactory = cacheFactory,
                 mediaSourceFactory = DefaultMediaSourceFactory(cacheFactory),
+                readOnlyCacheFactory = CacheDataSource.Factory()
+                    .setCache(cache)
+                    .setCacheKeyFactory { spec -> spec.key ?: MediaCacheIdentity.key(spec.uri.toString()) }
+                    .setUpstreamDataSourceFactory(upstreamFactory)
+                    .setCacheWriteDataSinkFactory(null)
+                    .setFlags(CacheDataSource.FLAG_IGNORE_CACHE_ON_ERROR),
                 executor = Executors.newFixedThreadPool(3)
             )
             state = created

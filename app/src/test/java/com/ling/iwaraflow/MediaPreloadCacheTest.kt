@@ -83,4 +83,56 @@ class MediaPreloadCacheTest {
             assertEquals(1.0, cache.progress(current).fraction, 0.0)
         } finally { cache.close() }
     }
+
+    @Test fun changingBudgetPreservesIdleCacheAndReadOnlyPlaybackDoesNotWrite() {
+        val cache = MediaPreloadCache(RuntimeEnvironment.getApplication())
+        val opens = AtomicInteger(); val bytes = ByteArray(256*1024) { 7 }
+        factory(cache).setUpstreamDataSourceFactory { source(bytes, opens, false) }
+        val url = "https://cache.test/budget-${System.nanoTime()}"
+        try {
+            cache.keepPreloads(setOf(url)); cache.prefetchFull(url)
+            waitFor { cache.progress(url).fraction == 1.0 }
+            cache.keepPreloads(emptySet())
+            AppPrefs(RuntimeEnvironment.getApplication()).cacheBudgetMb = 4096
+            cache.applyBudget()
+            // Queue a sentinel after the budget operation on the initialization worker.
+            val executor = MediaPreloadCache::class.java.getDeclaredField("initExecutor").apply { isAccessible = true }.get(null) as java.util.concurrent.ExecutorService
+            executor.submit {}.get(5, TimeUnit.SECONDS)
+            assertEquals(bytes.size.toLong(), cache.storedProgress(url).cached)
+            val state = (field(cache, "pending").get(cache) as Future<*>).get()!!
+            val readonly = (field(state, "readOnlyCacheFactory").get(state) as CacheDataSource.Factory)
+                .setUpstreamDataSourceFactory { source(bytes, opens, false) }
+            fun read(link: String) {
+                val reader = readonly.createDataSource()
+                try {
+                    reader.open(DataSpec.Builder().setUri(link).build())
+                    val buffer = ByteArray(32*1024)
+                    while (reader.read(buffer, 0, buffer.size) != C.RESULT_END_OF_INPUT) {}
+                } finally { reader.close() }
+            }
+            val previous = opens.get()
+            read(url); assertEquals(previous, opens.get())
+            val uncached = "$url-other"
+            read(uncached)
+            assertEquals(previous + 1, opens.get())
+            assertEquals("Low disk playback must not cache newly fetched bytes", 0L, cache.storedProgress(uncached).cached)
+        } finally { cache.close() }
+    }
+
+    @Test fun cacheCleanupRequestedBeforeInitializationIsNotDropped() {
+        val cache = MediaPreloadCache(RuntimeEnvironment.getApplication())
+        val bytes = ByteArray(128*1024) { 9 }
+        factory(cache).setUpstreamDataSourceFactory { source(bytes, AtomicInteger(), false) }
+        val url = "https://cache.test/clear-${System.nanoTime()}"
+        try {
+            cache.keepPreloads(setOf(url)); cache.prefetchFull(url)
+            waitFor { cache.progress(url).fraction == 1.0 }
+            cache.keepPreloads(emptySet())
+            val second = MediaPreloadCache(RuntimeEnvironment.getApplication())
+            try {
+                second.clearIdleCache()
+                waitFor { second.storedProgress(url).cached == 0L }
+            } finally { second.close() }
+        } finally { cache.close() }
+    }
 }

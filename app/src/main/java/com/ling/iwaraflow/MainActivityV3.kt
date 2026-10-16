@@ -80,6 +80,9 @@ class MainActivityV3 : AppCompatActivity(), PlaybackGuideHost {
 
     /** 四个顶部流各自的现场（列表、看到第几条、翻到第几页），见 [FeedSessionStore]。 */
     private val homeFeedSessions = FeedSessionStore()
+    private lateinit var warmQueue: WarmRecommendationStore
+    private var restoringWarmQueue = false
+    private val warmVideoIds = hashSetOf<String>()
 
     /** 预检给出的确定性不可播放原因；这些视频直接播放同样放不了。 */
     private val permanentIssues = setOf("仅限好友观看", "视频仍在处理中", "视频已删除或不存在", "没有观看权限")
@@ -171,6 +174,7 @@ class MainActivityV3 : AppCompatActivity(), PlaybackGuideHost {
         recommender = RecommendationEngine(api, history).apply { classicsEvery = prefs.classicsEvery }
         playableGate = PlayableVideoGate(api)
         mediaCache = MediaPreloadCache(this)
+        warmQueue = WarmRecommendationStore(this)
         updates = UpdateManager(this)
         likedSync = LikedVideoSync(api, history, prefs)
 
@@ -195,6 +199,7 @@ class MainActivityV3 : AppCompatActivity(), PlaybackGuideHost {
             onDisliked = { item, _ -> afterDislike(item) },
             onFullscreen = { _, enabled -> setFullscreen(enabled) }
         )
+        adapter.onUpcomingChanged = { upcoming -> if (mode == "recommend") warmQueue.save(upcoming) }
         pager.adapter = adapter
         topBar.addOnLayoutChangeListener { _, _, _, _, bottom, _, _, _, _ ->
             adapter.setOverlayTopInset(bottom + dp(8))
@@ -216,7 +221,7 @@ class MainActivityV3 : AppCompatActivity(), PlaybackGuideHost {
             // 简介里写清楚这条是怎么被推荐出来的；别的流（最新 / 流行 / 人气）没有理由可写。
             reasonFor = { videoId ->
                 if (mode != "recommend") null
-                else recommender.reasonFor(videoId)?.let { reason ->
+                else (recommender.reasonFor(videoId) ?: if (videoId in warmVideoIds) "上次预缓存的推荐" else null)?.let { reason ->
                     // 调试模式：理由下面再附上这条视频的分是怎么算出来的。
                     if (!prefs.recommendDebug) reason
                     else reason + (recommender.explain(videoId)?.let { "\n$it" }.orEmpty())
@@ -230,7 +235,7 @@ class MainActivityV3 : AppCompatActivity(), PlaybackGuideHost {
                 // 翻到下一条了，上一条的评论就不该还挂着。
                 comments.close()
                 adapter.setActive(position)
-                if (pagingEnabled && position >= adapter.itemCount - 5) loadMore()
+                if (!restoringWarmQueue && pagingEnabled && position >= adapter.itemCount - 5) loadMore()
                 // 每翻几页按最新画像重排一次还没展示的候选。
                 if (mode == "recommend" && ++pagesSinceRerank >= RERANK_EVERY_PAGES) rerankQueue()
             }
@@ -250,12 +255,38 @@ class MainActivityV3 : AppCompatActivity(), PlaybackGuideHost {
                 listOf(R.id.tabRecommend to "recommend", R.id.tabLatest to "date", R.id.tabTrending to "trending", R.id.tabPopular to "popularity").forEach { (id, value) ->
                     findViewById<TextView>(id).setTextColor(if (value == mode) -1 else 0x99FFFFFF.toInt())
                 }
-            } else loadFeed(reset = true)
+            } else restoreWarmRecommendations()
         }
         // 官方点赞的完整同步放在首屏之后，避免和冷启动抢网络。
         window.decorView.postDelayed({ if (!isFinishing && !isDestroyed) likedSync.syncIfStale() }, 2500L)
         // 兜底：即使首屏加载失败，也仍然会检查更新。正常情况下首屏出来后会更早触发。
         window.decorView.postDelayed({ runLaunchUpdateCheck() }, 9000L)
+    }
+
+    private fun restoreWarmRecommendations() {
+        if (!warmQueue.available()) { loadFeed(reset = true); return }
+        loading.visibility = View.VISIBLE
+        val serial = requestSerial
+        val delivered = java.util.concurrent.atomic.AtomicBoolean(false)
+        fun finish(items: List<VideoItem>) {
+            if (isFinishing || isDestroyed || serial != requestSerial || !delivered.compareAndSet(false, true)) return
+            if (items.isEmpty()) { loadFeed(reset = true); return }
+            mode = "recommend"
+            feedSession = java.util.UUID.randomUUID().toString()
+            adapter.impressionSession = feedSession
+            warmVideoIds.addAll(items.map { it.id })
+            consumedCandidates.addAll(items.map { it.id })
+            restoringWarmQueue = true
+            restoreHomeSession(FeedSessionStore.Session(items, 0, 0, true))
+            note("启动复用预缓存推荐 ${items.size} 条")
+            window.decorView.postDelayed({
+                restoringWarmQueue = false
+                if (!isFinishing && !isDestroyed && requestSerial == serial && mode == "recommend" && lifecycle.currentState.isAtLeast(Lifecycle.State.RESUMED)) loadMore()
+            }, 1500L)
+        }
+        warmQueue.restore(mediaCache, ::finish)
+        // A slow or damaged Keystore/cache must not stall the normal startup path.
+        window.decorView.postDelayed({ finish(emptyList()) }, 1800L)
     }
 
     /** 启动检查更新不和首屏视频抢冷启动的网络。 */
@@ -424,6 +455,8 @@ class MainActivityV3 : AppCompatActivity(), PlaybackGuideHost {
 
     private fun loadFeed(reset: Boolean) {
         if (reset) {
+            restoringWarmQueue = false
+            if (mode == "recommend") { WarmRecommendationStore.clear(this); warmVideoIds.clear() }
             currentPage = 0
             emptyRefills = 0
             consumedCandidates.clear()
@@ -1320,6 +1353,7 @@ class MainActivityV3 : AppCompatActivity(), PlaybackGuideHost {
     }
 
     override fun onStop() {
+        if (mode == "recommend") warmQueue.save(adapter.items.drop(pager.currentItem + 1).take(2))
         if (openingInternalPage || !isInPictureInPictureMode) adapter.pauseAll()
         super.onStop()
     }

@@ -137,7 +137,9 @@ data class VideoItem(
     /** Playback intent survives temporary page suspension and player recreation. */
     var resumePlayWhenReady: Boolean = true,
     /** Which account supplied this personal status; prevents restoring another account's heart. */
-    var likeStateAccount: String? = null
+    var likeStateAccount: String? = null,
+    /** Warm startup can use cached bytes immediately; choices refresh their signed URLs on demand. */
+    var refreshSourcesForSelection: Boolean = false
 )
 
 data class LoginResult(

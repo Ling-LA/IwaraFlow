@@ -3,6 +3,7 @@ package com.ling.iwaraflow
 import android.content.Context
 
 class AppPrefs(context: Context) {
+    private val appContext = context.applicationContext
     internal val likeStates = VideoLikeStore(context.applicationContext)
     private val prefs = context.getSharedPreferences(FILE, Context.MODE_PRIVATE)
 
@@ -30,11 +31,17 @@ class AppPrefs(context: Context) {
         set(value) = prefs.edit().putBoolean("preload_metered", value).apply()
     var isolateInterests: Boolean
         get() = prefs.getBoolean("isolate_interests", false)
-        set(value) { prefs.edit().putBoolean("isolate_interests", value).apply() }
+        set(value) {
+            if (value != isolateInterests) WarmRecommendationStore.clear(appContext)
+            prefs.edit().putBoolean("isolate_interests", value).apply()
+        }
 
     var isolateLibrary: Boolean
         get() = prefs.getBoolean("isolate_library", false)
-        set(value) = prefs.edit().putBoolean("isolate_library", value).apply()
+        set(value) {
+            if (value != isolateLibrary) WarmRecommendationStore.clear(appContext)
+            prefs.edit().putBoolean("isolate_library", value).apply()
+        }
     var cacheBudgetMb: Int
         get() = prefs.getInt("cache_budget_mb", 2048).coerceIn(256, 8192)
         set(value) = prefs.edit().putInt("cache_budget_mb", value.coerceIn(256, 8192)).apply()
@@ -44,7 +51,10 @@ class AppPrefs(context: Context) {
 
     var privateBrowsing: Boolean
         get() = prefs.getBoolean("private_browsing", false)
-        set(value) = prefs.edit().putBoolean("private_browsing", value).apply()
+        set(value) {
+            prefs.edit().putBoolean("private_browsing", value).apply()
+            if (value) WarmRecommendationStore.clear(appContext)
+        }
     var danmakuDensity: Int
         get() = prefs.getInt("danmaku_density", 3).coerceIn(1, 6)
         set(value) = prefs.edit().putInt("danmaku_density", value.coerceIn(1, 6)).apply()
@@ -130,7 +140,10 @@ class AppPrefs(context: Context) {
      */
     var accountId: String
         get() = prefs.getString(KEY_ACCOUNT_ID, "").orEmpty()
-        set(value) = prefs.edit().putString(KEY_ACCOUNT_ID, value).apply()
+        set(value) {
+            if (value != accountId) WarmRecommendationStore.clear(appContext)
+            prefs.edit().putString(KEY_ACCOUNT_ID, value).apply()
+        }
 
     /**
      * 点一下画面是不是暂停播放。关掉之后点一下只在「信息栏 / 操作栏」和

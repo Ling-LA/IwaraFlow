@@ -20,6 +20,8 @@ internal class ActiveVideoCacheEvictor(@Volatile var budget: Long) : CacheEvicto
     override fun onSpanTouched(cache: Cache, oldSpan: CacheSpan, newSpan: CacheSpan) {
         spans.remove(oldSpan); spans.add(newSpan); evict(cache, 0)
     }
+    /** Called under the cache monitor, just like all CacheEvictor callbacks. */
+    fun resize(cache: Cache, limit: Long) { synchronized(cache) { budget = limit; evict(cache, 0) } }
     private fun evict(cache: Cache, incoming: Long) {
         val protected = owners.values.flatMap { it }.toHashSet()
         while (bytes + incoming > budget) {

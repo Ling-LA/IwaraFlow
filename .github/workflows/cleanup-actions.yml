@@ -2,7 +2,7 @@ name: Clean old builds
 
 on:
   workflow_run:
-    workflows: [Build APK]
+    workflows: [Build APK, Record Android 16 promo]
     types: [completed]
   schedule:
     # Daily at 03:17 China Standard Time; also catches interrupted cleanup runs.
@@ -36,7 +36,7 @@ jobs:
           persist-credentials: false
       - name: Test retention policy
         run: python3 -m unittest discover -s scripts -p 'test_cleanup_actions.py' -v
-      - name: Keep the latest 50 APK builds
+      - name: Keep the latest 50 build runs
         env:
           GH_TOKEN: ${{ github.token }}
           DRY_RUN: ${{ github.event_name == 'workflow_dispatch' && inputs.dry_run && 'true' || 'false' }}

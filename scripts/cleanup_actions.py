@@ -1,4 +1,4 @@
-"""Keep 50 APK builds and one maintenance run; never touch Releases."""
+"""Keep 50 APK/promo builds and one maintenance run; never touch Releases."""
 
 import datetime
 import json
@@ -8,7 +8,8 @@ import urllib.error
 import urllib.request
 
 
-POLICIES = {"build-apk.yml": 50, "cleanup-actions.yml": 1}
+BUILD_PATHS = frozenset({".github/workflows/build-apk.yml", ".github/workflows/record-promo.yml"})
+CLEANUP_WORKFLOW = "cleanup-actions.yml"
 
 
 def select_old_runs(runs, keep, current_run_id):
@@ -56,11 +57,11 @@ class GitHub:
                 delay = 2 ** attempt
             time.sleep(delay)
 
-    def list_runs(self, workflow_id):
+    def list_runs(self):
         runs = []
         page = 1
         while True:
-            result = self.request(f"workflows/{workflow_id}/runs?per_page=100&page={page}")
+            result = self.request(f"runs?per_page=100&page={page}")
             batch = result["workflow_runs"]  # Invalid/incomplete responses must abort cleanup.
             runs.extend(batch)
             if len(batch) < 100:
@@ -69,39 +70,48 @@ class GitHub:
 
 
 def cleanup(api, current_run_id, dry_run, log=print, pause=time.sleep):
+    workflow = api.request(f"workflows/{CLEANUP_WORKFLOW}")
+    cleanup_path = f".github/workflows/{CLEANUP_WORKFLOW}"
+    if not workflow or workflow["path"] != cleanup_path:
+        raise ValueError("Unexpected or missing cleanup workflow")
+    cleanup_id = int(workflow["id"])
+    all_runs = api.list_runs()
+    # Only these two explicitly approved build workflows share the 50-run limit.
+    # Other workflows are ignored, including any added in the future.
+    builds = [run for run in all_runs if run.get("path") in BUILD_PATHS]
+    maintenance = [run for run in all_runs if run.get("path") == cleanup_path]
+    if any(int(run["workflow_id"]) != cleanup_id for run in maintenance):
+        raise ValueError("Cleanup workflow scope mismatch")
+    if any(int(run["workflow_id"]) <= 0 for run in builds):
+        raise ValueError("Invalid build workflow ID")
     plans = []
-    # Resolve and validate both workflows before any destructive requests.
-    for filename, keep in POLICIES.items():
-        workflow = api.request(f"workflows/{filename}")
-        if not workflow or workflow["path"] != f".github/workflows/{filename}":
-            raise ValueError(f"Unexpected or missing workflow: {filename}")
-        workflow_id = int(workflow["id"])
-        runs = api.list_runs(workflow_id)
-        if any(int(run["workflow_id"]) != workflow_id for run in runs):
-            raise ValueError("Workflow scope mismatch")
+    # Validate both complete snapshots before any destructive requests.
+    for label, keep, runs in [("APK/promo builds", 50, builds), (CLEANUP_WORKFLOW, 1, maintenance)]:
         old = select_old_runs(runs, keep, current_run_id)
-        plans.append((filename, workflow_id, old))
-        log(f"{filename}: {len(runs)} runs, keep newest {keep}, {len(old)} old completed runs")
+        plans.append((label, old))
+        log(f"{label}: {len(runs)} runs, keep newest {keep}, {len(old)} old completed runs")
 
     deleted = 0
-    for filename, workflow_id, old in plans:
+    for label, old in plans:
         for run in old:
             run_id = int(run["id"])
+            workflow_id = int(run["workflow_id"])
             if dry_run:
-                log(f"Would delete {filename} run {run_id} ({run['created_at']})")
+                log(f"Would delete {label} run {run_id} ({run['created_at']})")
                 continue
             # A previously completed run might have been re-run since the snapshot.
             fresh = api.request(f"runs/{run_id}")
             if fresh is None:
                 continue
-            if int(fresh["id"]) != run_id or int(fresh["workflow_id"]) != workflow_id:
+            if (int(fresh["id"]) != run_id or int(fresh["workflow_id"]) != workflow_id
+                    or fresh.get("path") != run["path"]):
                 raise ValueError("Run scope changed; refusing deletion")
             if fresh["status"] != "completed":
                 log(f"Skipped active run {run_id}; retry at next cleanup")
                 continue
             api.request(f"runs/{run_id}", method="DELETE")
             deleted += 1
-            log(f"Deleted {filename} run {run_id}")
+            log(f"Deleted {label} run {run_id}")
             pause(1)  # Space mutating requests to avoid secondary rate limits.
     return deleted
 
@@ -110,7 +120,7 @@ def main():
     api = GitHub(os.environ["GH_TOKEN"], os.environ["GITHUB_REPOSITORY"])
     dry_run = os.environ.get("DRY_RUN", "true").lower() == "true"
     deleted = cleanup(api, int(os.environ["GITHUB_RUN_ID"]), dry_run)
-    summary = f"Cleanup finished: dry_run={dry_run}, deleted={deleted}. APK builds retained: newest 50; active runs deferred.\n"
+    summary = f"Cleanup finished: dry_run={dry_run}, deleted={deleted}. APK/promo builds retained: newest 50; active runs deferred.\n"
     print(summary)
     if os.environ.get("GITHUB_STEP_SUMMARY"):
         with open(os.environ["GITHUB_STEP_SUMMARY"], "a", encoding="utf-8") as output:

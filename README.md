@@ -469,7 +469,7 @@ build-apk.bat assembleRelease
 >
 > 因此涉及应用发布的 `main` 推送必须同时提高 `versionCode` 与 `versionName`。仅修改文档或 CI 维护配置时可在提交信息中使用 `[skip ci]`，跳过 APK 构建与发布。
 
-Actions 自动清理：`Clean old builds` 在每次 `Build APK` 结束后执行，并在北京时间每天 03:17 补查。按创建时间保留最新 **50 次 APK 构建**（包括成功、失败和取消的构建），删除超出的旧构建及其日志、Artifacts；仍在运行的旧任务留到下次处理。清理流程自身仅保留最近 1 次，不占用这 50 次构建名额。GitHub Releases 中的正式安装包继续保留。
+Actions 自动清理：`Clean old builds` 在每次 APK 构建或宣传视频任务结束后执行，并在北京时间每天 03:17 补查。按创建时间合并保留 `build-apk.yml` 和 `record-promo.yml` 的最新 **50 条构建记录**（包括成功、失败和取消的构建），删除超出的旧记录及其日志、Artifacts；仍在运行的旧任务留到下次处理。清理流程自身仅保留最近 1 次，不占用这 50 条名额。其他工作流和 GitHub Releases 中的正式安装包继续保留。
 
 需要手动检查时，在 Actions → `Clean old builds` → Run workflow 运行；默认 `dry_run` 仅预览，取消勾选后执行清理。清理策略的本地测试：`python -m unittest discover -s scripts -p 'test_cleanup_actions.py' -v`。
 

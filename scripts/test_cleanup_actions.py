@@ -5,7 +5,9 @@ from cleanup_actions import GitHub, cleanup, select_old_runs
 
 
 def run(run_id, workflow_id=1, status="completed"):
+    filename = {1: "build-apk.yml", 2: "cleanup-actions.yml", 3: "record-promo.yml", 4: "unrelated.yml"}[workflow_id]
     return {"id": run_id, "workflow_id": workflow_id, "status": status,
+            "path": f".github/workflows/{filename}",
             "created_at": "2026-10-22T00:00:00Z"}
 
 
@@ -16,8 +18,8 @@ class FakeAPI:
         self.deleted = []
         self.refreshed = {}
 
-    def list_runs(self, workflow_id):
-        return self.builds if workflow_id == 1 else self.maintenance
+    def list_runs(self):
+        return self.builds + self.maintenance
 
     def request(self, path, method="GET"):
         if method == "DELETE":
@@ -84,14 +86,33 @@ class RetentionTests(unittest.TestCase):
 
     def test_incomplete_listing_aborts_before_any_deletion(self):
         api = FakeAPI()
-        api.maintenance = [{"id": 1001, "workflow_id": 2}]
+        api.maintenance = [{"id": 1001, "workflow_id": 2, "path": ".github/workflows/cleanup-actions.yml"}]
         with self.assertRaises(KeyError):
             self.clean(api)
         self.assertEqual([], api.deleted)
 
-    def test_workflow_scope_mismatch_aborts_before_any_deletion(self):
+    def test_invalid_workflow_id_aborts_before_any_deletion(self):
         api = FakeAPI()
-        api.builds[0]["workflow_id"] = 3
+        api.builds[0]["workflow_id"] = 0
+        with self.assertRaises(ValueError):
+            self.clean(api)
+        self.assertEqual([], api.deleted)
+
+    def test_promo_builds_share_the_fifty_run_limit(self):
+        api = FakeAPI(49)
+        api.builds.extend([run(50, 3), run(51, 3)])
+        self.clean(api)
+        self.assertEqual([1, 1001], api.deleted)
+
+    def test_unrelated_workflows_are_neither_counted_nor_deleted(self):
+        api = FakeAPI(50)
+        api.builds.extend([run(0, 4), run(900, 4)])
+        self.clean(api)
+        self.assertEqual([1001], api.deleted)
+
+    def test_changed_workflow_path_cannot_be_deleted(self):
+        api = FakeAPI()
+        api.refreshed[1] = dict(run(1), path=".github/workflows/unrelated.yml")
         with self.assertRaises(ValueError):
             self.clean(api)
         self.assertEqual([], api.deleted)
@@ -109,8 +130,8 @@ class RetentionTests(unittest.TestCase):
             {"workflow_runs": [run(i) for i in range(100)]},
             {"workflow_runs": [run(100)]},
         ]) as request:
-            self.assertEqual(101, len(api.list_runs(1)))
-        self.assertEqual("workflows/1/runs?per_page=100&page=2", request.call_args.args[0])
+            self.assertEqual(101, len(api.list_runs()))
+        self.assertEqual("runs?per_page=100&page=2", request.call_args.args[0])
 
     def test_other_repositories_are_rejected(self):
         with self.assertRaises(ValueError):

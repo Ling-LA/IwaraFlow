@@ -199,8 +199,12 @@ class RecommendationEngine(
             // 没看过的不够就再抽几轮。每轮抽的都是存档里别的页，不是往后走一页——
             // 存量有好几千页，挪一页解决不了任何问题。
             var round = 1
-            while (buckets.fresh.size < MIN_FRESH_CANDIDATES && round <= MAX_EXTRA_ROUNDS) {
-                val extraDeadline = System.nanoTime() + TimeUnit.MILLISECONDS.toNanos(listBudgetMs)
+            while (round <= MAX_EXTRA_ROUNDS && (buckets.fresh.size < MIN_FRESH_CANDIDATES ||
+                    (round == 1 && System.nanoTime() < deadline && needsPersonalizedRefill(merged, buckets.fresh)))) {
+                // Optional quality refill shares the first batch's budget. Only a
+                // genuinely undersized feed may use the existing extra-round budget.
+                val extraDeadline = if (buckets.fresh.size >= MIN_FRESH_CANDIDATES) deadline
+                    else System.nanoTime() + TimeUnit.MILLISECONDS.toNanos(listBudgetMs)
                 val before = merged.size
                 mergeRound(pool, merged, subscribed, round = round, deadline = extraDeadline)
                 round += 1
@@ -298,7 +302,17 @@ class RecommendationEngine(
      * 一次请求：某个榜单（或订阅流 / 标签召回 / 作者召回）的某一页。
      * [sort] 以 [TAG_PREFIX] / [AUTHOR_PREFIX] 开头时是个性化召回；[month] 非空时是按月点赞榜。
      */
-    internal data class PageRequest(val sort: String, val page: Int, val weight: Double, val month: String = "")
+    internal data class PageRequest(val sort: String, val page: Int, val weight: Double,
+        val month: String = "", val tagSort: String = "date")
+
+    private fun needsPersonalizedRefill(merged: Map<String, RecommendationCandidate>, fresh: List<VideoItem>): Boolean {
+        val personalized = merged.values.filter { it.matchedTags.isNotEmpty() || it.matchedAuthorId.isNotBlank() }
+            .mapTo(HashSet()) { it.item.id }
+        // A long-time user can exhaust the first interest pages while global charts
+        // still supply plenty of unseen, unrelated videos. Refill once in that case.
+        // Failed/empty personalized sources do not trigger an additional startup wait.
+        return personalized.size >= MIN_FRESH_CANDIDATES && fresh.count { it.id in personalized } < 6
+    }
 
     /**
      * 这一轮抓哪几页。第 0 轮保证有各榜单的首页（新内容还是要优先，冷启动也要快），
@@ -306,12 +320,24 @@ class RecommendationEngine(
      *
      * 第 0 轮还带上：本月 / 上月的点赞榜（近期里真正受欢迎的作品，不然近期候选大多是
      * 按时间随机抽到的、点赞很少的视频）、热门榜首页之外再抽一页，以及按画像做的
-     * 个性化召回——权重最高的标签和作者各拉一页。
+     * 个性化召回——按权重抽取标签，分别拉高赞和近期作品，同时补充高分作者。
      */
     internal fun requestsFor(round: Int): List<PageRequest> {
         val requests = ArrayList<PageRequest>()
         val loggedIn = api.isLoggedIn()
         if (round == 0) { sampledPages = emptyList(); recallNote = "" }
+        val tags = profile.topTags(RECALL_TAGS, RECALL_TAG_MIN_WEIGHT, random)
+        val authors = profile.topAuthorIds(RECALL_AUTHORS, RECALL_AUTHOR_MIN_WEIGHT)
+        tags.forEach { tag ->
+            // Both recent uploads and well-liked work within the actual interest.
+            // Later rounds leave the two latest pages instead of falling back only
+            // to unrelated global archives after those pages have been watched.
+            listOf("likes", "date").forEach { order ->
+                val page = if (round == 0) random.nextInt(2) else 2 + random.nextInt(6)
+                requests += PageRequest(TAG_PREFIX + tag, page, 2.8, tagSort = order)
+            }
+        }
+        authors.forEach { requests += PageRequest(AUTHOR_PREFIX + it, if (round == 0) 0 else round, 2.5) }
         if (round == 0) {
             if (loggedIn) requests += PageRequest(SUBSCRIBED, 0, SUBSCRIBED_WEIGHT)
             RANKINGS.forEach { (sort, weight) -> requests += PageRequest(sort, 0, weight) }
@@ -321,10 +347,6 @@ class RecommendationEngine(
                     requests += PageRequest("likes", random.nextInt(MONTH_TOP_PAGES), if (index == 0) 2.8 else 2.4, month = month)
                 }
             }
-            val tags = profile.topTags(RECALL_TAGS, RECALL_TAG_MIN_WEIGHT, random)
-            val authors = profile.topAuthorIds(RECALL_AUTHORS, RECALL_AUTHOR_MIN_WEIGHT)
-            tags.forEach { requests += PageRequest(TAG_PREFIX + it, random.nextInt(2), 2.4) }
-            authors.forEach { requests += PageRequest(AUTHOR_PREFIX + it, 0, 2.3) }
             if (tags.isNotEmpty() || authors.isNotEmpty()) {
                 recallNote = "标签 ${tags.joinToString(",")} 作者 ${authors.size} 位"
             }
@@ -406,7 +428,7 @@ class RecommendationEngine(
                     request.sort == SUBSCRIBED -> api.getSubscribedVideoPageBlocking(request.page, PAGE_SIZE)
                     request.month.isNotBlank() -> api.getMonthTopBlocking(request.month, request.page, PAGE_SIZE)
                     request.sort.startsWith(TAG_PREFIX) ->
-                        VideoListPage(api.getVideosByTagBlocking(request.sort.removePrefix(TAG_PREFIX), request.page, PAGE_SIZE), -1)
+                        VideoListPage(api.getVideosByTagBlocking(request.sort.removePrefix(TAG_PREFIX), request.page, PAGE_SIZE, request.tagSort), -1)
                     request.sort.startsWith(AUTHOR_PREFIX) ->
                         VideoListPage(api.getAuthorVideosBlocking(request.sort.removePrefix(AUTHOR_PREFIX), request.page, PAGE_SIZE), -1)
                     else -> api.getVideoListPageBlocking(request.sort, page = request.page, limit = PAGE_SIZE)
@@ -417,10 +439,15 @@ class RecommendationEngine(
         // misses the budget is treated like the failures this merge already tolerates.
         sources.forEach { (request, future) ->
             val remaining = deadline - System.nanoTime()
-            val response = (if (remaining <= 0L) null
-            else runCatching { future.get(remaining, TimeUnit.NANOSECONDS) }
+            val response = runCatching {
+                when {
+                    future.isDone -> future.get()
+                    remaining > 0L -> future.get(remaining, TimeUnit.NANOSECONDS)
+                    else -> null
+                }
+            }
                 .onFailure { lastFailure = (it as? java.util.concurrent.ExecutionException)?.cause ?: it }
-                .getOrNull()) ?: return@forEach
+                .getOrNull() ?: return@forEach
             if (request.month.isNotBlank()) {
                 // 过滤没生效时回来的是全站总榜（几十万条），那批常年霸榜的老片不能混进来。
                 if (response.total < 0 || response.total > MONTH_FILTER_MAX_TOTAL) { monthFilterSupported = false; return@forEach }
@@ -453,6 +480,7 @@ class RecommendationEngine(
                 }
             }
         }
+        sources.forEach { (_, future) -> if (!future.isDone) future.cancel(true) }
     }
 
     private fun rank(merged: Map<String, RecommendationCandidate>): List<VideoItem> = ranker.rank(merged)
@@ -623,7 +651,7 @@ class RecommendationEngine(
          */
         internal const val RECENT_MAX_AGE_MS = RecommendationRanker.RECENT_MAX_AGE_MS
         internal const val CLASSIC_MIN_AGE_MS = RecommendationRanker.CLASSIC_MIN_AGE_MS
-        /** 老片排序里口味占的比重：比主流里的 0.38 更重，老片本来就该挑合口味的。 */
+        /** 老片与主流采用一致的兴趣系数，由排序器统一维护。 */
         internal const val CLASSIC_TASTE_WEIGHT = RecommendationRanker.CLASSIC_TASTE_WEIGHT
         /** 多样性重排：和最近几条比、最多往后看几条、名次代价、相似度惩罚。 */
         internal const val SIMILARITY_WINDOW = RecommendationRanker.SIMILARITY_WINDOW

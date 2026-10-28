@@ -38,6 +38,6 @@ class RecallTagSamplingTest {
         val random = Random(42)
         val favored = (0 until 2000).count { profile.topTags(1, 0.5, random).single() == "favored" }
         assertTrue("Interest should have more opportunities, while other topics remain reachable: $favored",
-            favored in 1200..1600)
+            favored in 1700..1850)
     }
 }

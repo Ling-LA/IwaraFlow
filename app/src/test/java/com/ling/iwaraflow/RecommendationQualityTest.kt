@@ -31,12 +31,12 @@ class RecommendationQualityTest {
         assertTrue("点赞率高的分数高", good > poor)
     }
 
-    @Test fun absoluteCountsStillMatterButLessThanBefore() {
+    @Test fun absoluteLikesHaveAMeaningfulButBoundedAdvantage() {
         val e = engine()
         val popular = e.qualityScore(likes = 2_000, views = 20_000)
         val small = e.qualityScore(likes = 20, views = 200)
         assertTrue(popular > small)
-        assertTrue("差距不该像纯点赞数那样悬殊", popular - small < 4.5)
+        assertTrue("高赞应有明显优势，但不能无限压过个人兴趣", popular - small in 4.5..6.0)
         assertEquals("没有任何数据时打 0 分", 0.0, e.qualityScore(0, 0), 1e-9)
     }
 

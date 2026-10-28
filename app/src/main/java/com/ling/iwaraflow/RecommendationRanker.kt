@@ -100,11 +100,17 @@ class RecommendationRanker(private val random: Random = Random()) {
     internal fun weightedOrder(items: List<VideoItem>, taste: PreferenceProfile, now: Long): List<VideoItem> =
         weightedOrderBy(items) { scoreOf(it, taste, now) }
 
-    private fun weightedOrderBy(items: List<VideoItem>, score: (VideoItem) -> Double): List<VideoItem> =
-        items.map { item ->
-            val weight = samplingWeight(score(item))
+    private fun weightedOrderBy(items: List<VideoItem>, score: (VideoItem) -> Double): List<VideoItem> {
+        if (items.isEmpty()) return items
+        val scored = items.map { it to score(it) }
+        // Scores share a sizeable source/quality baseline. Centering keeps that baseline
+        // from saturating every probability and erasing the actual preference differences.
+        val center = scored.map { it.second }.sorted()[scored.size / 2]
+        return scored.map { (item, value) ->
+            val weight = samplingWeight(value - center)
             item to (kotlin.math.ln(random.nextDouble().coerceAtLeast(1e-12)) / weight)
         }.sortedByDescending { it.second }.map { it.first }
+    }
 
     /** 一条候选此刻的得分：来源 + 质量 + 新鲜度 + 画像 + 稳定抖动。 */
     fun scoreOf(item: VideoItem, taste: PreferenceProfile, now: Long): Double =
@@ -378,7 +384,7 @@ class RecommendationRanker(private val random: Random = Random()) {
         item.authorId.takeIf { it.isNotBlank() } ?: item.author.lowercase()
 
     /**
-     * 视频质量分：**平滑点赞率**为主，绝对热度为辅。
+     * 视频质量分：平滑点赞率与绝对热度共同计分。
      *
      * 只看点赞总数，老视频和常年霸榜的天然占优；只看裸点赞率，10 次播放 5 个赞会压过
      * 十万播放一万赞。所以点赞率按贝叶斯平滑：先假设每条视频有 [QUALITY_PRIOR_VIEWS] 次
@@ -389,8 +395,10 @@ class RecommendationRanker(private val random: Random = Random()) {
         val v = views.coerceAtLeast(0).toDouble()
         val rate = (l + QUALITY_PRIOR_VIEWS * QUALITY_PRIOR_RATE) / (v + QUALITY_PRIOR_VIEWS)
         val relative = ln(rate / QUALITY_PRIOR_RATE).coerceIn(-1.5, 2.5) * 1.6
-        val heat = ln(l + 1.0) * 0.5 + ln(v + 1.0) * 0.12
-        return relative + heat
+        val heat = ln(l + 1.0) * 0.95 + ln(v + 1.0) * 0.12
+        // Logarithmic, capped heat favors established likes without letting all-time
+        // blockbusters overwhelm the entire personal-interest budget.
+        return (relative + heat).coerceIn(-2.4, 14.0)
     }
 
     /**
@@ -479,7 +487,7 @@ class RecommendationRanker(private val random: Random = Random()) {
 
     companion object {
         internal fun samplingWeight(score: Double): Double =
-            kotlin.math.exp(2.0 * kotlin.math.tanh(score.coerceIn(-100.0, 100.0) / 12.0))
+            kotlin.math.exp(2.0 * kotlin.math.tanh(score.coerceIn(-100.0, 100.0) / 6.0))
 
         /** 质量分的先验：假设每条视频先有 400 次播放、5% 的点赞率。 */
         const val QUALITY_PRIOR_VIEWS = 400.0
@@ -495,8 +503,8 @@ class RecommendationRanker(private val random: Random = Random()) {
         /** 年龄软分桶：90 天内近期，一年内中期（都在主体里），超过一年才是经典。 */
         const val RECENT_MAX_AGE_MS = 90L * 24 * 60 * 60 * 1000
         const val CLASSIC_MIN_AGE_MS = 365L * 24 * 60 * 60 * 1000
-        /** 老片排序里口味占的比重：比主流里的 0.38 更重，老片本来就该挑合口味的。 */
-        const val CLASSIC_TASTE_WEIGHT = 0.5
+        /** 经典内容也要结合个人兴趣，避免仅由累计热度决定顺序。 */
+        const val CLASSIC_TASTE_WEIGHT = 0.9
         /** 多样性重排：和最近几条比、最多往后看几条、名次代价、相似度惩罚。 */
         const val SIMILARITY_WINDOW = 3
         const val DIVERSITY_LOOKAHEAD = 16
@@ -511,7 +519,7 @@ class RecommendationRanker(private val random: Random = Random()) {
         /** At most one inferred-interest explanation per four recommendations. */
         const val INTEREST_REASON_INTERVAL = 4
         /** 画像分在总分里占的比重，以及稳定扰动的幅度。 */
-        const val TASTE_WEIGHT = 0.38
+        const val TASTE_WEIGHT = 0.9
         const val JITTER_WEIGHT = 0.15
         /** 候选表最多记这么多条，按最近用到的顺序淘汰最老的那条。 */
         const val MAX_TRACKED_CANDIDATES = 2000

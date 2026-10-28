@@ -60,8 +60,11 @@ class RecommendationDiversityTest {
         )
         val few = VideoItem("few", "t", "X", listOf("a", "b", "c"), 0)
         val many = VideoItem("many", "t", "Y", listOf("a", "b", "c", "d", "e", "f", "g"), 0)
-        assertEquals(3.0, taste.score(few), 1e-9)
-        assertEquals("最多只算 ${PreferenceProfile.TOP_TAGS} 个标签", 4.0, taste.score(many), 1e-9)
+        assertTrue("多个弱标签只提供递减加分", taste.score(few) in 1.0..2.0)
+        assertTrue(taste.score(many) > taste.score(few))
+        val four = many.copy(tags = listOf("a", "b", "c", "d"))
+        assertEquals("超过 ${PreferenceProfile.TOP_TAGS} 个标签不继续加分", taste.score(four), taste.score(many), 1e-9)
+        assertTrue("堆砌弱标签不能等同于一个强兴趣", taste.score(many) < 2.0)
     }
 
     /** 强负反馈的标签必须算得进来，不能因为“只取最强的几个”被正标签挤掉。 */

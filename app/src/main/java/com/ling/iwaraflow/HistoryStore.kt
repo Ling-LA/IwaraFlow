@@ -926,6 +926,7 @@ class HistoryStore(context: Context, private val profileFile: String? = null) : 
         val tags = HashMap(longTerm.getValue(PREF_TAG))
         val videos = HashMap<String, Double>()
         val positiveTags = HashMap<String, Double>()
+        val specificity = TagSpecificity()
         // 长期持续快速划走：同一作者 / 标签攒够 [LONG_TERM_SKIPS] 次划走，再额外压一层。
         val authorSkips = HashMap<String, Double>()
         val authorIdSkips = HashMap<String, Double>()
@@ -943,6 +944,10 @@ class HistoryStore(context: Context, private val profileFile: String? = null) : 
                 val at = c.getLong(3)
                 val action = c.getString(5)
                 val ageDays = ((now - at).coerceAtLeast(0) / 86_400_000.0)
+                if (action in setOf("watch", "complete", ACTION_SKIP, "like", "favorite", "follow", "unlike", "unfavorite")) {
+                    specificity.observe(c.getString(6).orEmpty(), splitTags(c.getString(1)),
+                        kotlin.math.exp(-kotlin.math.ln(2.0) * ageDays / 30.0))
+                }
                 // 搜索只是“我想看看这是什么”，不代表“以后多给我推这个”：几个小时就淡掉。
                 // 真正点开结果、看得久、点赞收藏之后才会变成长期兴趣。
                 val decay = if (action == ACTION_SEARCH) {
@@ -996,10 +1001,12 @@ class HistoryStore(context: Context, private val profileFile: String? = null) : 
         tagSkips.forEach { (key, n) -> tags[key] = (tags[key] ?: 0.0) - LONG_TERM_TAG_PENALTY * (n / LONG_TERM_SKIPS).coerceAtMost(1.0) }
         val multipliers = if (applySystemAdjustments) systemTagMultipliers() else emptyMap()
         val evidence = tagEvidence()
+        val specificityMultipliers = specificity.multipliers()
         val boundedTags = tags.entries.groupBy { SearchQuery.canonicalTag(it.key) }.mapValues { (key, entries) ->
             val score = entries.sumOf { it.value }.coerceIn(-6.0, 8.0)
             val confidence = if (score > 0) .55 + .45 * evidence.confidence(key) else 1.0
-            (score * confidence * (multipliers[key] ?: 1.0)).coerceIn(-6.0, 8.0)
+            val selectivity = if (score > 0) specificityMultipliers[key] ?: 1.0 else 1.0
+            (score * confidence * selectivity * (multipliers[key] ?: 1.0)).coerceIn(-6.0, 8.0)
         }
         return PreferenceProfile(author.mapValues { it.value.coerceIn(-6.0, 8.0) }, boundedTags,
             authorIds.mapValues { it.value.coerceIn(-6.0, 8.0) }, videos.mapValues { it.value.coerceIn(-6.0, 8.0) },

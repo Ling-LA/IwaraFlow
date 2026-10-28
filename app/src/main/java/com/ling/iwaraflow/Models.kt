@@ -201,14 +201,20 @@ data class PreferenceProfile(
      * 标签有 15 个的视频只要沾到几个正兴趣标签，就会无脑压过只有 3 个标签的视频。
      * 按绝对值取前 [TOP_TAGS] 个，强负反馈的标签同样算得进来。
      */
-    private fun matchedTagScore(item: VideoItem): Double =
-        item.tags.distinctBy(SearchQuery::canonicalTag)
+    private fun matchedTagScore(item: VideoItem): Double {
+        val strongest = item.tags.distinctBy(SearchQuery::canonicalTag)
             .mapNotNull { tag ->
                 (tagWeights[SearchQuery.canonicalTag(tag)] ?: tagWeights[tag.lowercase()])?.coerceIn(-6.0, 8.0)
             }
             .sortedByDescending { kotlin.math.abs(it) }
             .take(TOP_TAGS)
-            .sum() + manualTagScore(item)
+        // Diminishing returns within each direction: a strong positive match must
+        // never shrink the strongest negative signal (or vice versa).
+        fun combine(weights: List<Double>) = weights.mapIndexed { index, weight ->
+            weight * if (index == 0) 1.0 else 0.2
+        }.sum()
+        return combine(strongest.filter { it > 0 }) + combine(strongest.filter { it < 0 }) + manualTagScore(item)
+    }
 
     /** 用户明确说过不想看这个作者 / 标签。这类内容连探索位都不该给。 */
     fun isMuted(item: VideoItem): Boolean =
@@ -234,8 +240,9 @@ data class PreferenceProfile(
         // Draw once per tag: a sort selector is evaluated repeatedly during comparisons.
         // Drawing inside it changes the ordering mid-sort and can make TimSort throw.
         return pool.map { tag ->
-            val weight = (tagWeights[tag] ?: 0.0).coerceIn(0.0, 8.0) / 8.0 +
-                if (tag in explicit) 1.5 else 1.0
+            val affinity = (tagWeights[tag] ?: 0.0).coerceIn(0.0, 8.0) / 4.0
+            val weight = (1.0 + affinity) * (1.0 + affinity) +
+                if (tag in explicit) MANUAL_POSITIVE_BOOST else 0.0
             tag to (kotlin.math.ln(random.nextDouble().coerceAtLeast(1e-12)) / weight)
         }.sortedByDescending { it.second }.take(count).map { it.first }
     }

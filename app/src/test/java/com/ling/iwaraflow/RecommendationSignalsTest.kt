@@ -24,6 +24,23 @@ class RecommendationSignalsTest {
     private fun video(id: String, author: String, tags: List<String>, authorId: String = "id-$author") =
         VideoItem(id, id, author, tags, 1, authorId = authorId)
 
+    @Test fun experiencedUsersKeepSpecificInterestsAboveFrequentlySeenGenericTags() {
+        repeat(80) { index ->
+            val tags = if (index < 20) listOf("generic", "favorite") else listOf("generic")
+            val item = video("history$index", "author$index", tags)
+            history.recordInteraction(item, if (index < 20) "like" else "watch", if (index < 20) 2.0 else 0.8)
+        }
+        val later = System.currentTimeMillis() + HistoryStore.SESSION_WINDOW_MS + 60_000L
+        val profile = history.preferenceProfileAt(later)
+        assertTrue(profile.tagWeights.getValue("favorite") > profile.tagWeights.getValue("generic") * 1.5)
+        assertTrue(profile.tagWeights.getValue("generic") > 0)
+        history.setSystemTagMultiplier("favorite", 0.0)
+        assertEquals(0.0, history.preferenceProfileAt(later).tagWeights.getValue("favorite"), 0.0)
+        history.setManualTagPreference("generic", 1)
+        assertEquals(PreferenceProfile.MANUAL_POSITIVE_BOOST,
+            history.preferenceProfileAt(later).manualTagScore(video("new", "new", listOf("generic"))), 0.0)
+    }
+
     @Test fun quickSkipsPushAnAuthorAndItsTagsBelowZero() {
         history.recordInteraction(video("v1", "Alice", listOf("miku")), "skip", -0.5)
         history.recordInteraction(video("v2", "Alice", listOf("miku")), "skip", -0.5)

@@ -29,9 +29,11 @@ class WarmRecommendationDeviceTest {
         while (!condition() && SystemClock.uptimeMillis() < end) SystemClock.sleep(30)
         assertTrue(message, condition())
     }
-    private fun factory(cache: MediaPreloadCache): CacheDataSource.Factory {
+    private fun setUpstream(cache: MediaPreloadCache, upstream: androidx.media3.datasource.DataSource.Factory) {
         val state = (field(cache, "pending") as Future<*>).get(5, TimeUnit.SECONDS)!!
-        return field(state, "cacheFactory") as CacheDataSource.Factory
+        listOf("cacheFactory", "preloadCacheFactory", "readOnlyCacheFactory").forEach { name ->
+            (field(state, name) as CacheDataSource.Factory).setUpstreamDataSourceFactory(upstream)
+        }
     }
     private fun restore(cache: MediaPreloadCache): List<VideoItem> {
         val latch = CountDownLatch(1); var result = emptyList<VideoItem>()
@@ -39,14 +41,18 @@ class WarmRecommendationDeviceTest {
         assertTrue(latch.await(10, TimeUnit.SECONDS))
         return result
     }
-    private fun seed(): MediaPreloadCache {
+    private fun seed(prefixOnly: Boolean = false): MediaPreloadCache {
         val prefs = AppPrefs(context)
         prefs.privateBrowsing = false; prefs.accountId = ""; prefs.isolateLibrary = false; prefs.isolateInterests = false
         WarmRecommendationStore.clear(context)
         val cache = MediaPreloadCache(context)
-        val bytes = ins.context.assets.open("navigation-fixture.mp4").use { it.readBytes() }
+        val promoMedia = InstrumentationRegistry.getArguments().getString("promoMedia") == "true"
+        val bytes = if (promoMedia) {
+            require(context.packageName == "com.ling.iwaraflow.qa")
+            java.io.File(context.filesDir, "promo-custom.mp4").readBytes()
+        } else ins.context.assets.open("navigation-fixture.mp4").use { it.readBytes() }
         assertTrue(bytes.size > WarmRecommendationStore.MIN_PREFIX_BYTES)
-        factory(cache).setUpstreamDataSourceFactory { ByteArrayDataSource(bytes) }
+        setUpstream(cache) { ByteArrayDataSource(bytes) }
         val stamp = System.nanoTime()
         val items = (1..2).map { index ->
             val source = VideoSource("720", "https://warm-fixture.invalid/$stamp/$index.mp4?expires=1", 720)
@@ -54,9 +60,15 @@ class WarmRecommendationDeviceTest {
                 streamUrl = source.url, sources = listOf(source))
         }
         cache.keepPreloads(items.mapTo(hashSetOf()) { it.streamUrl!! })
-        items.forEach { cache.registerSources(it.id, it.sources!!); cache.prefetchFull(it.streamUrl!!) }
-        await("Both upcoming files must finish caching") { items.all { cache.progress(it.streamUrl).fraction == 1.0 } }
-        val store = WarmRecommendationStore(context)
+        items.forEach {
+            cache.registerSources(it.id, it.sources!!)
+            if (prefixOnly) cache.prefetch(it.streamUrl!!, 128 * 1024L) else cache.prefetchFull(it.streamUrl!!)
+        }
+        await("Both upcoming files must finish caching") {
+            items.all { if (prefixOnly) cache.storedProgress(it.streamUrl!!).cached >= 128 * 1024L else cache.progress(it.streamUrl).fraction == 1.0 }
+        }
+        val ageDays = InstrumentationRegistry.getArguments().getString("ageDays", "0").toLong().coerceIn(0, 3650)
+        val store = WarmRecommendationStore(context) { System.currentTimeMillis() - ageDays * 24 * 60 * 60 * 1000L }
         main { store.save(items) }
         await("Encrypted queue was not committed") { store.available() }
         context.getSharedPreferences("warm_device_test", 0).edit()
@@ -78,7 +90,7 @@ class WarmRecommendationDeviceTest {
         try {
             // Any unexpected media request fails. The expired .invalid URL cannot be fetched.
             val networkOpens = java.util.concurrent.atomic.AtomicInteger()
-            factory(cache).setUpstreamDataSourceFactory {
+            setUpstream(cache) {
                 object : androidx.media3.datasource.DataSource by ByteArrayDataSource(byteArrayOf(0)) {
                     override fun open(spec: androidx.media3.datasource.DataSpec): Long {
                         networkOpens.incrementAndGet()
@@ -134,22 +146,138 @@ class WarmRecommendationDeviceTest {
             assertTrue(restore(cache).isEmpty())
         } finally { AppPrefs(context).privateBrowsing = false; cache.close(); WarmRecommendationStore.clear(context) }
     }
-    @Test fun expiredMalformedOrEvictedSnapshotsDoNotBlockNormalStartup() {
+    @Test fun malformedOrEvictedSnapshotsDoNotBlockNormalStartup() {
         val cache = seed()
         try {
             val secrets = SecureSessionStore(context)
             val key = "warm_recommendation_queue"
             val snapshot = secrets.secret(key)!!
             assertEquals(2, restore(cache).size)
-            assertTrue(secrets.putSecretDurable(key, org.json.JSONObject(snapshot)
-                .put("savedAt", System.currentTimeMillis() - WarmRecommendationStore.MAX_AGE_MS - 1000).toString()))
-            assertTrue(restore(cache).isEmpty())
             assertTrue(secrets.putSecretDurable(key, "{broken"))
             assertTrue(restore(cache).isEmpty())
             assertTrue(secrets.putSecretDurable(key, snapshot))
             cache.keepPreloads(emptySet()); cache.clearIdleCache()
             await("Idle cache was not cleared") { cache.cacheBytes() == 0L }
             assertTrue(restore(cache).isEmpty())
+        } finally { cache.close(); WarmRecommendationStore.clear(context) }
+    }
+
+    @Test fun completeCachedBytesRemainReusableAfterSevenThirtyAndNinetyDays() {
+        val cache = seed()
+        val expected = ins.context.assets.open("navigation-fixture.mp4").use { it.readBytes() }
+        try {
+            val secrets = SecureSessionStore(context)
+            val snapshot = secrets.secret("warm_recommendation_queue")!!
+            val networkOpens = java.util.concurrent.atomic.AtomicInteger()
+            setUpstream(cache) {
+                object : androidx.media3.datasource.DataSource by ByteArrayDataSource(byteArrayOf(0)) {
+                    override fun open(spec: androidx.media3.datasource.DataSpec): Long {
+                        networkOpens.incrementAndGet(); throw java.io.IOException("Expired URL must never be requested")
+                    }
+                }
+            }
+            for (days in listOf(7, 30, 90)) {
+                val aged = org.json.JSONObject(snapshot)
+                val savedAt = System.currentTimeMillis() - days * 24 * 60 * 60 * 1000L
+                aged.put("savedAt", savedAt)
+                val rows = aged.getJSONArray("rows")
+                repeat(rows.length()) { rows.getJSONObject(it).put("sourceSavedAt", savedAt) }
+                assertTrue(secrets.putSecretDurable("warm_recommendation_queue", aged.toString()))
+                val restored = restore(cache)
+                assertEquals("A $days-day-old queue still has two cached files", 2, restored.size)
+                val state = (field(cache, "pending") as Future<*>).get(5, TimeUnit.SECONDS)!!
+                val cacheOnly = field(state, "cacheOnlyFactory") as CacheDataSource.Factory
+                restored.forEach { item ->
+                    assertTrue(MediaCacheIdentity.isCacheOnly(item.streamUrl!!))
+                    val reader = cacheOnly.createDataSource()
+                    val output = java.io.ByteArrayOutputStream()
+                    try {
+                        reader.open(androidx.media3.datasource.DataSpec.Builder().setUri(item.streamUrl!!).build())
+                        val buffer = ByteArray(32 * 1024)
+                        while (true) {
+                            val n = reader.read(buffer, 0, buffer.size)
+                            if (n == androidx.media3.common.C.RESULT_END_OF_INPUT) break
+                            output.write(buffer, 0, n)
+                        }
+                    } finally { reader.close() }
+                    assertArrayEquals("Cached media bytes changed after $days days", expected, output.toByteArray())
+                }
+            }
+            assertEquals(0, networkOpens.get())
+        } finally { cache.close(); WarmRecommendationStore.clear(context) }
+    }
+
+    @Test fun expiredPartialCacheRefreshesCredentialsAndFetchesOnlyMissingBytes() {
+        val cache = seed(prefixOnly = true)
+        try {
+            val secrets = SecureSessionStore(context)
+            val snapshot = org.json.JSONObject(secrets.secret("warm_recommendation_queue")!!)
+            val first = snapshot.getJSONArray("rows").getJSONObject(0)
+            val oldUrl = first.getString("url")
+            val store = WarmRecommendationStore(context)
+            val latch = CountDownLatch(1); var restored = emptyList<VideoItem>()
+            store.restore(cache) { restored = it; latch.countDown() }
+            assertTrue(latch.await(10, TimeUnit.SECONDS))
+            assertEquals(2, restored.size)
+            assertNull(restored.first().streamUrl); assertNull(restored.first().sources)
+            assertEquals("720", restored.first().selectedQuality)
+            // Saving upcoming items while fresh resolution is pending must keep their cached identity.
+            main { store.save(restored) }
+            assertEquals(2, restore(cache).size)
+            val bytes = ins.context.assets.open("navigation-fixture.mp4").use { it.readBytes() }
+            val positions = java.util.concurrent.CopyOnWriteArrayList<Long>()
+            setUpstream(cache) {
+                val data = ByteArrayDataSource(bytes)
+                object : androidx.media3.datasource.DataSource by data {
+                    override fun open(spec: androidx.media3.datasource.DataSpec): Long { positions += spec.position; return data.open(spec) }
+                }
+            }
+            val freshUrl = oldUrl.substringBefore('?') + "?expires=${System.currentTimeMillis() / 1000 + 600}"
+            val fresh = VideoSource("720", freshUrl, 720)
+            MediaCacheIdentity.registerFresh(restored.first().id, listOf(fresh))
+            assertEquals(MediaCacheIdentity.key(oldUrl), MediaCacheIdentity.key(freshUrl))
+            cache.keepPreloads(setOf(freshUrl)); cache.prefetchFull(freshUrl)
+            await("Fresh URL did not resume cached prefix") { cache.progress(freshUrl).fraction == 1.0 }
+            assertTrue(positions.isNotEmpty())
+            assertTrue("Cached prefix must not be downloaded again: $positions", positions.all { it >= 128 * 1024L })
+        } finally { cache.close(); WarmRecommendationStore.clear(context) }
+    }
+
+    @Test fun savingRestoredUnsignedSnapshotDoesNotRenewItsCredentialLifetime() {
+        val cache = seed()
+        try {
+            val secrets = SecureSessionStore(context)
+            val key = "warm_recommendation_queue"
+            val snapshot = org.json.JSONObject(secrets.secret(key)!!)
+            val savedAt = System.currentTimeMillis() - 30L * 24 * 60 * 60 * 1000
+            snapshot.put("savedAt", savedAt)
+            val rows = snapshot.getJSONArray("rows")
+            repeat(rows.length()) { i ->
+                val row = rows.getJSONObject(i)
+                val oldUrl = row.getString("url")
+                val unsignedUrl = oldUrl.substringBefore('?')
+                row.put("url", unsignedUrl).put("sourceSavedAt", savedAt)
+                val sources = row.getJSONArray("sources")
+                repeat(sources.length()) { j ->
+                    val source = sources.getJSONObject(j)
+                    if (source.getString("url") == oldUrl) source.put("url", unsignedUrl)
+                }
+            }
+            assertTrue(secrets.putSecretDurable(key, snapshot.toString()))
+            val store = WarmRecommendationStore(context)
+            val latch = CountDownLatch(1); var restored = emptyList<VideoItem>()
+            store.restore(cache) { restored = it; latch.countDown() }
+            assertTrue(latch.await(10, TimeUnit.SECONDS))
+            assertEquals(2, restored.size)
+            assertTrue(restored.all { MediaCacheIdentity.isCacheOnly(it.streamUrl!!) })
+            main { store.save(restored) }
+            assertEquals(2, restore(cache).size) // Ordered after the queued durable save.
+            val resaved = org.json.JSONObject(secrets.secret(key)!!).getJSONArray("rows")
+            repeat(resaved.length()) { i ->
+                val row = resaved.getJSONObject(i)
+                assertEquals(savedAt, row.getLong("sourceSavedAt"))
+                assertFalse(WarmRecommendationStore.sourceFresh(row.getString("url"), row.getLong("sourceSavedAt"), System.currentTimeMillis()))
+            }
         } finally { cache.close(); WarmRecommendationStore.clear(context) }
     }
 

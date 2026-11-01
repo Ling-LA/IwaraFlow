@@ -11,10 +11,12 @@ import android.provider.Settings
 import android.view.*
 import android.widget.FrameLayout
 import android.widget.ImageButton
+import android.widget.TextView
 import android.graphics.drawable.GradientDrawable
 import android.graphics.drawable.RippleDrawable
 import android.content.res.ColorStateList
 import androidx.media3.common.Player
+import androidx.media3.common.PlaybackException
 import androidx.media3.exoplayer.ExoPlayer
 import androidx.media3.ui.PlayerView
 
@@ -27,6 +29,15 @@ class FloatingVideoService : Service() {
     private var returnIntent: Intent? = null
     private var videoId = ""
     private var closed = false
+    private var api: IwaraApi? = null
+    private var sourceRequest: java.io.Closeable? = null
+    private var playbackMetrics: PlaybackMetrics.Session? = null
+    private val retryHandler = android.os.Handler(android.os.Looper.getMainLooper())
+    private var recoveryAttempts = 0
+    private var recovering = false
+    private var playbackUrl = ""
+    private var preferredQuality = "highest"
+    private var status: TextView? = null
     override fun onBind(intent: Intent?): IBinder? = null
     override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
         val url = intent?.getStringExtra("url") ?: run { stopSelf(); return START_NOT_STICKY }
@@ -43,6 +54,8 @@ class FloatingVideoService : Service() {
         releaseWindow()
         closed = false; instance = this
         videoId = intent.getStringExtra("id").orEmpty()
+        playbackUrl = url; preferredQuality = intent.getStringExtra("quality") ?: AppPrefs(this).defaultQuality
+        recoveryAttempts = 0; recovering = false
         val density = resources.displayMetrics.density
         fun dp(n: Int) = (n*density).toInt()
         val wm = getSystemService(WINDOW_SERVICE) as WindowManager
@@ -58,8 +71,19 @@ class FloatingVideoService : Service() {
         window = root
         cache = MediaPreloadCache(this)
         val p = ExoPlayer.Builder(this).build().also { player = it }
+        playbackMetrics = PlaybackMetrics.track(p)
         val video = (LayoutInflater.from(this).inflate(R.layout.view_floating_video, root, false) as PlayerView).apply { player = p }
         root.addView(video, FrameLayout.LayoutParams(-1, -1))
+        status = TextView(this).apply {
+            gravity = Gravity.CENTER; setTextColor(-1); textSize = 13f
+            setPadding(dp(12), dp(8), dp(12), dp(8))
+            background = GradientDrawable().apply { setColor(0xDD263845.toInt()); cornerRadius = dp(12).toFloat() }
+            visibility = View.GONE
+            root.addView(this, FrameLayout.LayoutParams(-2, -2, Gravity.CENTER).apply { setMargins(dp(8), dp(4), dp(8), dp(4)) })
+            setOnClickListener {
+                if (!recovering) { recoveryAttempts = 0; recoverPlayback("手动重试") }
+            }
+        }
         val buttons = mutableListOf<View>()
         fun control(icon: Int, label: String, gravity: Int, action: () -> Unit): ImageButton = ImageButton(this).apply {
             setImageResource(icon); contentDescription = label
@@ -100,6 +124,10 @@ class FloatingVideoService : Service() {
             }
             override fun onPlaybackStateChanged(state: Int) {
                 if (state == Player.STATE_ENDED) { toggle.setImageResource(R.drawable.ic_play); controls?.show() }
+                if (state == Player.STATE_READY) status?.visibility = View.GONE
+            }
+            override fun onPlayerError(error: PlaybackException) {
+                if (player === p && !closed) recoverPlayback(error.errorCodeName)
             }
         })
         var downX = 0f; var downY = 0f; var startX = 0; var startY = 0; var dragging = false
@@ -129,10 +157,54 @@ class FloatingVideoService : Service() {
             controls?.show()
             p.setMediaSource(cache!!.createMediaSource(url)); p.seekTo(intent.getLongExtra("position", 0))
             p.setAudioAttributes(androidx.media3.common.AudioAttributes.DEFAULT, true)
+            p.setHandleAudioBecomingNoisy(true)
             p.playWhenReady = intent.getBooleanExtra("playWhenReady", true)
             p.prepare(); cache?.prefetchFull(url)
         } catch (_: Exception) { releaseWindow(); stopSelf() }
         return START_NOT_STICKY
+    }
+
+    /** Refresh an expired/failed source without changing the user's pause intent or position. */
+    private fun recoverPlayback(reason: String) {
+        val p = player ?: return
+        if (closed || recovering) return
+        NavigationDiagnostics.note(this, "小窗播放错误：$reason · 自动恢复 $recoveryAttempts/2")
+        val local = playbackUrl.startsWith("file:") || playbackUrl.startsWith("content:")
+        if (local || videoId.isBlank() || recoveryAttempts >= VideoAdapter.MAX_ERROR_RECOVERIES) {
+            status?.text = if (local) "本地文件播放失败，请返回软件检查" else "播放失败，轻触重试"
+            status?.visibility = View.VISIBLE
+            controls?.show()
+            return
+        }
+        recovering = true
+        val position = p.currentPosition.coerceAtLeast(0L)
+        recoveryAttempts++
+        status?.text = "正在恢复播放…"
+        status?.visibility = View.VISIBLE
+        retryHandler.postDelayed({
+            if (closed || player !== p) return@postDelayed
+            val client = api ?: IwaraApi(this).also { api = it }
+            sourceRequest = client.resolveSources(videoId) { result -> retryHandler.post {
+                if (closed || player !== p) return@post
+                sourceRequest = null; recovering = false
+                result.onSuccess { sources ->
+                    val source = client.chooseSource(sources, preferredQuality)
+                    if (source == null) { recoverPlayback("没有可用清晰度"); return@onSuccess }
+                    val shouldPlay = p.playWhenReady
+                    playbackUrl = source.url
+                    cache?.registerSources(videoId, sources)
+                    cache?.keepPreloads(setOf(source.url))
+                    playbackMetrics?.intentionalChange()
+                    val media = cache?.createMediaSource(source.url) ?: return@onSuccess
+                    p.setMediaSource(media); p.seekTo(position); p.prepare(); p.playWhenReady = shouldPlay
+                    if (shouldPlay) cache?.prefetchFull(source.url)
+                    NavigationDiagnostics.note(this, "小窗播放源已刷新 · 保留${if (shouldPlay) "播放" else "暂停"}状态")
+                }.onFailure { error ->
+                    NavigationDiagnostics.note(this, "小窗播放源刷新失败：${error.javaClass.simpleName}")
+                    recoverPlayback("播放源刷新失败")
+                }
+            } }
+        }, if (recoveryAttempts == 1) 500L else 1500L)
     }
     private fun savePosition() {
         val p = player ?: return
@@ -140,6 +212,11 @@ class FloatingVideoService : Service() {
     }
     private fun releaseWindow() {
         closed = true
+        retryHandler.removeCallbacksAndMessages(null)
+        sourceRequest?.close(); sourceRequest = null
+        api?.close(); api = null
+        playbackMetrics?.close(); playbackMetrics = null
+        recovering = false; status = null
         controls?.close(); controls = null
         player?.release(); player = null
         cache?.close(); cache = null
@@ -167,6 +244,7 @@ class FloatingVideoService : Service() {
             val intent = Intent(activity, FloatingVideoService::class.java)
                 .putExtra("url", url).putExtra("id", item.id).putExtra("title", item.title).putExtra("position", item.resumePositionMs)
                 .putExtra("playWhenReady", item.resumePlayWhenReady)
+                .putExtra("quality", item.selectedQuality ?: AppPrefs(activity).defaultQuality)
                 .putExtra("return", Intent(activity.intent).setClass(activity, activity.javaClass))
             return runCatching {
                 activity.startForegroundService(intent)

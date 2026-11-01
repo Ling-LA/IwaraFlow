@@ -89,4 +89,15 @@ class PlaylistApiTest {
             finally { api.close() }
         }
     }
+    @Test fun emptyCreateResponseCannotResolveToPreexistingSameNameFolder() {
+        MockWebServer().use { server ->
+            server.enqueue(MockResponse().setResponseCode(201).setBody("{}"))
+            server.enqueue(MockResponse().setBody("""{"count":2,"results":[{"id":"old","title":"Folder"},{"id":"new","title":"Folder"}]}"""))
+            val api = IwaraApi(context, server.url("/").toString().trimEnd('/'))
+            try {
+                assertEquals("new", api.createPlaylistBlocking("Folder", setOf("old")).id)
+                assertEquals("POST", server.takeRequest().method); assertEquals("GET", server.takeRequest().method)
+            } finally { api.close() }
+        }
+    }
 }

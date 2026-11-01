@@ -2,8 +2,10 @@ package com.ling.iwaraflow
 
 import android.app.Activity
 import android.content.Intent
+import android.net.Uri
 import android.os.SystemClock
 import android.util.Base64
+import android.view.MotionEvent
 import android.view.View
 import android.view.ViewGroup
 import android.view.inspector.WindowInspector
@@ -11,6 +13,7 @@ import android.widget.CheckBox
 import android.widget.EditText
 import android.widget.TextView
 import androidx.recyclerview.widget.RecyclerView
+import androidx.viewpager2.widget.ViewPager2
 import androidx.test.ext.junit.runners.AndroidJUnit4
 import androidx.test.platform.app.InstrumentationRegistry
 import okhttp3.OkHttpClient
@@ -25,6 +28,7 @@ import org.json.JSONObject
 import org.junit.Assert.*
 import org.junit.Test
 import org.junit.runner.RunWith
+import java.io.File
 import java.util.concurrent.TimeUnit
 import java.util.concurrent.atomic.AtomicBoolean
 
@@ -67,6 +71,7 @@ class PlaylistDeviceTest {
         val session = SecureSessionStore(context)
         val previousAccount = prefs.accountId
         val previousIsolation = prefs.isolateLibrary
+        val previousAutoNext = prefs.autoNext
         val previousRefresh = session.refreshToken
         val previousAccess = session.accessToken
         val previousVerified = session.secret("verified_user_id")
@@ -76,6 +81,7 @@ class PlaylistDeviceTest {
         val catalog = linkedMapOf<String, String>()
         val members = linkedMapOf<String, MutableSet<String>>()
         val delayedWrites = AtomicBoolean(false)
+        val deleted = mutableListOf<Pair<String, String>>()
         var createCount = 0
         val certificate = HeldCertificate.Builder().commonName("localhost").addSubjectAlternativeName("localhost").build()
         val serverTls = HandshakeCertificates.Builder().heldCertificate(certificate).build()
@@ -99,7 +105,9 @@ class PlaylistDeviceTest {
                         json(JSONArray(catalog.keys.map { row(it).put("added", videoId in members[it].orEmpty()) }))
                     }
                     path.size == 3 && path[0] == "playlist" && path[1] in catalog -> {
-                        if (request.method == "POST") members.getValue(path[1]).add(path[2]) else members.getValue(path[1]).remove(path[2])
+                        if (request.method == "POST") members.getValue(path[1]).add(path[2]) else {
+                            members.getValue(path[1]).remove(path[2]); deleted += path[1] to path[2]
+                        }
                         MockResponse().setResponseCode(204).apply { if (delayedWrites.get()) setHeadersDelay(1, TimeUnit.SECONDS) }
                     }
                     path.size == 2 && path[0] == "playlist" && path[1] in catalog -> {
@@ -134,9 +142,14 @@ class PlaylistDeviceTest {
         }
         var folders: PlaylistFoldersActivity? = null
         var videos: SavedVideosActivity? = null
+        val clip = File.createTempFile("playlist-device-", ".mp4", context.cacheDir).apply {
+            instrumentation.context.assets.open("navigation-fixture.mp4").use { input ->
+                outputStream().use { output -> input.copyTo(output) }
+            }
+        }
         try {
             // Start logged out; no initial Activity request can reach an authenticated public endpoint.
-            session.clearAuthentication(); prefs.accountId = account; prefs.isolateLibrary = true
+            session.clearAuthentication(); prefs.accountId = account; prefs.isolateLibrary = true; prefs.autoNext = false
             HistoryStore(context).use { it.accountId = account; it.setLocalFavorite(fixture, true) }
             folders = instrumentation.startActivitySync(Intent(context, PlaylistFoldersActivity::class.java)
                 .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)) as PlaylistFoldersActivity
@@ -212,20 +225,94 @@ class PlaylistDeviceTest {
                 val api = localApi(); field(videoActivity, "api").set(videoActivity, api)
                 field(videoActivity, "playlistFavorites").set(videoActivity,
                     PlaylistFavorites(videoActivity, api, field(videoActivity, "history").get(videoActivity) as HistoryStore))
+                val feed = videoActivity.playbackGuideAdapter
+                (field(feed, "favoriteController").get(feed) as? PlaylistFavorites)?.close()
+                (field(feed, "favoriteSubscription").get(feed) as? java.io.Closeable)?.close()
+                field(feed, "favoriteController").set(feed, null); field(feed, "favoriteSubscription").set(feed, null)
+                field(feed, "api").set(feed, api)
+                val panel = (field(videoActivity, "comments").get(videoActivity) as CommentsHost).panel
+                field(panel, "api").set(panel, api)
                 loginFixture(); invoke(videoActivity, "loadLibraryPage", true)
             }
             await("Official playlist page did not render both saved videos") {
                 videoActivity.findViewById<RecyclerView>(R.id.savedVideos).adapter?.itemCount == 2
             }
             ProfileUiDeviceTest().screenshot("playlist-videos-018")
+
+            // Exercise the real player star, not the controller directly. Both videos use a
+            // bundled neutral clip and all authenticated traffic stays on the local fixture.
+            main {
+                @Suppress("UNCHECKED_CAST")
+                val rows = field(videoActivity, "items").get(videoActivity) as List<VideoItem>
+                rows.forEach { it.sources = listOf(VideoSource("fixture", Uri.fromFile(clip).toString(), 1)) }
+                val selected = rows.indexOfFirst { it.id == second.id }
+                videoActivity.findViewById<RecyclerView>(R.id.savedVideos)
+                    .findViewHolderForAdapterPosition(selected)!!.itemView.performClick()
+            }
+            lateinit var star: View
+            await("Saved video did not open with its selected favorite star") {
+                // ViewPager2 keeps neighbouring cards attached. isShown alone also matches
+                // their off-screen stars; the interaction must target its current page.
+                val pager = videoActivity.findViewById<ViewPager2>(R.id.savedPager)
+                val holder = (pager.getChildAt(0) as RecyclerView).findViewHolderForAdapterPosition(pager.currentItem)
+                val current = holder?.itemView?.findViewById<View>(R.id.favorite)
+                if (current != null) star = current
+                current?.isShown == true && holder != null &&
+                    (field(holder, "bound").get(holder) as? VideoItem)?.id == second.id &&
+                    videoActivity.playbackGuideAdapter.activeItem()?.let { it.id == second.id && it.localFavorite } == true
+            }
+            val downAt = SystemClock.uptimeMillis()
+            main {
+                MotionEvent.obtain(downAt, downAt, MotionEvent.ACTION_DOWN, star.width / 2f, star.height / 2f, 0).let {
+                    star.dispatchTouchEvent(it); it.recycle()
+                }
+            }
+            SystemClock.sleep(650)
+            main {
+                MotionEvent.obtain(downAt, SystemClock.uptimeMillis(), MotionEvent.ACTION_UP, star.width / 2f, star.height / 2f, 0).let {
+                    star.dispatchTouchEvent(it); it.recycle()
+                }
+            }
+            await("Long-pressing the saved star did not open folder management") {
+                texts().filterIsInstance<CheckBox>().let { boxes -> boxes.size == 2 && boxes.all { it.isChecked } }
+            }
+            synchronized(catalog) { assertTrue("Long press must not remove any official membership", deleted.isEmpty()) }
+            main { texts().first { it.contentDescription == "关闭收藏夹" }.performClick() }
+            await("Folder picker did not close") { texts().none { it.contentDescription == "关闭收藏夹" } }
+            main { star.performClick() }
+            await("Short-tapping the saved star did not cancel its global favorite state") {
+                videoActivity.playbackGuideAdapter.activeItem()?.localFavorite == false
+            }
+            synchronized(catalog) {
+                assertEquals(setOf("folder-1" to second.id, "folder-2" to second.id), deleted.toSet())
+                assertEquals(2, deleted.size)
+                assertTrue(members.values.none { second.id in it })
+                assertEquals(setOf(fixture.id), members.getValue("folder-1"))
+            }
+            main { videoActivity.findViewById<View>(R.id.savedFeedBack).performClick() }
+            await("Returning to the playlist kept the removed video in its list") {
+                videoActivity.findViewById<View>(R.id.savedListPage).isShown &&
+                    videoActivity.findViewById<RecyclerView>(R.id.savedVideos).adapter?.itemCount == 1 &&
+                    descendants(videoActivity.findViewById(R.id.savedVideos)).filterIsInstance<TextView>().any { it.text.toString() == fixture.title }
+            }
+            ProfileUiDeviceTest().screenshot("playlist-short-tap-removal-0181")
+            main { videoActivity.findViewById<View>(R.id.savedBack).performClick() }
+            await("Returning to folders did not refresh the default-folder preview after cancellation") {
+                val list = descendants(activity.window.decorView).filterIsInstance<RecyclerView>().first()
+                val card = list.findViewHolderForAdapterPosition(0)?.itemView
+                val labels = card?.let(::descendants)?.filterIsInstance<TextView>()?.map { it.text.toString() }.orEmpty()
+                activity.window.decorView.isShown && fixture.title in labels && second.title !in labels &&
+                    favorites.store.folders().firstOrNull { it.id == "folder-1" }?.count == 1
+            }
         } finally {
             main { videos?.finish(); folders?.finish() }
             instrumentation.waitForIdleSync()
             HistoryStore(context).use { it.accountId = account; it.libraryDatabase.delete("favorites", null, null) }
             session.refreshToken = previousRefresh; session.accessToken = previousAccess
             session.putSecret("verified_user_id", previousVerified)
-            prefs.accountId = previousAccount; prefs.isolateLibrary = previousIsolation
+            prefs.accountId = previousAccount; prefs.isolateLibrary = previousIsolation; prefs.autoNext = previousAutoNext
             server.shutdown()
+            clip.delete()
         }
     }
 }

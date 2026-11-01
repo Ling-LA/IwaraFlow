@@ -267,7 +267,7 @@ class MainActivityV3 : AppCompatActivity(), PlaybackGuideHost {
         onBackPressedDispatcher.addCallback(this, exitFullscreenOnBack)
         pager.registerOnPageChangeCallback(object : ViewPager2.OnPageChangeCallback() {
             override fun onPageSelected(position: Int) {
-                if (showingBrowseGrid) return
+                if (showingBrowseGrid || FullscreenMode.isChangingViewport(pager)) return
                 if (mode in BrowseCatalogState.MODES) browseStates[mode]?.selectedIndex = position
                 // 翻到下一条了，上一条的评论就不该还挂着。
                 comments.close()

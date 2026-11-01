@@ -460,9 +460,9 @@ class NavigationDeviceTest {
             assertSame(home, awaitActivity(MainActivityV3::class.java)); assertPaused()
             shell("input keyevent KEYCODE_HOME")
             SystemClock.sleep(500)
-            // This reuses the existing Activity, so wait for resume rather than creation.
-            main { home.startActivity(Intent(app, MainActivityV3::class.java).addFlags(
-                Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_REORDER_TO_FRONT or Intent.FLAG_ACTIVITY_SINGLE_TOP)) }
+            // Relaunch like a user tapping the launcher. A background app starting itself is
+            // blocked by some OEMs and does not exercise the user's return-to-app path.
+            shell("am start -W -n ${app.packageName}/${MainActivityV3::class.java.name} -f 0x30020000")
             assertSame(home, awaitActivity(MainActivityV3::class.java)); assertPaused()
 
             shell("appops set ${app.packageName} SYSTEM_ALERT_WINDOW allow")

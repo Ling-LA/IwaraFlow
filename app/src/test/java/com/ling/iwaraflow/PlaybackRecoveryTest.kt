@@ -2,6 +2,7 @@ package com.ling.iwaraflow
 
 import android.widget.FrameLayout
 import android.widget.TextView
+import android.view.View
 import androidx.media3.exoplayer.ExoPlayer
 import org.junit.Assert.*
 import org.junit.Test
@@ -73,8 +74,11 @@ class PlaybackRecoveryTest {
         try {
             set(fixture.holder, "recoveryAttempts", VideoAdapter.MAX_ERROR_RECOVERIES)
             reportError(fixture.holder, item)
-            assertTrue("放不了的视频要给出原因：${titleOf(fixture.holder)}",
-                titleOf(fixture.holder).contains("播放失败"))
+            val retry = fixture.holder.itemView.findViewWithTag<TextView>("playback_retry")
+            assertEquals("失败后应提供可见的独立恢复入口", View.VISIBLE, retry.visibility)
+            assertEquals("播放失败 · 点击重试", retry.text.toString())
+            assertTrue("重试入口应允许点击", retry.isEnabled && retry.hasOnClickListeners())
+            assertEquals("错误不能覆盖视频标题或简介入口", item.title, titleOf(fixture.holder))
             assertEquals("到上限后不再重新解析", staleSource.url, item.streamUrl)
         } finally { fixture.adapter.releaseAll() }
     }

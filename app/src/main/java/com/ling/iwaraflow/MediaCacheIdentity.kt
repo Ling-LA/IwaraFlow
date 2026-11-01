@@ -7,6 +7,9 @@ internal object MediaCacheIdentity {
     private val keys = object : LinkedHashMap<String, String>(64, .75f, true) {
         override fun removeEldestEntry(eldest: MutableMap.MutableEntry<String, String>?) = size > 512
     }
+    private val cacheOnly = object : LinkedHashMap<String, Boolean>(8, .75f, true) {
+        override fun removeEldestEntry(eldest: MutableMap.MutableEntry<String, Boolean>?) = size > 512
+    }
     @Synchronized fun register(videoId: String, sources: List<VideoSource>) {
         if (videoId.isBlank()) return
         sources.forEach { source ->
@@ -21,4 +24,14 @@ internal object MediaCacheIdentity {
         }
     }
     @Synchronized fun key(url: String): String = keys[url] ?: url
+
+    /** Restored expired links may identify cached bytes, but must never authorize a network read. */
+    @Synchronized fun requireCachedBytes(url: String) { cacheOnly[url] = true }
+    @Synchronized fun isCacheOnly(url: String): Boolean = cacheOnly[url] == true
+
+    /** Only a newly resolved server response can make the same URL eligible for networking again. */
+    @Synchronized fun registerFresh(videoId: String, sources: List<VideoSource>) {
+        register(videoId, sources)
+        sources.forEach { cacheOnly.remove(it.url) }
+    }
 }

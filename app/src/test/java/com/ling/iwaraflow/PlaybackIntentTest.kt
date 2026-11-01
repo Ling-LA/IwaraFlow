@@ -85,6 +85,14 @@ class PlaybackIntentTest {
         assertFalse(player(holder).playWhenReady)
         assertFalse(item.resumePlayWhenReady)
     }
+    @Test fun headphoneDisconnectPausesAndStaysPausedOnReturn() = fixture { adapter, holder, item ->
+        RuntimeEnvironment.getApplication().sendBroadcast(android.content.Intent(android.media.AudioManager.ACTION_AUDIO_BECOMING_NOISY))
+        shadowOf(Looper.getMainLooper()).idle()
+        assertFalse(player(holder).playWhenReady)
+        assertFalse(item.resumePlayWhenReady)
+        adapter.suspendPlayback(); resume(adapter, holder)
+        assertFalse(player(holder).playWhenReady)
+    }
     @Test fun sessionSnapshotRetainsPauseAndOldSnapshotsStillAutoplay() {
         val paused = VideoItem("snapshot", "Fixture", "Author", emptyList(), 0, resumePlayWhenReady = false)
         val text = FeedSessionCodec.encode(FeedSessionStore.Session(listOf(paused), 0, 0, false))

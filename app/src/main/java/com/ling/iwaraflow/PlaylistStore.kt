@@ -69,6 +69,20 @@ class PlaylistStore(context: Context) {
         edit.putLong("revision", prefs.getLong("revision", 0L) + 1).apply()
         true
     }
+    /** A multi-folder cancellation is not globally confirmed until memberships are read back.
+     * Invalidate acknowledged folder contents/counts while retaining the conservative star.
+     */
+    fun confirmRemovalWrite(s: Snapshot, videoId: String, folder: PlaylistFolder): Boolean = synchronized(lock) {
+        if (!current(s)) return false
+        val all = folders(s).toMutableList(); val index = all.indexOfFirst { it.id == folder.id }
+        val row = if (index >= 0) all[index] else folder
+        val changed = row.copy(count = (row.count - if (folder.id in memberships(videoId, s)) 1 else 0).coerceAtLeast(0))
+        if (index >= 0) all[index] = changed else all += changed
+        val edit = prefs.edit().putString(key(s, "folders"), encodeFolders(all)).putLong(key(s, "checked:$videoId"), 0L)
+        prefs.all.keys.filter { it.startsWith(key(s, "page:${folder.id}:")) }.forEach(edit::remove)
+        edit.putLong("revision", prefs.getLong("revision", 0L) + 1).apply()
+        true
+    }
     fun cachePage(s: Snapshot, index: Int, page: PlaylistVideoPage) = synchronized(lock) {
         if (!current(s)) return
         val value = JSONObject().put("folder", folderJson(page.folder)).put("total", page.total).put("more", page.hasMore)
@@ -107,13 +121,37 @@ class PlaylistStore(context: Context) {
     fun markMigrated(s: Snapshot, id: String): Boolean = synchronized(lock) {
         current(s) && prefs.edit().putBoolean(key(s, "migrated:$id"), true).commit()
     }
-    fun migrationComplete(s: Snapshot = snapshot()) = prefs.getBoolean(key(s, "migration_complete"), false)
+    // v1 may have copied into an existing category. Preserve its journal; it is not proof
+    // that an item was newly inserted, and must never authorize deletion from that folder.
+    data class MigrationCreation(val title: String, val existingIds: Set<String>)
+    fun dedicatedMigrationTarget(s: Snapshot) = prefs.getString(key(s, "migration_v2_target"), "").orEmpty()
+    fun setDedicatedMigrationTarget(s: Snapshot, id: String): Boolean = synchronized(lock) {
+        current(s) && prefs.edit().putString(key(s, "migration_v2_target"), id)
+            .remove(key(s, "migration_v2_creation")).commit()
+    }
+    fun migrationCreation(s: Snapshot): MigrationCreation? = runCatching {
+        val raw = prefs.getString(key(s, "migration_v2_creation"), null) ?: return null
+        val value = JSONObject(raw); val ids = value.getJSONArray("existingIds")
+        MigrationCreation(value.getString("title"), (0 until ids.length()).mapTo(HashSet()) { ids.getString(it) })
+    }.getOrNull()
+    fun prepareMigrationCreation(s: Snapshot, title: String, existingIds: Set<String>): Boolean = synchronized(lock) {
+        current(s) && prefs.edit().putString(key(s, "migration_v2_creation"), JSONObject()
+            .put("title", title).put("existingIds", JSONArray(existingIds.toList())).toString()).commit()
+    }
+    fun clearMigrationCreation(s: Snapshot): Boolean = synchronized(lock) {
+        current(s) && prefs.edit().remove(key(s, "migration_v2_creation")).commit()
+    }
+    fun dedicatedMigrationItem(s: Snapshot, id: String) = prefs.getString(key(s, "migration_v2_item:$id"), "").orEmpty()
+    fun markDedicatedMigrationItem(s: Snapshot, id: String, outcome: String): Boolean = synchronized(lock) {
+        current(s) && prefs.edit().putString(key(s, "migration_v2_item:$id"), outcome).commit()
+    }
+    fun migrationComplete(s: Snapshot = snapshot()) = prefs.getBoolean(key(s, "migration_v2_complete"), false)
     fun migrationStatus() = prefs.getString(key(snapshot(), "migration_status"), "").orEmpty()
-    fun migrationRetryAt(s: Snapshot = snapshot()) = prefs.getLong(key(s, "migration_retry"), 0L)
+    fun migrationRetryAt(s: Snapshot = snapshot()) = prefs.getLong(key(s, "migration_v2_retry"), 0L)
     fun migrationProgress(s: Snapshot, message: String, complete: Boolean = false, failed: Boolean = false): Unit = synchronized(lock) {
         if (!current(s)) return
-        prefs.edit().putString(key(s, "migration_status"), message).putBoolean(key(s, "migration_complete"), complete)
-            .putLong(key(s, "migration_retry"), if (failed) System.currentTimeMillis() + 60_000L else 0L)
+        prefs.edit().putString(key(s, "migration_status"), message).putBoolean(key(s, "migration_v2_complete"), complete)
+            .putLong(key(s, "migration_v2_retry"), if (failed) System.currentTimeMillis() + 60_000L else 0L)
             .putLong("revision", prefs.getLong("revision", 0L) + 1).commit()
     }
     fun listen(changed: (String?) -> Unit): Closeable {

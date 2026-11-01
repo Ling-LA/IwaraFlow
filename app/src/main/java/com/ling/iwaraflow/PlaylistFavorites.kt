@@ -123,6 +123,36 @@ class PlaylistFavorites(context: Context, private val api: IwaraApi, private val
         requireCurrent(s); store.confirmWrite(s, item, folder, true); store.setDefault(s, folder.id)
         Change(true, true)
     }
+    /** Short tap on a saved star removes this video from every authoritative membership. */
+    fun remove(item: VideoItem, callback: (Result<Change>) -> Unit) = submit(callback) { s ->
+        val joined = memberships(s, item.id).filter { it.added }
+        preserveExplicitRemoval(s, item.id)
+        if (joined.isEmpty()) return@submit Change(false, false)
+        var failure: Exception? = null
+        for (folder in joined.distinctBy { it.id }) {
+            try {
+                requireCurrent(s); api.setPlaylistVideoBlocking(folder.id, item.id, false)
+                requireCurrent(s); store.confirmRemovalWrite(s, item.id, folder)
+            } catch (error: Exception) { failure = error; break }
+        }
+        // Even a rejected/lost write response can be followed by an authoritative result.
+        // If read-back fails, the prior star stays on; no false "removed" success is emitted.
+        requireCurrent(s)
+        val remaining = try { memberships(s, item.id).any { it.added } } catch (error: Exception) {
+            throw IOException("取消收藏结果尚未确认，请刷新后重试", error)
+        }
+        if (remaining) throw IOException(if (failure != null) "部分收藏夹取消失败，视频仍在收藏中，请重试"
+            else "视频仍在其他收藏夹中，请重试取消", failure)
+        Change(false, true)
+    }
+    private fun preserveExplicitRemoval(s: PlaylistStore.Snapshot, videoId: String) {
+        requireCurrent(s)
+        // Preserve the legacy archive itself, but do not let an unfinished automatic import
+        // override a user's newer explicit removal on its next incremental worker turn.
+        if ((store.migrated(s, videoId) || store.dedicatedMigrationItem(s, videoId).isNotBlank() || history.isLocalFavorite(videoId)) &&
+            !store.markDedicatedMigrationItem(s, videoId, "removed_by_user")) throw IOException("无法保存取消收藏进度，请重试")
+        requireCurrent(s)
+    }
     internal fun loadPicker(item: VideoItem, callback: (Result<List<PlaylistFolder>>) -> Unit) = submit(callback) { s ->
         val all = folders(s).associateBy { it.id }
         memberships(s, item.id).map { row -> (all[row.id] ?: row).copy(added = row.added) }
@@ -132,6 +162,7 @@ class PlaylistFavorites(context: Context, private val api: IwaraApi, private val
         val wasSaved = rows.any { it.added }
         val known = rows.map { it.id }.toSet()
         if ((selected - known).isNotEmpty()) throw IOException("收藏夹列表有变化，请刷新后重试")
+        if (selected.isEmpty()) preserveExplicitRemoval(s, item.id)
         // Add first so moving folders cannot lose the last copy when one request fails.
         rows.filter { it.id in selected && !it.added }.forEach { folder ->
             requireCurrent(s); api.setPlaylistVideoBlocking(folder.id, item.id, true)
@@ -165,8 +196,49 @@ class PlaylistFavorites(context: Context, private val api: IwaraApi, private val
         if (!AppPrefs(app).isolateLibrary && owner.isNotBlank() && owner != s.account) return
         startLegacy(automatic = true) { }
     }
-    fun importLegacy(callback: (Result<Int>) -> Unit) = startLegacy(automatic = false, callback)
-    private fun startLegacy(automatic: Boolean, callback: (Result<Int>) -> Unit) {
+    fun importLegacy(retryUnconfirmedCreation: Boolean = false, callback: (Result<Int>) -> Unit) =
+        startLegacy(automatic = false, retryUnconfirmedCreation = retryUnconfirmedCreation, callback = callback)
+    /** Never adopt an existing official category by its display name or quick-save preference. */
+    private fun dedicatedMigrationFolder(s: PlaylistStore.Snapshot, all: List<PlaylistFolder>, retryUnconfirmedCreation: Boolean): PlaylistFolder {
+        val target = store.dedicatedMigrationTarget(s)
+        if (target.isNotBlank()) return all.firstOrNull { it.id == target }
+            ?: throw IOException("旧版收藏专用收藏夹已被删除；为尊重你的操作，不会自动重建")
+        val pendingCreation = store.migrationCreation(s)
+        if (pendingCreation != null) {
+            val candidates = all.filter { it.title == pendingCreation.title && it.id !in pendingCreation.existingIds }
+            if (candidates.isEmpty() && retryUnconfirmedCreation) {
+                // Only the explicit recovery dialog may authorize another POST after the
+                // user checked the official site. Automatic startup never retries it.
+                if (!store.clearMigrationCreation(s)) throw IOException("无法保存重试进度")
+                return dedicatedMigrationFolder(s, all, false)
+            }
+            if (candidates.size != 1) throw IOException("默认收藏夹创建结果尚未确认，请在官网核对后重试；不会重复创建或使用已有分类")
+            val recovered = candidates.single()
+            if (!store.setDedicatedMigrationTarget(s, recovered.id)) throw IOException("无法保存默认收藏夹，请重试")
+            return recovered
+        }
+        val titles = all.mapTo(HashSet()) { it.title }
+        val title = if (DEFAULT_TITLE !in titles) DEFAULT_TITLE else {
+            val base = "$DEFAULT_TITLE（旧版收藏）"
+            if (base !in titles) base else generateSequence(2) { it + 1 }.map { "$base $it" }.first { it !in titles }
+        }
+        val existingIds = all.mapTo(HashSet()) { it.id }
+        // Persist before POST: after a lost response/crash only read back an unambiguous
+        // newly-created ID. Retrying the POST could create another public playlist.
+        if (!store.prepareMigrationCreation(s, title, existingIds)) throw IOException("无法保存默认收藏夹创建进度")
+        requireCurrent(s)
+        val created = try { api.createPlaylistBlocking(title, existingIds) } catch (error: PlaylistHttpException) {
+            // Definitive rejections did not create a folder. Timeouts/5xx remain uncertain.
+            if (error.status in setOf(400, 401, 403, 404, 413, 415, 422, 429)) store.clearMigrationCreation(s)
+            throw error
+        }
+        requireCurrent(s)
+        if (created.id in existingIds) throw IOException("官网返回了已有收藏夹，已停止导入以保护分类")
+        if (!store.setDedicatedMigrationTarget(s, created.id)) throw IOException("无法保存默认收藏夹，请重试")
+        store.putFolder(s, created)
+        return created
+    }
+    private fun startLegacy(automatic: Boolean, retryUnconfirmedCreation: Boolean = false, callback: (Result<Int>) -> Unit) {
         val migrationKey = store.snapshot().account
         val isolatedSource = AppPrefs(app).isolateLibrary
         synchronized(migrations) { if (!migrations.add(migrationKey)) { callback(Result.failure(IOException("旧版收藏正在同步"))); return }; ownedMigrations.add(migrationKey) }
@@ -182,21 +254,29 @@ class PlaylistFavorites(context: Context, private val api: IwaraApi, private val
         submit({ prepared -> prepared.onFailure { finish(Result.failure(it)) }.onSuccess { (s, folder, originals) ->
             fun next(index: Int, count: Int) {
                 if (index == originals.size) {
-                    store.migrationProgress(s, "旧版收藏已同步至官网 · 本地记录已保留", complete = true)
+                    store.migrationProgress(s, "旧版收藏已同步至独立默认收藏夹 · 原分类与本地记录已保留", complete = true)
                     finish(Result.success(count)); return
                 }
                 submit({ result -> result.onFailure { finish(Result.failure(IOException("已处理 $index 条；${it.message}"))) }
                     .onSuccess { changed -> next(index + 1, count + if (changed) 1 else 0) } }, priority = 10) {
                     requireCurrent(s); val item = originals[index]
                     if (AppPrefs(app).isolateLibrary != isolatedSource) throw IOException("本地收藏隔离设置已变化，请重新同步")
-                    if (store.migrated(s, item.id)) return@submit false
-                    val already = memberships(s, item.id).any { it.id == folder.id && it.added }
+                    if (store.dedicatedMigrationItem(s, item.id).isNotBlank()) return@submit false
+                    val rows = memberships(s, item.id)
+                    val already = rows.any { it.id == folder.id && it.added }
+                    // A v1 checkpoint only means "processed", not "inserted by us". If the
+                    // user has since removed it (or deleted that entire folder), never undo
+                    // that choice while repairing the old migration destination.
+                    if (!already && store.migrated(s, item.id) && rows.none { it.id == store.migrationTarget(s) && it.added }) {
+                        if (!store.markDedicatedMigrationItem(s, item.id, "skipped_removed")) throw IOException("无法保存同步进度，请重试")
+                        return@submit false
+                    }
                     if (!already) {
                         api.setPlaylistVideoBlocking(folder.id, item.id, true)
                         requireCurrent(s); store.confirmWrite(s, item, folder, true)
                     }
-                    if (!store.markMigrated(s, item.id)) throw IOException("无法保存同步进度，请重试")
-                    store.migrationProgress(s, "正在将旧版收藏同步至官网：${index + 1}/${originals.size} · 公开")
+                    if (!store.markDedicatedMigrationItem(s, item.id, if (already) "already_present" else "added")) throw IOException("无法保存同步进度，请重试")
+                    store.migrationProgress(s, "正在同步至独立默认收藏夹：${index + 1}/${originals.size} · 公开")
                     !already
                 }
             }
@@ -211,10 +291,7 @@ class PlaylistFavorites(context: Context, private val api: IwaraApi, private val
             requireCurrent(s)
             if (AppPrefs(app).isolateLibrary != isolatedSource) throw IOException("本地收藏隔离设置已变化，请重新同步")
             val folder = if (originals.isEmpty()) PlaylistFolder("", DEFAULT_TITLE) else {
-                val all = folders(s)
-                val target = store.migrationTarget(s)
-                all.firstOrNull { it.id == target } ?: if (target.isNotBlank() && automatic) throw IOException("原迁移收藏夹已删除，请在我的收藏中重试同步")
-                    else defaultFolder(s, all).also { store.setMigrationTarget(s, it.id) }
+                dedicatedMigrationFolder(s, folders(s), retryUnconfirmedCreation)
             }
             if (folder.id.isNotBlank()) store.setDefault(s, folder.id)
             Triple(s, folder, originals)

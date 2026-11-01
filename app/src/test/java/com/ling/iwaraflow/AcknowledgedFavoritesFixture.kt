@@ -15,5 +15,12 @@ internal fun acknowledgedFavoritesFixture(): PlaylistFavorites {
         null
     }.`when`(controller).add(any<VideoItem>() ?: VideoItem("fixture", "Fixture", "Author", emptyList(), 0),
         any<((Result<PlaylistFavorites.Change>) -> Unit)>() ?: {})
+    doAnswer {
+        val item = it.getArgument<VideoItem>(0)
+        val changed = saved.remove(item.id)
+        it.getArgument<(Result<PlaylistFavorites.Change>) -> Unit>(1)(Result.success(PlaylistFavorites.Change(false, changed)))
+        null
+    }.`when`(controller).remove(any<VideoItem>() ?: VideoItem("fixture", "Fixture", "Author", emptyList(), 0),
+        any<((Result<PlaylistFavorites.Change>) -> Unit)>() ?: {})
     return controller
 }

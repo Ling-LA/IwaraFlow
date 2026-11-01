@@ -382,7 +382,7 @@ class IwaraApi(context: Context, private val apiRoot: String = DEFAULT_API_ROOT)
         return PlaylistVideoPage(folder, items, root.optInt("count", folder.count), hasMorePages(root, page, rows.length()))
     }
 
-    fun createPlaylistBlocking(title: String): PlaylistFolder {
+    fun createPlaylistBlocking(title: String, excludedIds: Set<String> = emptySet()): PlaylistFolder {
         val clean = title.trim()
         require(clean.isNotEmpty() && clean.length <= 100) { "收藏夹名称需为 1 至 100 个字符" }
         val snapshot = likeStates.snapshot()
@@ -396,7 +396,7 @@ class IwaraApi(context: Context, private val apiRoot: String = DEFAULT_API_ROOT)
             for (page in 0 until 1000) {
                 if (!likeStates.isCurrent(snapshot)) throw IOException("账号已切换，请重试")
                 val batch = getPlaylistFoldersBlocking(snapshot.account, page)
-                matches += batch.folders.filter { it.title == clean }
+                matches += batch.folders.filter { it.title == clean && it.id !in excludedIds }
                 if (!batch.hasMore) {
                     if (matches.size == 1) return matches.single()
                     break
@@ -460,7 +460,7 @@ class IwaraApi(context: Context, private val apiRoot: String = DEFAULT_API_ROOT)
                 if (response.code == 401) synchronized(SecureSessionStore.accountLock) {
                     if (likeStates.isCurrent(snapshot)) session.accessToken = null
                 }
-                throw IOException(extractMessage(raw, "更新收藏夹失败（HTTP ${response.code}）"))
+                throw PlaylistHttpException(response.code, extractMessage(raw, "更新收藏夹失败（HTTP ${response.code}）"))
             }
             if (!likeStates.isCurrent(snapshot)) throw IOException("账号已切换，请重试")
             raw
@@ -669,8 +669,27 @@ class IwaraApi(context: Context, private val apiRoot: String = DEFAULT_API_ROOT)
         return FollowingPage(users, root.optInt("count", -1), hasMorePages(root, page, arr.length()))
     }
 
-    fun resolveSources(videoId: String, callback: (Result<List<VideoSource>>) -> Unit) {
-        enqueuePlayback(callback) { runCatching { resolveSourcesBlocking(videoId) } }
+    fun resolveSources(videoId: String, callback: (Result<List<VideoSource>>) -> Unit): java.io.Closeable {
+        val cancellation = RequestCancellation()
+        val queuedAt = android.os.SystemClock.elapsedRealtime()
+        synchronized(lifecycleLock) {
+            if (!closed) {
+                val epoch = requestEpoch.get()
+                playbackIo.execute {
+                    if (closed || epoch != requestEpoch.get() || cancellation.cancelled) return@execute
+                    val started = android.os.SystemClock.elapsedRealtime()
+                    requestPriority.set(RequestScheduler.Priority.PLAYBACK)
+                    val result = try { cancellation.run { runCatching { resolveSourcesBlocking(videoId) } } }
+                        finally { requestPriority.remove() }
+                    PlaybackMetrics.sourceResolved(started - queuedAt, android.os.SystemClock.elapsedRealtime() - started,
+                        result.isSuccess, cancellation.cancelled)
+                    if (!closed && epoch == requestEpoch.get() && !cancellation.cancelled) callback(result)
+                }
+            }
+        }
+        // Cancels this video's live HTTP calls and makes queued work a no-op. Other pages and
+        // metadata requests keep running, while the two playback workers are freed immediately.
+        return java.io.Closeable { cancellation.cancel() }
     }
     fun resolvePreloadSources(videoId: String, callback: (Result<List<VideoSource>>) -> Unit) {
         enqueue(callback) { runCatching { resolveSourcesBlocking(videoId) } }
@@ -689,7 +708,7 @@ class IwaraApi(context: Context, private val apiRoot: String = DEFAULT_API_ROOT)
             }
             throw IOException(reason)
         }
-        return resolveFileUrlBlocking(fileUrl)
+        return resolveFileUrlBlocking(fileUrl).also { MediaCacheIdentity.registerFresh(videoId, it) }
     }
 
     fun resolveStream(videoId: String, quality: String = "highest", callback: (Result<String>) -> Unit) {

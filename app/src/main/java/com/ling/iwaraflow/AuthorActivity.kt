@@ -139,6 +139,7 @@ class AuthorActivity : AppCompatActivity(), PlaybackGuideHost {
         )
         pager.registerOnPageChangeCallback(object : ViewPager2.OnPageChangeCallback() {
             override fun onPageSelected(position: Int) {
+                if (FullscreenMode.isChangingViewport(pager)) return
                 comments.close()
                 feedAdapter.setActive(position)
                 if (!noMore && !loadingPage && position >= feedAdapter.itemCount - 5) loadNextPage()

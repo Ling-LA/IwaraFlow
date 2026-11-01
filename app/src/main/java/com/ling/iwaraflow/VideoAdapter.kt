@@ -441,6 +441,24 @@ class VideoAdapter(
             onVisibilityChange = { itemView.post { applyVideoInsets() } }
         }.also { (view as android.widget.FrameLayout).addView(it,
             android.widget.FrameLayout.LayoutParams(-2, -2, android.view.Gravity.BOTTOM or android.view.Gravity.CENTER_HORIZONTAL)) }
+        private val sourceRetry = androidx.appcompat.widget.AppCompatTextView(view.context).apply {
+            val density = resources.displayMetrics.density
+            tag = "playback_retry"; textSize = 14f; gravity = android.view.Gravity.CENTER
+            setTextColor(0xFF285C7B.toInt()); setPadding((18*density).toInt(), (12*density).toInt(), (18*density).toInt(), (12*density).toInt())
+            background = android.graphics.drawable.GradientDrawable().apply {
+                setColor(0xEEE4E9ED.toInt()); cornerRadius = 22*density
+            }
+            isFocusable = true; visibility = View.GONE
+            accessibilityLiveRegion = View.ACCESSIBILITY_LIVE_REGION_POLITE
+            setOnClickListener {
+                val item = bound
+                if (item != null && active && playbackEnabled && !released && sourceRequest == null) {
+                    recoveryAttempts = 0
+                    refreshSourceAfterError(item, "手动重试")
+                }
+            }
+        }.also { (view as android.widget.FrameLayout).addView(it,
+            android.widget.FrameLayout.LayoutParams(-2, -2, android.view.Gravity.CENTER)) }
         private val likeHold = HoldReaction(like, 0xFFFF365D.toInt(), favorite, 0xFFFFD54F.toInt()) { doubleReaction() }
         private val favoriteHold = CommentHold(favorite) { openFavoritePicker() }
         private val screenReactionHold = ScreenReactionHold(view) {
@@ -462,6 +480,10 @@ class VideoAdapter(
         fun restartDanmaku() = danmaku.restart()
         private var danmakuLoaded = false
         private var player: ExoPlayer? = null
+        private var sourceRequest: java.io.Closeable? = null
+        private var choiceRequest: java.io.Closeable? = null
+        private var choiceGeneration = 0L
+        private var playbackMetrics: PlaybackMetrics.Session? = null
         private var resumeAfterGuide = false
         fun setGuideVisible(visible: Boolean) {
             if (visible) {
@@ -685,15 +707,18 @@ class VideoAdapter(
             quality.text = displayQuality(item)
 
             like.setOnClickListener {
+                // Buttons toggle the acknowledged state; only a double tap on the picture
+                // may earn the small once-only extra preference signal.
+                likeStates.apply(item)
                 val desired = !item.liked
                 // 动画播在按钮自己身上，而不是屏幕正中央。
-                toggleRemoteLike(item, desired) {
+                toggleRemoteLike(item, desired, onAccepted = {
                     reactionBurst.playOn(like, ReactionBurstView.Kind.LIKE)
-                }
+                })
             }
             favorite.setOnClickListener {
                 if (favoriteBusy) return@setOnClickListener
-                if (item.localFavorite) openFavoritePicker() else addFavorite(item)
+                if (item.localFavorite) removeFavorite(item) else addFavorite(item)
             }
             accessibilityActions.forEach { androidx.core.view.ViewCompat.removeAccessibilityAction(itemView, it) }
             accessibilityActions.clear()
@@ -724,8 +749,9 @@ class VideoAdapter(
                     lastTap = 0L
                     // 双击点赞：动画播在手指按下的位置。
                     reactionBurst.playAt(downX, downY, ReactionBurstView.Kind.LIKE)
+                    likeStates.apply(item)
                     if (!item.liked) toggleRemoteLike(item, true)
-                    else if (api.isLoggedIn()) history.recordExtraLikeAsync(item) { added ->
+                    else if (!likeBusy && api.isLoggedIn()) history.recordExtraLikeAsync(item) { added ->
                         if (added) onSignal?.invoke(item, "extra_like")
                     }
                 } else {
@@ -882,6 +908,13 @@ class VideoAdapter(
             favoriteController?.showPicker(activity, item) { acceptFavorite(item, it) }
         }
 
+        private fun removeFavorite(item: VideoItem) {
+            if (released || favoriteBusy) return
+            if (!api.isLoggedIn()) { onNeedLogin(); return }
+            favoriteBusy = true
+            favoriteController?.remove(item) { acceptFavorite(item, it) }
+        }
+
         private fun doubleReaction() {
             val item = bound ?: return
             if (!active || likeBusy || favoriteBusy) return
@@ -914,9 +947,6 @@ class VideoAdapter(
         private fun start(item: VideoItem) {
             val bindGeneration = generation
             if (!active || !playbackEnabled || released || player != null) return
-            val startedAt = android.os.SystemClock.elapsedRealtime()
-            var firstFrame = false
-            var rebufferAt = 0L
             val renderersFactory = DefaultRenderersFactory(itemView.context).setEnableDecoderFallback(true)
             val p = ExoPlayer.Builder(itemView.context, renderersFactory)
                 .setLoadControl(feedLoadControl())
@@ -924,11 +954,9 @@ class VideoAdapter(
                 repeatMode = Player.REPEAT_MODE_OFF
                 playWhenReady = false
                 volume = 0f
+                setAudioAttributes(androidx.media3.common.AudioAttributes.DEFAULT, true)
+                setHandleAudioBecomingNoisy(true)
                 addListener(object : Player.Listener {
-                    override fun onRenderedFirstFrame() {
-                        if (!firstFrame) { firstFrame = true; PlaybackMetrics.firstFrame(android.os.SystemClock.elapsedRealtime() - startedAt) }
-                    }
-
                     override fun onPlayWhenReadyChanged(playWhenReady: Boolean, reason: Int) {
                         // Lifecycle/guide pauses must not replace the user's playback intent.
                         if (active && playbackEnabled && !guideVisible && bound?.id == item.id) {
@@ -968,12 +996,7 @@ class VideoAdapter(
                     }
 
                     override fun onPlaybackStateChanged(playbackState: Int) {
-                        val now = android.os.SystemClock.elapsedRealtime()
-                        if (playbackState == Player.STATE_BUFFERING && firstFrame && rebufferAt == 0L) rebufferAt = now
-                        else if (playbackState != Player.STATE_BUFFERING && rebufferAt != 0L) {
-                            PlaybackMetrics.buffered(now - rebufferAt); rebufferAt = 0L
-                        }
-
+                        if (playbackState == Player.STATE_READY) sourceRetry.visibility = View.GONE
                         if (playbackState == Player.STATE_ENDED) networkHint.reset()
                         else networkHint.networkStable(playbackState == Player.STATE_READY)
                         if (playbackState == Player.STATE_BUFFERING) {
@@ -983,7 +1006,7 @@ class VideoAdapter(
                             bufferingSince = 0L
                             if (stableSince == 0L) stableSince = android.os.SystemClock.elapsedRealtime()
                         }
-                        if (playbackState == Player.STATE_READY) { recoveryAttempts = 0; watch.noteReady() }
+                        if (playbackState == Player.STATE_READY) watch.noteReady()
                         if (playbackState == Player.STATE_ENDED) watch.noteEnded()
                         if (playbackState == Player.STATE_READY && active) {
                             val pos = bindingAdapterPosition
@@ -1002,6 +1025,7 @@ class VideoAdapter(
                 })
             }
             player = p
+            playbackMetrics = PlaybackMetrics.track(p)
             playerView.player = p
             danmaku.player = p
             danmaku.invalidate()
@@ -1012,13 +1036,18 @@ class VideoAdapter(
                 prepareChosenSource(item, cachedSources, preservePosition = false)
                 return
             }
-            api.resolveSources(item.id) { result ->
+            sourceRequest?.close()
+            sourceRequest = api.resolveSources(item.id) { result ->
                 itemView.post {
                     if (released || !playbackEnabled || !active || generation != bindGeneration || bound?.id != item.id || player !== p) return@post
+                    sourceRequest = null
                     result.onSuccess { sources ->
                         item.sources = sources
                         prepareChosenSource(item, sources, preservePosition = false)
-                    }.onFailure { title.text = "${item.title}\n[播放地址获取失败：${it.message}]" }
+                    }.onFailure {
+                        NavigationDiagnostics.note(itemView.context, "当前视频播放源解析失败：${it.javaClass.simpleName}")
+                        showPlaybackRetry()
+                    }
                 }
             }
         }
@@ -1029,13 +1058,14 @@ class VideoAdapter(
             val source = if (!item.streamUrl.isNullOrBlank()) {
                 sources.firstOrNull { it.url == item.streamUrl } ?: api.chooseSource(sources, preferred)
             } else api.chooseSource(sources, preferred)
-            source ?: return
+            source ?: run { showPlaybackRetry(); return }
             val oldPosition = if (preservePosition) p.currentPosition else item.resumePositionMs.coerceAtLeast(0L)
             val shouldPlay = active && item.resumePlayWhenReady
             item.streamUrl = source.url
             if (item.selectedQuality == null && preferred != "highest") item.selectedQuality = source.name
             quality.text = "画质\n" + (item.selectedQuality ?: if (preferred == "highest") "最高" else source.name)
             mediaCache.registerSources(item.id, sources)
+            playbackMetrics?.intentionalChange()
             p.setMediaSource(mediaCache.createMediaSource(source.url))
             if (oldPosition > 0L) p.seekTo(oldPosition)
             p.prepare()
@@ -1095,6 +1125,11 @@ class VideoAdapter(
             tapHandler.removeCallbacks(holdToSpeed)
             stopSpeedBoost()
             stopWatchdog()
+            sourceRequest?.close(); sourceRequest = null
+            cancelQualityRequest()
+            // An idle player with a cancelled source request cannot resume by play() alone.
+            // Recreate it on return; prepared players retain their last rendered frame.
+            if (p.playbackState == Player.STATE_IDLE) { releasePlayerOnly(); return }
             p.playWhenReady = false
             p.pause()
         }
@@ -1247,7 +1282,7 @@ class VideoAdapter(
                 if (p.playWhenReady && bufferingSince > 0 && android.os.SystemClock.elapsedRealtime() - bufferingSince > 5000) {
                     offerLowerQuality()
                 }
-                val shouldAdvance = p.playWhenReady && p.playbackState == Player.STATE_READY
+                val shouldAdvance = p.isPlaying && !seeking
                 if (shouldAdvance && lastWatchdogPosition >= 0 && position <= lastWatchdogPosition + 120L) stalledChecks++
                 else stalledChecks = 0
                 if (stalledChecks >= 2) {
@@ -1282,6 +1317,7 @@ class VideoAdapter(
             p.stop()
             p.clearMediaItems()
             mediaCache.registerSources(item.id, sources)
+            playbackMetrics?.intentionalChange()
             p.setMediaSource(mediaCache.createMediaSource(source.url))
             p.prepare()
             if (position > 0L) p.seekTo(position)
@@ -1300,12 +1336,14 @@ class VideoAdapter(
          */
         private fun refreshSourceAfterError(item: VideoItem, reason: String) {
             val p = player ?: return
-            val position = p.currentPosition.coerceAtLeast(0L)
+            val position = (if (p.mediaItemCount == 0) item.resumePositionMs else p.currentPosition).coerceAtLeast(0L)
+            item.resumePositionMs = position
             if (recoveryAttempts >= MAX_ERROR_RECOVERIES) {
-                title.text = "${item.title}\n[播放失败：$reason]"
+                showPlaybackRetry()
                 return
             }
             recoveryAttempts += 1
+            showPlaybackRetry(loading = true)
             val bindGeneration = generation
             val scheme = item.streamUrl?.substringBefore(':').orEmpty().lowercase()
             if (scheme == "content" || scheme == "file") {
@@ -1314,24 +1352,36 @@ class VideoAdapter(
             }
             item.sources = null
             item.streamUrl = null
-            api.resolveSources(item.id) { result ->
+            sourceRequest?.close()
+            sourceRequest = api.resolveSources(item.id) { result ->
                 itemView.post {
-                    if (released || !active || generation != bindGeneration || bound?.id != item.id) return@post
+                    if (released || !active || generation != bindGeneration || bound?.id != item.id || player !== p) return@post
+                    sourceRequest = null
                     result.onSuccess { sources ->
                         item.sources = sources
                         item.resumePositionMs = position
                         prepareChosenSource(item, sources, preservePosition = false)
                     }.onFailure {
-                        title.text = "${item.title}\n[播放地址刷新失败：${it.message}]"
+                        NavigationDiagnostics.note(itemView.context, "当前视频播放源刷新失败：${it.javaClass.simpleName}")
+                        showPlaybackRetry()
                     }
                 }
             }
         }
 
+        private fun showPlaybackRetry(loading: Boolean = false) {
+            sourceRetry.text = if (loading) "正在重新连接…" else "播放失败 · 点击重试"
+            sourceRetry.contentDescription = sourceRetry.text
+            sourceRetry.isEnabled = !loading
+            sourceRetry.visibility = View.VISIBLE
+        }
+
         private fun persistHistory(completed: Boolean) {
             val item = bound ?: return
             val p = player ?: return
-            val position = p.currentPosition.coerceAtLeast(0L)
+            // A source may still be resolving: an empty player reports zero, not the
+            // saved resume point. Backgrounding must not overwrite that saved point.
+            val position = (if (p.mediaItemCount == 0) item.resumePositionMs else p.currentPosition).coerceAtLeast(0L)
             val duration = p.duration.coerceAtLeast(0L)
             // 已经放完的视频记 0，不记片尾：否则划回来时从片尾起播，立刻又 ENDED、
             // 又自动跳下一条，看上去就是“划不回去”。
@@ -1391,6 +1441,8 @@ class VideoAdapter(
 
         private fun updateLikeUi(item: VideoItem) {
             likeStates.apply(item)
+            like.contentDescription = if (item.liked) "取消点赞" else "点赞"
+            favorite.contentDescription = if (item.localFavorite) "取消收藏，长按管理收藏夹" else "收藏，长按选择收藏夹"
             like.setIcon(
                 if (item.liked) R.drawable.ic_heart_rounded else R.drawable.ic_heart_rounded_outline,
                 if (item.liked) 0xFFFF365D.toInt() else 0xFFFFFFFF.toInt()
@@ -1412,13 +1464,19 @@ class VideoAdapter(
         }
 
         private fun showQualityChooser(item: VideoItem, forDownload: Boolean) {
+            if (released || !active || !playbackEnabled || bound?.id != item.id) return
             val cached = item.sources
             if (!cached.isNullOrEmpty() && !item.refreshSourcesForSelection) { openSourceDialog(item, cached, forDownload); return }
             val bindGeneration = generation
+            val requestPlayer = player
             Toast.makeText(itemView.context, "正在读取清晰度…", Toast.LENGTH_SHORT).show()
-            api.resolveSources(item.id) { result ->
+            cancelQualityRequest()
+            val requestGeneration = choiceGeneration
+            choiceRequest = api.resolveSources(item.id) { result ->
                 itemView.post {
-                    if (released || generation != bindGeneration || bound?.id != item.id) return@post
+                    if (released || !active || !playbackEnabled || generation != bindGeneration ||
+                        choiceGeneration != requestGeneration || player !== requestPlayer || bound?.id != item.id) return@post
+                    choiceRequest = null
                     result.onSuccess { sources ->
                         item.sources = sources; item.refreshSourcesForSelection = false
                         openSourceDialog(item, sources, forDownload)
@@ -1426,6 +1484,13 @@ class VideoAdapter(
                         .onFailure { Toast.makeText(itemView.context, "清晰度获取失败：${it.message}", Toast.LENGTH_SHORT).show() }
                 }
             }
+        }
+
+        private fun cancelQualityRequest() {
+            // Network cancellation cannot retract a reply already queued on the UI thread.
+            // Invalidate it even if this exact player is resumed before that reply runs.
+            choiceGeneration++
+            choiceRequest?.close(); choiceRequest = null
         }
 
         private fun openSourceDialog(item: VideoItem, sources: List<VideoSource>, forDownload: Boolean) {
@@ -1491,6 +1556,10 @@ class VideoAdapter(
         }
 
         private fun releasePlayerOnly() {
+            sourceRequest?.close(); sourceRequest = null
+            cancelQualityRequest()
+            sourceRetry.visibility = View.GONE
+            playbackMetrics?.close(); playbackMetrics = null
             speedBoosting = false
             seeking = false
             speedIndicator.visibility = View.GONE

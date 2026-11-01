@@ -23,12 +23,14 @@ gradle :app:connectedDebugAndroidTest -Pandroid.testInstrumentationRunnerArgumen
 adb install -r app/build/outputs/apk/debug/app-debug.apk
 adb install -r app/build/outputs/apk/androidTest/debug/app-debug-androidTest.apk
 mkdir -p app/build/reports/ui-checks
-for phase in prepare restore; do
-  adb shell am force-stop com.ling.iwaraflow
-  log="app/build/reports/ui-checks/warm-$phase.txt"
-  adb shell am instrument -w -r \
-    -e class 'com.ling.iwaraflow.WarmRecommendationDeviceTest#coldStartUsesEncryptedQueueAndPlaysCachedVideoWithExpiredUrl' \
-    -e phase "$phase" com.ling.iwaraflow.test/androidx.test.runner.AndroidJUnitRunner > "$log"
-  cat "$log"
-  grep -F 'OK (1 test)' "$log"
+for days in 7 30 90; do
+  for phase in prepare restore; do
+    adb shell am force-stop com.ling.iwaraflow
+    log="app/build/reports/ui-checks/warm-$days-$phase.txt"
+    adb shell am instrument -w -r \
+      -e class 'com.ling.iwaraflow.WarmRecommendationDeviceTest#coldStartUsesEncryptedQueueAndPlaysCachedVideoWithExpiredUrl' \
+      -e ageDays "$days" -e phase "$phase" com.ling.iwaraflow.test/androidx.test.runner.AndroidJUnitRunner > "$log"
+    cat "$log"
+    grep -F 'OK (1 test)' "$log"
+  done
 done

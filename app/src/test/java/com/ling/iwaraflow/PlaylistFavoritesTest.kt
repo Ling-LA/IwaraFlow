@@ -111,7 +111,7 @@ class PlaylistFavoritesTest {
                     favorites.migrateLegacyIfNeeded()
                     waitUntil { favorites.store.migrationComplete() }
                     assertTrue(favorites.isFavorite(item.id)); assertTrue(history.isLocalFavorite(item.id))
-                    assertTrue(PlaylistStore(context).migrated(favorites.store.snapshot(), item.id))
+                    assertEquals("added", PlaylistStore(context).dedicatedMigrationItem(favorites.store.snapshot(), item.id))
                     favorites.store.confirmMemberships(favorites.store.snapshot(), item.id, emptySet())
                     favorites.migrateLegacyIfNeeded(); shadowOf(Looper.getMainLooper()).idle()
                     assertFalse(favorites.isFavorite(item.id)); assertEquals(4, server.requestCount)
@@ -121,13 +121,16 @@ class PlaylistFavoritesTest {
     }
     @Test fun partialMigrationRetriesOnlyRemainingVideos() {
         MockWebServer().use { server ->
-            val writes = HashMap<String, Int>(); var rejectOnce = true
+            val writes = HashMap<String, Int>(); var rejectOnce = true; var created = false
             server.dispatcher = object : Dispatcher() {
                 override fun dispatch(request: RecordedRequest): MockResponse {
                     val path = request.requestUrl!!.encodedPath
-                    if (path == "/playlists") return MockResponse().setBody("""{"count":2,"limit":50,"page":0,"results":[{"id":"folder","title":"旅行"},{"id":"other-folder","title":"新默认"}]}""")
-                    if (path == "/light/playlists") return MockResponse().setBody("""[{"id":"folder","title":"旅行","added":false}]""")
-                    if (path.startsWith("/playlist/folder/")) {
+                    if (path == "/playlists" && request.method == "POST") {
+                        created = true; return MockResponse().setBody("""{"id":"dedicated","title":"默认收藏夹"}""")
+                    }
+                    if (path == "/playlists") return MockResponse().setBody("""{"count":${if (created) 3 else 2},"limit":50,"page":0,"results":[{"id":"folder","title":"旅行"},{"id":"other-folder","title":"新默认"}${if (created) ",{\"id\":\"dedicated\",\"title\":\"默认收藏夹\"}" else ""}]}""")
+                    if (path == "/light/playlists") return MockResponse().setBody("""[{"id":"dedicated","title":"默认收藏夹","added":false}]""")
+                    if (path.startsWith("/playlist/dedicated/")) {
                         val id = path.substringAfterLast('/'); writes[id] = (writes[id] ?: 0) + 1
                         if (writes.size == 2 && rejectOnce) { rejectOnce = false; return MockResponse().setResponseCode(503).setBody("{}") }
                         return MockResponse().setResponseCode(204)
@@ -147,6 +150,7 @@ class PlaylistFavoritesTest {
                     val retry = CompletableFuture<Result<Int>>(); favorites.importLegacy { retry.complete(it) }
                     assertTrue(await(retry).isSuccess); assertTrue(favorites.store.migrationComplete())
                     assertEquals(listOf(1, 2), writes.values.sorted()); assertEquals(2, history.localFavorites().size)
+                    assertEquals("dedicated", favorites.store.dedicatedMigrationTarget(favorites.store.snapshot()))
                 } finally { favorites.close(); api.close() }
             }
         }
@@ -160,16 +164,17 @@ class PlaylistFavoritesTest {
             HistoryStore(context).use { source -> source.setLocalFavorite(item, true) }
             MockWebServer().use { server ->
                 server.enqueue(MockResponse().setBody("""{"count":1,"results":[{"id":"folder","title":"旅行"}]}"""))
-                server.enqueue(MockResponse().setBody("""[{"id":"folder","title":"旅行","added":false}]"""))
+                server.enqueue(MockResponse().setBody("""{"id":"dedicated","title":"默认收藏夹"}"""))
+                server.enqueue(MockResponse().setBody("""[{"id":"dedicated","title":"默认收藏夹","added":false}]"""))
                 server.enqueue(MockResponse().setResponseCode(204))
                 val api = IwaraApi(context, server.url("/").toString().trimEnd('/'))
                 val favorites = PlaylistFavorites(context, api, stale)
                 try {
                     favorites.migrateLegacyIfNeeded(); waitUntil { favorites.store.migrationComplete() }
                     assertEquals("account-a", stale.accountId)
-                    server.takeRequest(); server.takeRequest()
-                    assertEquals("/playlist/folder/video", server.takeRequest().path)
-                    assertFalse(favorites.isFavorite("anonymous-only")); assertEquals(3, server.requestCount)
+                    server.takeRequest(); server.takeRequest(); server.takeRequest()
+                    assertEquals("/playlist/dedicated/video", server.takeRequest().path)
+                    assertFalse(favorites.isFavorite("anonymous-only")); assertEquals(4, server.requestCount)
                 } finally { favorites.close(); api.close() }
             }
         }

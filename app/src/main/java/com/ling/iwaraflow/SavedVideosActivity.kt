@@ -125,6 +125,7 @@ class SavedVideosActivity : AppCompatActivity(), PlaybackGuideHost {
         )
         pager.registerOnPageChangeCallback(object : ViewPager2.OnPageChangeCallback() {
             override fun onPageSelected(position: Int) {
+                if (FullscreenMode.isChangingViewport(pager)) return
                 comments.close()
                 feedAdapter.setActive(position)
                 if (position >= items.size - 5) loadLibraryPage()

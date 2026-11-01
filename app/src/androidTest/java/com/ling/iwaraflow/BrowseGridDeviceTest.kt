@@ -169,7 +169,17 @@ class BrowseGridDeviceTest {
                 (pager.adapter as VideoAdapter).activeVideoAspect()?.let { it > 1f } == true &&
                     (pager.getChildAt(0) as RecyclerView).findViewHolderForAdapterPosition(9) != null
             }
+            val fullscreenSelections = CopyOnWriteArrayList<String>()
+            val fullscreenActiveVideos = CopyOnWriteArrayList<String?>()
+            var fullscreenPhase = "enter"
             main {
+                pager.registerOnPageChangeCallback(object : ViewPager2.OnPageChangeCallback() {
+                    override fun onPageSelected(position: Int) {
+                        val active = (pager.adapter as VideoAdapter).activeItem()?.id
+                        fullscreenSelections += "$fullscreenPhase: page=$position, active=$active, guard=${FullscreenMode.isChangingViewport(pager)}"
+                        fullscreenActiveVideos += active
+                    }
+                })
                 (pager.getChildAt(0) as RecyclerView).findViewHolderForAdapterPosition(9)!!.itemView
                     .findViewById<View>(R.id.fullscreen).performClick()
             }
@@ -179,6 +189,7 @@ class BrowseGridDeviceTest {
                         ?.findViewById<View>(R.id.fullscreenSocial)?.isShown == true
             }
             main {
+                fullscreenPhase = "comments"
                 val card = (pager.getChildAt(0) as RecyclerView).findViewHolderForAdapterPosition(9)!!.itemView
                 assertTrue(card.findViewById<TextView>(R.id.fullscreenLikeCount).text.toString().contains("109"))
                 assertFalse(card.findViewById<View>(R.id.actionPanel).isShown)
@@ -202,10 +213,18 @@ class BrowseGridDeviceTest {
             ProfileUiDeviceTest().screenshot("fullscreen-comments-018")
             main { activity.onBackPressedDispatcher.onBackPressed() }
             await("Back must close fullscreen comments") { !activity.findViewById<View>(R.id.commentsPanel).isShown }
-            main { if ((pager.adapter as VideoAdapter).isFullscreen) activity.onBackPressedDispatcher.onBackPressed() }
-            await("Exiting fullscreen did not restore portrait playback") { pager.width < pager.height && !(pager.adapter as VideoAdapter).isFullscreen }
+            main {
+                fullscreenPhase = "exit"
+                if ((pager.adapter as VideoAdapter).isFullscreen) activity.onBackPressedDispatcher.onBackPressed()
+            }
+            await("Exiting fullscreen did not restore portrait playback") {
+                pager.width < pager.height && !(pager.adapter as VideoAdapter).isFullscreen && pager.isUserInputEnabled &&
+                    !(pager.getChildAt(0) as RecyclerView).isLayoutSuppressed && !FullscreenMode.isChangingViewport(pager)
+            }
             main {
                 assertEquals("grid-9", (pager.adapter as VideoAdapter).items[pager.currentItem].id)
+                assertTrue("Rotation must never activate a neighbouring video, even during framework layout notifications: $fullscreenSelections",
+                    fullscreenActiveVideos.all { it == "grid-9" })
                 activity.onBackPressedDispatcher.onBackPressed()
             }
             await("Back did not restore the category grid") { grid.isShown && pager.visibility == View.GONE }

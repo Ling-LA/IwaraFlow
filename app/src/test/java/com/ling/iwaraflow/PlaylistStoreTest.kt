@@ -58,4 +58,21 @@ class PlaylistStoreTest {
         AppPrefs(context).accountId = "account-b"
         assertFalse(store.claimMigration(store.snapshot())); assertFalse(store.migrated(store.snapshot(), item.id))
     }
+    @Test fun correctedMigrationJournalPreservesOldEvidenceAndIsAccountScoped() {
+        val store = PlaylistStore(context); val s = store.snapshot()
+        store.setMigrationTarget(s, "old-category"); store.markMigrated(s, item.id)
+        store.prepareMigrationCreation(s, "默认收藏夹", setOf("old-category"))
+        assertEquals(setOf("old-category"), PlaylistStore(context).migrationCreation(s)!!.existingIds)
+        assertTrue(store.setDedicatedMigrationTarget(s, "new-default"))
+        assertNull(store.migrationCreation(s))
+        assertTrue(store.markDedicatedMigrationItem(s, item.id, "added"))
+        store.migrationProgress(s, "done", complete = true)
+        val reopened = PlaylistStore(context)
+        assertEquals("old-category", reopened.migrationTarget(s)); assertTrue(reopened.migrated(s, item.id))
+        assertEquals("new-default", reopened.dedicatedMigrationTarget(s))
+        assertEquals("added", reopened.dedicatedMigrationItem(s, item.id)); assertTrue(reopened.migrationComplete(s))
+        AppPrefs(context).accountId = "account-b"
+        assertFalse(store.migrationComplete()); assertTrue(store.dedicatedMigrationTarget(store.snapshot()).isBlank())
+        assertFalse(store.markDedicatedMigrationItem(s, "other", "added"))
+    }
 }

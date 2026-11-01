@@ -52,7 +52,8 @@ class MediaPreloadCache(context: Context) {
 
     fun registerSources(videoId: String, sources: List<VideoSource>) = MediaCacheIdentity.register(videoId, sources)
 
-    fun progress(url: String?): Progress = if (url == null) Progress() else jobs[url]?.progress ?: Progress()
+    fun progress(url: String?): Progress = if (url == null) Progress() else jobs[url]?.progress
+        ?: if (pending.isDone) storedProgress(url) else Progress()
 
     /** Read persisted contiguous bytes, including after the downloading facade/process is gone.
      * Call only from a worker; cache initialization is bounded so startup can fall back. */
@@ -76,6 +77,7 @@ class MediaPreloadCache(context: Context) {
     }
 
     fun prefetchFull(url: String, primary: Boolean = true) {
+        if (MediaCacheIdentity.isCacheOnly(url)) return
         if (closed || !url.startsWith("https://") || !hasDiskRoom() || (NetworkProfile.isMetered(appContext) && !budget.allowed())) return
         jobs[url]?.let { it.primary = primary; return }
         val job = Job().apply { this.primary = primary }
@@ -91,11 +93,9 @@ class MediaPreloadCache(context: Context) {
             var throttleBytes = 0L
             val throttleStart = sampleAt
             try {
-                val writer = CacheWriter(state.cacheFactory.createDataSourceForDownloading(), DataSpec.Builder().setUri(url).build(), null) { length, cached, added ->
+                val writer = CacheWriter(state.preloadCacheFactory.createDataSourceForDownloading(), DataSpec.Builder().setUri(url).build(), null) { length, cached, added ->
                     val metered = NetworkProfile.isMetered(appContext)
                     if (metered && added > 0) budget.record(added)
-                    if (cached >= prefs.cacheBudgetMb.toLong() * 1024 * 1024 ||
-                        (metered && !budget.allowed())) throw BudgetReached()
                     val now = android.os.SystemClock.elapsedRealtime()
                     sampleBytes += added
                     if (now - sampleAt >= 1000) {
@@ -104,6 +104,8 @@ class MediaPreloadCache(context: Context) {
                     }
                     val contiguous = if (length > 0) state.cache.getCachedLength(MediaCacheIdentity.key(url), 0, length).coerceAtLeast(0) else cached
                     job.progress = Progress(length, contiguous, measuredRate)
+                    if (cached >= prefs.cacheBudgetMb.toLong() * 1024 * 1024 ||
+                        (metered && !budget.allowed())) throw BudgetReached()
                     if (job.cancelled || closed || !hasDiskRoom()) throw java.io.InterruptedIOException()
                     if (!job.primary && added > 0) {
                         // Leave most bandwidth to the currently prioritized video.
@@ -131,7 +133,13 @@ class MediaPreloadCache(context: Context) {
                 // Retain the stopped job until the video changes; do not retry every second.
             } catch (_: Exception) {
                 jobs.remove(url, job) // Allow retry after a transient network failure.
-            } finally { job.writer = null; budget.flush() }
+            } finally {
+                // Cancellation/budget stops also commit the last partial fragment on close.
+                // Report those persisted bytes instead of the previous progress callback.
+                val stored = storedProgress(url)
+                if (stored.total > 0 || stored.cached > 0) job.progress = stored.copy(bytesPerSecond = measuredRate)
+                job.writer = null; budget.flush()
+            }
         }
         }
     }
@@ -149,6 +157,11 @@ class MediaPreloadCache(context: Context) {
         .setUserAgent("IwaraFlow/Android")
         .setDefaultRequestProperties(mapOf("Referer" to "https://www.iwara.tv/"))
         .setTransferListener(PlaybackMetrics.transfer(androidx.media3.exoplayer.upstream.DefaultBandwidthMeter.getSingletonInstance(appContext)))) }
+    // The factory is opened by the playback loader, so cold cache initialization never blocks
+    // Activity creation and can never turn an expired link into an uncached HTTP request.
+    private val cacheOnlyMediaSourceFactory by lazy { DefaultMediaSourceFactory(androidx.media3.datasource.DataSource.Factory {
+        shared.cacheOnlyFactory.createDataSource()
+    }) }
     private fun hasDiskRoom(): Boolean = appContext.cacheDir.usableSpace > MIN_FREE_BYTES
     fun applyBudget() {
         initExecutor.execute {
@@ -177,19 +190,28 @@ class MediaPreloadCache(context: Context) {
         if (scheme == "content" || scheme == "file") {
             return localFactory.createMediaSource(MediaItem.fromUri(url))
         }
+        if (MediaCacheIdentity.isCacheOnly(url)) return cacheOnlyMediaSourceFactory.createMediaSource(MediaItem.fromUri(url))
         if (!pending.isDone) return uncachedFactory.createMediaSource(MediaItem.fromUri(url))
         return runCatching {
-            val factory = if (hasDiskRoom()) shared.mediaSourceFactory else DefaultMediaSourceFactory(shared.readOnlyCacheFactory)
+            val factory = when {
+                MediaCacheIdentity.isCacheOnly(url) -> DefaultMediaSourceFactory(shared.cacheOnlyFactory)
+                hasDiskRoom() -> shared.mediaSourceFactory
+                else -> DefaultMediaSourceFactory(shared.readOnlyCacheFactory)
+            }
             factory.createMediaSource(MediaItem.fromUri(url))
         }
-            .getOrElse { uncachedFactory.createMediaSource(MediaItem.fromUri(url)) }
+            .getOrElse {
+                // An expired restored URL must not escape the cache-only path after a cache error.
+                if (MediaCacheIdentity.isCacheOnly(url)) return@getOrElse cacheOnlyMediaSourceFactory.createMediaSource(MediaItem.fromUri(url))
+                uncachedFactory.createMediaSource(MediaItem.fromUri(url))
+            }
     }
 
     fun prefetch(url: String) = prefetch(url, 2L * 1024L * 1024L)
 
     /** Cache only the beginning of a video so the next swipe can start immediately. */
     fun prefetch(url: String, bytes: Long) {
-        if (closed) return
+        if (closed || MediaCacheIdentity.isCacheOnly(url)) return
         val state = shared
         state.executor.execute {
             runCatching {
@@ -198,7 +220,7 @@ class MediaPreloadCache(context: Context) {
                     .setPosition(0)
                     .setLength(bytes)
                     .build()
-                CacheWriter(state.cacheFactory.createDataSourceForDownloading(), dataSpec, null, null).cache()
+                CacheWriter(state.preloadCacheFactory.createDataSourceForDownloading(), dataSpec, null, null).cache()
             }
         }
     }
@@ -219,10 +241,13 @@ class MediaPreloadCache(context: Context) {
 
     private class SharedState(
         val cache: SimpleCache,
+        val databaseProvider: StandaloneDatabaseProvider,
         val evictor: ActiveVideoCacheEvictor,
         val cacheFactory: CacheDataSource.Factory,
+        val preloadCacheFactory: CacheDataSource.Factory,
         val mediaSourceFactory: DefaultMediaSourceFactory,
         val readOnlyCacheFactory: CacheDataSource.Factory,
+        val cacheOnlyFactory: CacheDataSource.Factory,
         val executor: ExecutorService
     )
 
@@ -254,8 +279,8 @@ class MediaPreloadCache(context: Context) {
                 evictor,
                 databaseProvider
             )
-            val upstreamFactory = DefaultHttpDataSource.Factory()
-                .setTransferListener(PlaybackMetrics.transfer(androidx.media3.exoplayer.upstream.DefaultBandwidthMeter.getSingletonInstance(context)))
+            fun upstreamFactory(preload: Boolean = false) = DefaultHttpDataSource.Factory()
+                .setTransferListener(PlaybackMetrics.transfer(androidx.media3.exoplayer.upstream.DefaultBandwidthMeter.getSingletonInstance(context), preload))
                 .setUserAgent("Mozilla/5.0 (Linux; Android 14) AppleWebKit/537.36 Chrome/152 Mobile Safari/537.36")
                 .setDefaultRequestProperties(mapOf("Referer" to "https://www.iwara.tv/"))
                 .setConnectTimeoutMs(10_000)
@@ -267,19 +292,38 @@ class MediaPreloadCache(context: Context) {
                     override fun onCachedBytesRead(cacheSizeBytes: Long, cachedBytesRead: Long) = PlaybackMetrics.cached(cachedBytesRead)
                     override fun onCacheIgnored(reason: Int) {}
                 })
-                .setUpstreamDataSourceFactory(upstreamFactory)
+                .setUpstreamDataSourceFactory(upstreamFactory())
+                .setFlags(CacheDataSource.FLAG_IGNORE_CACHE_ON_ERROR)
+            val preloadCacheFactory = CacheDataSource.Factory()
+                .setCache(cache)
+                .setCacheKeyFactory { spec -> spec.key ?: MediaCacheIdentity.key(spec.uri.toString()) }
+                .setEventListener(object : CacheDataSource.EventListener {
+                    override fun onCachedBytesRead(cacheSizeBytes: Long, cachedBytesRead: Long) = PlaybackMetrics.cached(cachedBytesRead, preload = true)
+                    override fun onCacheIgnored(reason: Int) {}
+                })
+                .setUpstreamDataSourceFactory(upstreamFactory(preload = true))
                 .setFlags(CacheDataSource.FLAG_IGNORE_CACHE_ON_ERROR)
             val created = SharedState(
                 cache = cache,
+                databaseProvider = databaseProvider,
                 evictor = evictor,
                 cacheFactory = cacheFactory,
+                preloadCacheFactory = preloadCacheFactory,
                 mediaSourceFactory = DefaultMediaSourceFactory(cacheFactory),
                 readOnlyCacheFactory = CacheDataSource.Factory()
                     .setCache(cache)
                     .setCacheKeyFactory { spec -> spec.key ?: MediaCacheIdentity.key(spec.uri.toString()) }
-                    .setUpstreamDataSourceFactory(upstreamFactory)
+                    .setUpstreamDataSourceFactory(upstreamFactory())
                     .setCacheWriteDataSinkFactory(null)
                     .setFlags(CacheDataSource.FLAG_IGNORE_CACHE_ON_ERROR),
+                cacheOnlyFactory = CacheDataSource.Factory()
+                    .setCache(cache)
+                    .setCacheKeyFactory { spec -> spec.key ?: MediaCacheIdentity.key(spec.uri.toString()) }
+                    .setCacheWriteDataSinkFactory(null)
+                    .setEventListener(object : CacheDataSource.EventListener {
+                        override fun onCachedBytesRead(cacheSizeBytes: Long, cachedBytesRead: Long) = PlaybackMetrics.cached(cachedBytesRead)
+                        override fun onCacheIgnored(reason: Int) {}
+                    }),
                 executor = Executors.newFixedThreadPool(3)
             )
             state = created
@@ -292,6 +336,7 @@ class MediaPreloadCache(context: Context) {
             val current = state ?: return@synchronized
             current.executor.shutdownNow()
             runCatching { current.cache.release() }
+            runCatching { current.databaseProvider.close() }
             state = null
             refs.set(0)
         }

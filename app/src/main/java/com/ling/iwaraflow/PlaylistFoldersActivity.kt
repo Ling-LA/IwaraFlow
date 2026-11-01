@@ -49,11 +49,13 @@ class PlaylistFoldersActivity : AppCompatActivity() {
             startActivity(Intent(this, SavedVideosActivity::class.java).putExtra(SavedVideosActivity.EXTRA_KIND, SavedVideosActivity.KIND_FAVORITES))
         }, LinearLayout.LayoutParams(0, -2, 1f))
         legacy.addView(page.action("重试同步") {
+            val pendingCreation = favorites.store.migrationCreation(favorites.store.snapshot()) != null
             if (!importing) AlertDialog.Builder(this).setTitle("导入旧版收藏")
-                .setMessage("将旧版本地收藏添加到 Iwara 默认公开收藏夹。原有记录会保留；已导入的视频不会重复添加。")
+                .setMessage("将旧版本地收藏导入单独新建的默认公开收藏夹；已有官网分类与本地记录均保留，已处理或已移除的视频不会重复添加。" +
+                    if (pendingCreation) "\n\n上次创建结果未确认。请先到官网核对：若没有新收藏夹，点击导入会重试创建；若有多个同名新夹，请先在官网处理重名。" else "")
                 .setNegativeButton("取消", null).setPositiveButton("导入") { _, _ ->
                     importing = true; status.text = "正在导入旧版收藏…"
-                    favorites.importLegacy { result ->
+                    favorites.importLegacy(retryUnconfirmedCreation = pendingCreation) { result ->
                         importing = false
                         result.onSuccess { Toast.makeText(this, "已导入 $it 条", Toast.LENGTH_LONG).show(); reload() }
                             .onFailure { status.text = it.message }

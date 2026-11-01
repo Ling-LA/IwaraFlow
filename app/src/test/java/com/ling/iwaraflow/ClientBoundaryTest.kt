@@ -34,6 +34,17 @@ class ClientBoundaryTest {
         assertEquals("https://unknown.example/path?token=x", MediaCacheIdentity.key("https://unknown.example/path?token=x"))
     }
 
+    @Test fun restoredExpiredLinkStaysCacheOnlyUntilFreshServerResolution() {
+        val source = VideoSource("720", "https://cdn.test/authorization-${System.nanoTime()}?expires=1", 720)
+        MediaCacheIdentity.register("cached-item", listOf(source))
+        MediaCacheIdentity.requireCachedBytes(source.url)
+        // Binding the restored holder or scheduling preload must not re-authorize the URL.
+        MediaCacheIdentity.register("cached-item", listOf(source))
+        assertTrue(MediaCacheIdentity.isCacheOnly(source.url))
+        MediaCacheIdentity.registerFresh("cached-item", listOf(source))
+        assertFalse(MediaCacheIdentity.isCacheOnly(source.url))
+    }
+
     @Test fun previewReturnsMetadataBeforeSlowProbeAndCancellationStopsItsCallback() {
         PlayableVideoGate.clearProcessCache()
         MockWebServer().use { server ->

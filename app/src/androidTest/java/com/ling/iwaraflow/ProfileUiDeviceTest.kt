@@ -24,6 +24,13 @@ class ProfileUiDeviceTest {
         if (view is TextView) add(view)
         if (view is ViewGroup) repeat(view.childCount) { addAll(texts(view.getChildAt(it))) }
     }
+    private fun windowRoots(): List<View> {
+        if (android.os.Build.VERSION.SDK_INT >= 29) return android.view.inspector.WindowInspector.getGlobalWindowViews()
+        val type = Class.forName("android.view.WindowManagerGlobal")
+        val global = type.getDeclaredMethod("getInstance").apply { isAccessible = true }.invoke(null)
+        @Suppress("UNCHECKED_CAST")
+        return (type.getDeclaredField("mViews").apply { isAccessible = true }.get(global) as List<View>).toList()
+    }
     internal fun screenshot(name: String) {
         instrumentation.waitForIdleSync()
         android.os.SystemClock.sleep(300)
@@ -333,7 +340,17 @@ class ProfileUiDeviceTest {
                 activity.requestedOrientation = android.content.pm.ActivityInfo.SCREEN_ORIENTATION_PORTRAIT
             }
             val portraitDeadline = android.os.SystemClock.uptimeMillis() + 5000
-            while (activity.resources.configuration.orientation != android.content.res.Configuration.ORIENTATION_PORTRAIT && android.os.SystemClock.uptimeMillis() < portraitDeadline) android.os.SystemClock.sleep(100)
+            stableFrames = 0
+            while (stableFrames < 5 && android.os.SystemClock.uptimeMillis() < portraitDeadline) {
+                var ready = false
+                main {
+                    ready = activity.resources.configuration.orientation == android.content.res.Configuration.ORIENTATION_PORTRAIT &&
+                        activity.window.decorView.height > activity.window.decorView.width
+                }
+                stableFrames = if (ready) stableFrames + 1 else 0
+                android.os.SystemClock.sleep(100)
+            }
+            assertEquals("Portrait must settle before testing the sheet", 5, stableFrames)
             main {
                 DislikeSheet.show(activity, VideoItem("fixture", "示例作品", "示例作者", listOf("animation", "music"), 60), history, null)
             }
@@ -352,10 +369,18 @@ class ProfileUiDeviceTest {
                 for (x in listOf(1, sheetCapture.width-2)) {
                     assertTrue("No full-width white footer outside the panel", android.graphics.Color.red(sheetCapture.getPixel(x, sheetCapture.height-4)) < 220)
                 }
-                val firstWhite = (0 until sheetCapture.height).first { y ->
-                    android.graphics.Color.red(sheetCapture.getPixel(sheetCapture.width/2, y)) > 220
+                main {
+                    // Pixels above the sheet may belong to text or another application's
+                    // overlay. Measure the actual application-owned panel for its height cap.
+                    val panel = requireNotNull(windowRoots().mapNotNull { it.findViewWithTag<View>("dislike_panel") }
+                        .firstOrNull { it.isShown }) { "The portrait dislike panel was not attached" }
+                    val host = panel.parent as View
+                    val geometry = "panel=${panel.width}x${panel.height} bottom=${panel.bottom}, host=${host.width}x${host.height}, screen=${sheetCapture.width}x${sheetCapture.height}"
+                    assertTrue("Portrait panel host must have completed rotation: $geometry", host.height > host.width)
+                    assertTrue("Portrait panel must not exceed 60% of screen height: $geometry", panel.height <= sheetCapture.height * .6f + 1)
+                    assertTrue("Portrait panel must respect its available window height: $geometry", panel.height <= host.height * .6f + 1)
+                    assertEquals("Portrait panel must meet its host bottom edge: $geometry", host.height, panel.bottom)
                 }
-                assertTrue("Portrait panel must not exceed 60% of screen height", firstWhite >= sheetCapture.height * .39)
             } finally { sheetCapture.recycle() }
             instrumentation.sendKeyDownUpSync(android.view.KeyEvent.KEYCODE_BACK)
             main { PlaybackGuide.show(activity, false) }

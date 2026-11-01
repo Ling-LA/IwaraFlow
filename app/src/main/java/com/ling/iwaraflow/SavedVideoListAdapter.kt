@@ -15,6 +15,8 @@ class SavedVideoListAdapter(
     private val note: (VideoItem) -> String? = { null }
 ) : RecyclerView.Adapter<SavedVideoListAdapter.Holder>() {
 
+    var onLongClick: ((VideoItem) -> Unit)? = null
+
     override fun onCreateViewHolder(parent: ViewGroup, viewType: Int): Holder =
         Holder(LayoutInflater.from(parent.context).inflate(R.layout.item_author_video, parent, false))
 
@@ -41,6 +43,7 @@ class SavedVideoListAdapter(
             issue.visibility = if (label == null) View.GONE else View.VISIBLE
             itemView.alpha = 1f
             itemView.setOnClickListener { onClick(item) }
+            itemView.setOnLongClickListener(if (onLongClick == null) null else View.OnLongClickListener { onLongClick?.invoke(item); true })
 
             icon.visibility = View.VISIBLE
             thumbnail.setImageDrawable(null)

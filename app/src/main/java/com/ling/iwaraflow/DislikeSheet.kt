@@ -53,7 +53,7 @@ object DislikeSheet {
         }
         // 与评论面板相同：把手、固定标题行、分隔线、可滚动内容。
         // 拖动时移动整个面板，标题不会与选项列表分离。
-        val drag = DragToDismiss(container) { dialog.dismiss() }
+        val drag = SheetDragToDismiss(container) { dialog.dismiss() }
         val handle = android.widget.FrameLayout(activity).apply {
             addView(View(activity).apply {
                 setBackgroundColor(0xFFD5DEE6.toInt())
@@ -231,44 +231,6 @@ object DislikeSheet {
         }
         if (android.os.Looper.myLooper() == android.os.Looper.getMainLooper()) showResult.run()
         else android.os.Handler(android.os.Looper.getMainLooper()).post(showResult)
-    }
-
-    /** 和评论面板同一套手势：面板跟着手指走，松手时拖得够远或够快就收起，否则弹回。 */
-    private class DragToDismiss(private val sheet: View, private val dismiss: () -> Unit) : View.OnTouchListener {
-        private var startY = 0f
-        private var startTime = 0L
-        private var dragging = false
-        private val slop = android.view.ViewConfiguration.get(sheet.context).scaledTouchSlop
-
-        override fun onTouch(v: View, event: android.view.MotionEvent): Boolean {
-            when (event.actionMasked) {
-                android.view.MotionEvent.ACTION_DOWN -> {
-                    startY = event.rawY; startTime = event.eventTime; dragging = false
-                    sheet.animate().cancel()
-                    return true
-                }
-                android.view.MotionEvent.ACTION_MOVE -> {
-                    val dy = event.rawY - startY
-                    if (!dragging && dy > slop) dragging = true
-                    if (dragging) sheet.translationY = dy.coerceAtLeast(0f)
-                    return true
-                }
-                android.view.MotionEvent.ACTION_UP, android.view.MotionEvent.ACTION_CANCEL -> {
-                    val dy = event.rawY - startY
-                    val elapsed = (event.eventTime - startTime).coerceAtLeast(1L)
-                    val fling = dy > slop * 2 && dy / elapsed > 1.2f
-                    val farEnough = dy > sheet.height * CommentsPanel.DISMISS_FRACTION
-                    if (event.actionMasked == android.view.MotionEvent.ACTION_UP && dragging && (farEnough || fling)) {
-                        sheet.animate().translationY(sheet.height.toFloat()).setDuration(160L).withEndAction { dismiss() }.start()
-                    } else {
-                        sheet.animate().translationY(0f).setDuration(160L).start()
-                    }
-                    dragging = false
-                    return true
-                }
-            }
-            return false
-        }
     }
 
     private fun hostActivity(context: Context): Activity? {

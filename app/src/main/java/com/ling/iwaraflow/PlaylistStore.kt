@@ -27,15 +27,30 @@ class PlaylistStore(context: Context) {
         if (!current(s)) emptySet() else ids.filterTo(HashSet()) { memberships(it, s).isNotEmpty() }
     }
     fun checkedAt(id: String, s: Snapshot = snapshot()) = prefs.getLong(key(s, "checked:$id"), 0L)
+    fun markMembershipsStale(s: Snapshot, videoId: String) = synchronized(lock) {
+        if (current(s)) prefs.edit().putLong(key(s, "checked:$videoId"), 0L).apply()
+    }
 
     fun replaceFolders(s: Snapshot, rows: List<PlaylistFolder>): Boolean = synchronized(lock) {
         if (!current(s)) return false
-        val existing = folders(s).map { it.id }.toSet()
+        val previous = folders(s).associateBy { it.id }
+        val existing = previous.keys
         val removed = existing - rows.map { it.id }.toSet()
         val edit = prefs.edit().putString(key(s, "folders"), encodeFolders(rows)).putLong(key(s, "synced"), System.currentTimeMillis())
         if (removed.isNotEmpty()) prefs.all.forEach { (name, value) ->
             if (name.startsWith(key(s, "member:")) && value is Set<*>) edit.putStringSet(name, value.filterIsInstance<String>().toSet() - removed)
             if (removed.any { name.startsWith(key(s, "page:$it:")) }) edit.remove(name)
+        }
+        if (defaultId(s) in removed) edit.remove(key(s, "default"))
+        rows.forEach { row ->
+            val old = previous[row.id] ?: return@forEach
+            if (old != row) prefs.all.forEach { (name, value) ->
+                if (name.startsWith(key(s, "page:${row.id}:")) && value is String) {
+                    if (old.count != row.count || old.thumbnail != row.thumbnail) edit.remove(name)
+                    else runCatching { JSONObject(value).put("folder", folderJson(row)).toString() }
+                        .onSuccess { edit.putString(name, it) }.onFailure { edit.remove(name) }
+                }
+            }
         }
         edit.putLong("revision", prefs.getLong("revision", 0L) + 1).apply()
         true
@@ -60,7 +75,8 @@ class PlaylistStore(context: Context) {
         val all = folders(s).toMutableList(); val index = all.indexOfFirst { it.id == folder.id }
         val row = if (index >= 0) all[index] else folder
         val delta = if ((folder.id in old) == enabled) 0 else if (enabled) 1 else -1
-        val changed = row.copy(count = (row.count.coerceAtLeast(0) + delta).coerceAtLeast(0), thumbnail = if (enabled && row.thumbnail.isBlank()) item.thumbnailUrl else row.thumbnail)
+        val changed = row.copy(count = (row.count.coerceAtLeast(0) + delta).coerceAtLeast(0),
+            thumbnail = if (!enabled) "" else if (row.thumbnail.isBlank()) item.thumbnailUrl else row.thumbnail)
         if (index >= 0) all[index] = changed else all += changed
         val edit = prefs.edit().putString(key(s, "folders"), encodeFolders(all))
             .putStringSet(key(s, "member:${item.id}"), ids).putLong(key(s, "checked:${item.id}"), System.currentTimeMillis())
@@ -76,10 +92,20 @@ class PlaylistStore(context: Context) {
         if (!current(s)) return false
         val all = folders(s).toMutableList(); val index = all.indexOfFirst { it.id == folder.id }
         val row = if (index >= 0) all[index] else folder
-        val changed = row.copy(count = (row.count - if (folder.id in memberships(videoId, s)) 1 else 0).coerceAtLeast(0))
+        val changed = row.copy(count = (row.count - if (folder.id in memberships(videoId, s)) 1 else 0).coerceAtLeast(0), thumbnail = "")
         if (index >= 0) all[index] = changed else all += changed
         val edit = prefs.edit().putString(key(s, "folders"), encodeFolders(all)).putLong(key(s, "checked:$videoId"), 0L)
         prefs.all.keys.filter { it.startsWith(key(s, "page:${folder.id}:")) }.forEach(edit::remove)
+        edit.putLong("revision", prefs.getLong("revision", 0L) + 1).apply()
+        true
+    }
+
+    /** Reconcile an explicit content operation after reading its actual memberships back. */
+    fun invalidateFolderContent(s: Snapshot, folderId: String, countDelta: Int = 0): Boolean = synchronized(lock) {
+        if (!current(s)) return false
+        val rows = folders(s).map { if (it.id == folderId) it.copy(count = (it.count + countDelta).coerceAtLeast(0), thumbnail = "") else it }
+        val edit = prefs.edit().putString(key(s, "folders"), encodeFolders(rows))
+        prefs.all.keys.filter { it.startsWith(key(s, "page:$folderId:")) }.forEach(edit::remove)
         edit.putLong("revision", prefs.getLong("revision", 0L) + 1).apply()
         true
     }

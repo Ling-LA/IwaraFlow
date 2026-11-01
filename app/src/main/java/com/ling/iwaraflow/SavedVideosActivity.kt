@@ -52,6 +52,7 @@ class SavedVideosActivity : AppCompatActivity(), PlaybackGuideHost {
     private var likedOnly = false
     private var playlistId = ""
     private var playlistTitle = ""
+    private var playlistPageSession: PlaylistStore.Snapshot? = null
     private var playlistNextPage = 0
     private var playlistOffline = false
     private var likesChanged = false
@@ -90,6 +91,27 @@ class SavedVideosActivity : AppCompatActivity(), PlaybackGuideHost {
         kind = intent.getStringExtra(EXTRA_KIND) ?: KIND_HISTORY
         playlistId = intent.getStringExtra(EXTRA_PLAYLIST_ID).orEmpty()
         playlistTitle = intent.getStringExtra(EXTRA_PLAYLIST_TITLE).orEmpty()
+        if (kind == KIND_PLAYLIST) playlistPageSession = if (savedInstanceState?.containsKey("playlist_page_account") == true) {
+            PlaylistStore.Snapshot(savedInstanceState.getString("playlist_page_account").orEmpty(),
+                savedInstanceState.getLong("playlist_page_session"))
+        } else playlistFavorites.store.snapshot()
+        if (kind == KIND_PLAYLIST) adapter.onLongClick = { item ->
+            if (currentPlaylistPage()) {
+                val folder = playlistFavorites.store.folders().firstOrNull { it.id == playlistId }
+                    ?: PlaylistFolder(playlistId, playlistTitle)
+                PlaylistManagement.videoMenu(this, playlistFavorites, folder, item) { result ->
+                    if (currentPlaylistPage()) {
+                        result.onSuccess {
+                            item.localFavorite = it.saved
+                            if (it.changed && !it.saved) history.recordInteractionAsync(item, "unfavorite", -0.9)
+                        }
+                        // Re-read the actual source even on partial failure; never optimistically
+                        // hide a video that the server has kept in this folder.
+                        loadLibraryPage(reset = true)
+                    }
+                }
+            }
+        }
         findViewById<TextView>(R.id.savedTitle).text = pageTitle()
         findViewById<TextView>(R.id.savedFeedBack).text = "‹ ${pageTitle()}"
 
@@ -164,9 +186,6 @@ class SavedVideosActivity : AppCompatActivity(), PlaybackGuideHost {
     private fun installLibraryControls() {
         val header = findViewById<TextView>(R.id.savedSubtitle).parent as android.widget.LinearLayout
         if (kind == KIND_PLAYLIST) {
-            header.addView(android.widget.Button(this).apply {
-                text = "同步收藏夹"; setOnClickListener { loadLibraryPage(reset = true) }
-            })
             installLibraryPagination()
             return
         }
@@ -212,8 +231,24 @@ class SavedVideosActivity : AppCompatActivity(), PlaybackGuideHost {
         })
     }
 
+    /** An old account's public playlist must never become the new account's saved library. */
+    private fun currentPlaylistPage(): Boolean {
+        if (kind != KIND_PLAYLIST) return true
+        if (playlistPageSession?.let(playlistFavorites.store::current) == true) return true
+        if (!closed) {
+            closed = true; listSerial++; listLoading = false
+            items.clear(); adapter.notifyDataSetChanged()
+            if (::comments.isInitialized) comments.close()
+            if (::feedAdapter.isInitialized) feedAdapter.suspendPlayback()
+            playlistFavorites.close()
+            Toast.makeText(this, "账号已切换，请重新打开收藏夹", Toast.LENGTH_SHORT).show()
+            finish()
+        }
+        return false
+    }
+
     private fun loadLibraryPage(reset: Boolean = false) {
-        if (closed) return
+        if (closed || !currentPlaylistPage()) return
         if (reset) { listSerial++; listOffset = 0; listBaseOffset = 0; playlistNextPage = 0; listLoading = false; listTotal = Int.MAX_VALUE }
         if (listLoading || listOffset >= listTotal) return
         val serial = listSerial
@@ -224,7 +259,7 @@ class SavedVideosActivity : AppCompatActivity(), PlaybackGuideHost {
         listLoading = true
         val complete: (Result<Triple<SavedLibrary.Page, List<DownloadLibrary.Entry>, Boolean>>) -> Unit = { result ->
             runOnUiThread {
-                if (closed || serial != listSerial) return@runOnUiThread
+                if (closed || !currentPlaylistPage() || serial != listSerial) return@runOnUiThread
                 listLoading = false
                 result.onSuccess { (page, entries, downloaded) ->
                     val from = if (reset) 0 else items.size
@@ -272,6 +307,9 @@ class SavedVideosActivity : AppCompatActivity(), PlaybackGuideHost {
                         if (pager.currentItem + 1 < feedAdapter.itemCount) pager.setCurrentItem(pager.currentItem + 1, true)
                     }
                 }.onFailure {
+                    if (kind == KIND_PLAYLIST && it is PlaylistHttpException && it.status in setOf(400, 401, 403, 404)) {
+                        items.clear(); adapter.notifyDataSetChanged(); listTotal = 0
+                    }
                     findViewById<TextView>(R.id.savedSubtitle).apply {
                         text = "读取失败，点击重试"; setOnClickListener { loadLibraryPage(reset) }
                     }
@@ -280,10 +318,13 @@ class SavedVideosActivity : AppCompatActivity(), PlaybackGuideHost {
         }
         if (kind == KIND_PLAYLIST) {
             playlistFavorites.getFolderPage(playlistId, playlistNextPage) { result ->
-                if (closed || serial != listSerial) return@getFolderPage
+                if (closed || !currentPlaylistPage() || serial != listSerial) return@getFolderPage
                 complete(result.map { page ->
                     playlistNextPage++
                     playlistOffline = page.offline
+                    playlistTitle = page.folder.title
+                    findViewById<TextView>(R.id.savedTitle).text = pageTitle()
+                    findViewById<TextView>(R.id.savedFeedBack).text = "‹ ${pageTitle()}"
                     val total = if (page.hasMore) maxOf(page.total, offset + page.items.size + 1) else offset + page.items.size
                     page.items.forEach(prefs.likeStates::apply)
                     Triple(SavedLibrary.Page(page.items, total), emptyList(), false)
@@ -356,6 +397,7 @@ class SavedVideosActivity : AppCompatActivity(), PlaybackGuideHost {
      * 下好的视频直接放本地那一份——下载就是为了这个；还没下完 / 文件不在了的照常在线播。
      */
     private fun openVideo(item: VideoItem) {
+        if (!currentPlaylistPage()) return
         if (closed) return
         val index = items.indexOfFirst { it.id == item.id }
         if (index < 0) return
@@ -491,8 +533,10 @@ class SavedVideosActivity : AppCompatActivity(), PlaybackGuideHost {
 
     override fun onResume() {
         super.onResume()
+        if (!currentPlaylistPage()) return
         leavingForShare = false
         if (inFeed && !closed) feedAdapter.resumeActive()
+        else if (kind == KIND_PLAYLIST && !closed && !listLoading) loadLibraryPage(reset = true)
         else if (likesChanged && !closed) { likesChanged = false; loadLibraryPage(reset = true) }
     }
 
@@ -560,6 +604,10 @@ class SavedVideosActivity : AppCompatActivity(), PlaybackGuideHost {
         PagePlaybackState.save(outState, prefs, if (inFeed) feedAdapter.items else items, index, inFeed, base = listBaseOffset)
         outState.putString("library_query", listQuery); outState.putBoolean("library_ascending", ascending)
         outState.putBoolean("library_liked_only", likedOnly)
+        playlistPageSession?.let {
+            outState.putString("playlist_page_account", it.account)
+            outState.putLong("playlist_page_session", it.session)
+        }
         super.onSaveInstanceState(outState)
     }
 

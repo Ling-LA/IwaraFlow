@@ -5,6 +5,7 @@ import android.content.Intent
 import android.net.Uri
 import android.os.SystemClock
 import android.util.Base64
+import android.view.InputDevice
 import android.view.MotionEvent
 import android.view.View
 import android.view.ViewGroup
@@ -104,6 +105,14 @@ class PlaylistDeviceTest {
                         val videoId = request.requestUrl!!.queryParameter("id")
                         json(JSONArray(catalog.keys.map { row(it).put("added", videoId in members[it].orEmpty()) }))
                     }
+                    path.size == 2 && path[0] == "playlist" && path[1] in catalog && request.method == "PUT" -> {
+                        catalog[path[1]] = JSONObject(request.body.readUtf8()).getString("title")
+                        MockResponse().setResponseCode(204)
+                    }
+                    path.size == 2 && path[0] == "playlist" && path[1] in catalog && request.method == "DELETE" -> {
+                        catalog.remove(path[1]); members.remove(path[1])
+                        MockResponse().setResponseCode(204)
+                    }
                     path.size == 3 && path[0] == "playlist" && path[1] in catalog -> {
                         if (request.method == "POST") members.getValue(path[1]).add(path[2]) else {
                             members.getValue(path[1]).remove(path[2]); deleted += path[1] to path[2]
@@ -171,6 +180,45 @@ class PlaylistDeviceTest {
             var result: Result<PlaylistFavorites.Change>? = null
             main { favorites.showPicker(activity, second) { result = it } }
             await("Picker did not render the official default folder") { texts().filterIsInstance<CheckBox>().any { it.text.startsWith("默认收藏夹") } }
+            fun pickerPanel(): View? = windowRoots().flatMap(::descendants)
+                .firstOrNull { it.tag == "playlist_picker_panel" && it.isShown }
+            fun dragPickerHandle(fraction: Float) {
+                var x = 0f; var y = 0f; var distance = 0f
+                main {
+                    val panel = requireNotNull(pickerPanel())
+                    val handle = panel.findViewWithTag<View>("playlist_drag_handle")
+                    assertTrue("The handle needs a usable touch target", handle.height >= 24 * context.resources.displayMetrics.density - 1)
+                    val location = IntArray(2); handle.getLocationOnScreen(location)
+                    x = location[0] + handle.width / 2f; y = location[1] + handle.height / 2f
+                    distance = panel.height * fraction
+                }
+                val started = SystemClock.uptimeMillis()
+                fun inject(action: Int, dy: Float) {
+                    val event = MotionEvent.obtain(started, SystemClock.uptimeMillis(), action, x, y + dy, 0)
+                    event.source = InputDevice.SOURCE_TOUCHSCREEN
+                    try { assertTrue("Could not inject the handle gesture", instrumentation.uiAutomation.injectInputEvent(event, true)) }
+                    finally { event.recycle() }
+                }
+                inject(MotionEvent.ACTION_DOWN, 0f)
+                for (step in 1..12) {
+                    SystemClock.sleep(50)
+                    inject(MotionEvent.ACTION_MOVE, distance * step / 12)
+                }
+                inject(MotionEvent.ACTION_UP, distance)
+            }
+            dragPickerHandle(.08f)
+            await("Short handle drag must rebound without closing the picker") {
+                pickerPanel()?.let { kotlin.math.abs(it.translationY) < 1f } == true
+            }
+            main { texts().filterIsInstance<CheckBox>().first { it.text.startsWith("默认收藏夹") }.performClick() }
+            dragPickerHandle(.4f)
+            await("Dragging the picker handle down did not dismiss it") { pickerPanel() == null }
+            assertNull("Dismissing an unsubmitted draft must not report a save", result)
+            synchronized(catalog) { assertTrue("Dismissing an unsubmitted draft must not write official memberships", members.values.none { second.id in it }) }
+            main { favorites.showPicker(activity, second) { result = it } }
+            await("Reopening the picker did not reload official memberships") {
+                texts().filterIsInstance<CheckBox>().any { it.text.startsWith("默认收藏夹") && !it.isChecked }
+            }
             main {
                 texts().filterIsInstance<CheckBox>().first { it.text.startsWith("默认收藏夹") }.performClick()
                 texts().first { it.text.toString() == "＋ 新建收藏夹" }.performClick()
@@ -191,6 +239,8 @@ class PlaylistDeviceTest {
             main {
                 texts().first { it.text.toString() == "完成" }.performClick()
                 assertTrue("Checkboxes must be disabled while the selection is saving", texts().filterIsInstance<CheckBox>().all { !it.isEnabled })
+                assertFalse("The picker must not be drag-dismissed while a save is pending", requireNotNull(pickerPanel()).findViewWithTag<View>("playlist_drag_handle").isEnabled)
+                assertFalse(texts().first { it.contentDescription == "关闭收藏夹" }.isEnabled)
             }
             await("Picker did not confirm successful official writes") { result != null }
             assertTrue(result!!.getOrThrow().saved)
@@ -304,6 +354,141 @@ class PlaylistDeviceTest {
                 activity.window.decorView.isShown && fixture.title in labels && second.title !in labels &&
                     favorites.store.folders().firstOrNull { it.id == "folder-1" }?.count == 1
             }
+
+            fun awaitFolderCard(index: Int) {
+                await("Folder overview card $index did not finish laying out after navigation") {
+                    val list = descendants(activity.window.decorView).filterIsInstance<RecyclerView>().firstOrNull()
+                    val holder = list?.findViewHolderForAdapterPosition(index)
+                    activity.hasWindowFocus() && list?.isComputingLayout == false &&
+                        holder?.bindingAdapterPosition == index && holder.itemView.isShown && holder.itemView.isLaidOut
+                }
+            }
+            fun longFolder(index: Int) {
+                awaitFolderCard(index)
+                main {
+                    val card = descendants(activity.window.decorView).filterIsInstance<RecyclerView>().first()
+                        .findViewHolderForAdapterPosition(index)!!.itemView
+                    assertTrue("Visible folder card did not handle a long press", card.performLongClick())
+                }
+            }
+            fun choose(label: String) {
+                var x = 0f; var y = 0f
+                await("Visible dialog action '$label' did not appear") {
+                    val target = windowRoots().asReversed().flatMap(::descendants).filterIsInstance<TextView>()
+                        .firstOrNull { it.isShown && it.isEnabled && it.text.toString() == label }
+                    val bounds = android.graphics.Rect()
+                    if (target != null && target.isLaidOut && target.rootView.hasWindowFocus() &&
+                        target.getGlobalVisibleRect(bounds) && !bounds.isEmpty) {
+                        // getGlobalVisibleRect is relative to the root/window. Dialog windows
+                        // have a nonzero screen origin, so input injection needs screen coordinates.
+                        val screen = IntArray(2); target.getLocationOnScreen(screen)
+                        x = screen[0] + target.width / 2f; y = screen[1] + target.height / 2f
+                        android.util.Log.i("PlaylistDeviceTest", "tap '$label' screen=($x,$y) windowBounds=$bounds")
+                        true
+                    } else false
+                }
+                // AlertDialog menu rows dispatch through ListView's item-click listener;
+                // TextView.performClick() silently does nothing on those child labels.
+                val started = SystemClock.uptimeMillis()
+                for (action in listOf(MotionEvent.ACTION_DOWN, MotionEvent.ACTION_UP)) {
+                    val event = MotionEvent.obtain(started, SystemClock.uptimeMillis(), action, x, y, 0)
+                    event.source = InputDevice.SOURCE_TOUCHSCREEN
+                    try { assertTrue("Could not tap '$label'", instrumentation.uiAutomation.injectInputEvent(event, true)) }
+                    finally { event.recycle() }
+                }
+            }
+            longFolder(0)
+            ProfileUiDeviceTest().screenshot("playlist-folder-actions-0182")
+            choose("重命名")
+            try {
+                await("Rename menu action did not open its prefilled editor") {
+                    texts().filterIsInstance<EditText>().any { it.contentDescription == "修改收藏夹名称" }
+                }
+            } catch (error: AssertionError) {
+                main { android.util.Log.e("PlaylistDeviceTest", "Rename failure visible texts: " + texts().map { it.text.toString() }) }
+                ProfileUiDeviceTest().screenshot("playlist-rename-failure-0182")
+                throw error
+            }
+            ProfileUiDeviceTest().screenshot("playlist-rename-editor-0182")
+            main {
+                val input = texts().filterIsInstance<EditText>().single { it.contentDescription == "修改收藏夹名称" }
+                assertEquals("默认收藏夹", input.text.toString()); input.setText("风景精选")
+            }
+            choose("保存")
+            await("Renaming did not preserve the official folder ID") {
+                favorites.store.folders().any { it.id == "folder-1" && it.title == "风景精选" } &&
+                    texts().any { it.text.toString() == "风景精选" }
+            }
+            assertEquals("folder-1", favorites.store.dedicatedMigrationTarget(favorites.store.snapshot()))
+
+            fun openManagedFolder(index: Int): SavedVideosActivity {
+                awaitFolderCard(index)
+                main { session.clearAuthentication() }
+                val nextMonitor = instrumentation.addMonitor(SavedVideosActivity::class.java.name, null, false)
+                main {
+                    descendants(activity.window.decorView).filterIsInstance<RecyclerView>().first()
+                        .findViewHolderForAdapterPosition(index)!!.itemView.performClick()
+                }
+                val next = instrumentation.waitForMonitorWithTimeout(nextMonitor, 5000) as? SavedVideosActivity
+                instrumentation.removeMonitor(nextMonitor)
+                val opened = requireNotNull(next)
+                videos = opened
+                main {
+                    (field(opened, "playlistFavorites").get(opened) as PlaylistFavorites).close()
+                    (field(opened, "api").get(opened) as IwaraApi).close()
+                    val local = localApi(); field(opened, "api").set(opened, local)
+                    field(opened, "playlistFavorites").set(opened,
+                        PlaylistFavorites(opened, local, field(opened, "history").get(opened) as HistoryStore))
+                    val feed = opened.playbackGuideAdapter
+                    (field(feed, "favoriteController").get(feed) as? PlaylistFavorites)?.close()
+                    (field(feed, "favoriteSubscription").get(feed) as? java.io.Closeable)?.close()
+                    field(feed, "favoriteController").set(feed, null); field(feed, "favoriteSubscription").set(feed, null)
+                    field(feed, "api").set(feed, local)
+                    val panel = (field(opened, "comments").get(opened) as CommentsHost).panel
+                    field(panel, "api").set(panel, local)
+                    loginFixture(); invoke(opened, "loadLibraryPage", true)
+                }
+                await("Managed folder did not load its video") { opened.findViewById<RecyclerView>(R.id.savedVideos).adapter?.itemCount == 1 }
+                main { assertTrue("Manual sync button should be removed", texts().none { it.text.toString() == "同步收藏夹" }) }
+                return opened
+            }
+            val source = openManagedFolder(0)
+            main { source.findViewById<RecyclerView>(R.id.savedVideos).findViewHolderForAdapterPosition(0)!!.itemView.performLongClick() }
+            choose("移动到其他收藏夹")
+            await("Move destination picker did not load") { texts().any { it.text.toString() == "移动到收藏夹" } }
+            val targetTitle = synchronized(catalog) { catalog.getValue("folder-2") }
+            choose(targetTitle)
+            await("Move did not remove the source row after confirming the destination") {
+                source.findViewById<RecyclerView>(R.id.savedVideos).adapter?.itemCount == 0 &&
+                    favorites.store.memberships(fixture.id) == setOf("folder-2")
+            }
+            synchronized(catalog) {
+                assertTrue(members.getValue("folder-1").isEmpty()); assertEquals(setOf(fixture.id), members["folder-2"])
+            }
+            main { source.findViewById<View>(R.id.savedBack).performClick() }
+            await("Folder preview did not follow the moved item") { favorites.store.folders().firstOrNull { it.id == "folder-2" }?.count == 1 }
+            val target = openManagedFolder(1)
+            main { target.findViewById<RecyclerView>(R.id.savedVideos).findViewHolderForAdapterPosition(0)!!.itemView.performLongClick() }
+            choose("从当前收藏夹移除")
+            await("Removing within the target folder did not update its list and global star") {
+                target.findViewById<RecyclerView>(R.id.savedVideos).adapter?.itemCount == 0 && !favorites.isFavorite(fixture.id)
+            }
+            assertEquals("removed_by_user", favorites.store.dedicatedMigrationItem(favorites.store.snapshot(), fixture.id))
+            main { target.findViewById<View>(R.id.savedBack).performClick() }
+            await("Returning after removal did not refresh the folder count") { favorites.store.folders().firstOrNull { it.id == "folder-2" }?.count == 0 }
+            longFolder(0); choose("删除收藏夹")
+            await("Delete menu action did not open its separate confirmation") { texts().any { it.text.toString() == "删除收藏夹？" } }
+            synchronized(catalog) { assertTrue("Merely opening confirmation must not delete", "folder-1" in catalog) }
+            choose("取消")
+            await("Cancelling deletion did not close the confirmation") { texts().none { it.text.toString() == "删除收藏夹？" } }
+            synchronized(catalog) { assertTrue("Cancel must preserve the entire folder", "folder-1" in catalog) }
+            longFolder(0); choose("删除收藏夹"); choose("删除")
+            await("Confirmed folder deletion did not remove its card") { favorites.store.folders().none { it.id == "folder-1" } }
+            assertEquals("folder-1", favorites.store.dedicatedMigrationTarget(favorites.store.snapshot()))
+            main { favorites.migrateLegacyIfNeeded() }
+            SystemClock.sleep(300)
+            synchronized(catalog) { assertEquals(2, createCount); assertEquals(setOf("folder-2"), catalog.keys) }
+            ProfileUiDeviceTest().screenshot("playlist-manage-rename-move-delete-0182")
         } finally {
             main { videos?.finish(); folders?.finish() }
             instrumentation.waitForIdleSync()

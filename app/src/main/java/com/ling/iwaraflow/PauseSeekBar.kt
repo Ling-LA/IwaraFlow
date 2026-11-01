@@ -126,6 +126,7 @@ class PauseSeekBar @JvmOverloads constructor(
     private fun hideExtras(root: View?) {
         topRow(root)?.visibility = View.GONE
         preview(root)?.visibility = View.GONE
+        root?.findViewById<View>(R.id.fullscreenSocial)?.visibility = View.GONE
     }
 
     override fun onAttachedToWindow() {
@@ -145,6 +146,9 @@ class PauseSeekBar @JvmOverloads constructor(
         restoreChrome()
         super.onDetachedFromWindow()
     }
+
+    /** Reconcile mode/player changes immediately instead of waiting for the next polling tick. */
+    fun refreshControls() = refreshFromPlayer()
 
     private fun refreshFromPlayer() {
         val root = cardRoot()
@@ -181,6 +185,9 @@ class PauseSeekBar @JvmOverloads constructor(
             progress = ((position * max.toDouble()) / duration).roundToInt().coerceIn(0, max)
         }
         placeTopRow(root, position, duration)
+        // Fullscreen comments and the like count belong to this same transport-control set.
+        root.findViewById<View>(R.id.fullscreenSocial)?.visibility =
+            if (mode(root) == MODE_FULLSCREEN) View.VISIBLE else View.GONE
     }
 
     private fun formatTime(ms: Long): String {

@@ -106,6 +106,85 @@ class PlaylistFavorites(context: Context, private val api: IwaraApi, private val
         val row = api.createPlaylistBlocking(title)
         requireCurrent(s); store.putFolder(s, row); row
     }
+
+    fun renameFolder(folderId: String, title: String, callback: (Result<PlaylistFolder>) -> Unit) = submit(callback) { s ->
+        val clean = title.trim()
+        require(clean.isNotEmpty() && clean.length <= 100) { "收藏夹名称需为 1 至 100 个字符" }
+        val original = folders(s).firstOrNull { it.id == folderId } ?: throw IOException("收藏夹已不存在，请刷新")
+        if (original.title == clean) return@submit original
+        val write = runCatching { requireCurrent(s); api.renamePlaylistBlocking(folderId, clean) }
+        requireCurrent(s)
+        val actual = try { folders(s).firstOrNull { it.id == folderId } }
+            catch (error: Exception) { throw IOException("改名结果尚未确认，请稍后重新打开收藏夹查看", error) }
+        if (actual == null || actual.title != clean) throw IOException("收藏夹改名未完成，请重试", write.exceptionOrNull())
+        actual
+    }
+
+    fun deleteFolder(folderId: String, callback: (Result<Unit>) -> Unit) = submit(callback) { s ->
+        // Verify ownership from the complete authenticated catalog before any destructive call.
+        if (folders(s).none { it.id == folderId }) return@submit Unit
+        val write = runCatching { requireCurrent(s); api.deletePlaylistBlocking(folderId) }
+        requireCurrent(s)
+        val remaining = try { folders(s) }
+            catch (error: Exception) { throw IOException("删除结果尚未确认，请稍后重新打开收藏夹查看", error) }
+        if (remaining.any { it.id == folderId }) throw IOException("收藏夹删除未完成，请重试", write.exceptionOrNull())
+        // replaceFolders removes only this folder's cached memberships/pages/default choice.
+        // The migration destination checkpoint remains, so deleting it cannot recreate it.
+        Unit
+    }
+
+    /** Remove only this membership; copies in all other folders are untouched. */
+    fun removeFromFolder(item: VideoItem, folderId: String, callback: (Result<Change>) -> Unit) = submit(callback) { s ->
+        if (folders(s).none { it.id == folderId }) throw IOException("收藏夹已不存在，请刷新")
+        val before = memberships(s, item.id)
+        if (before.none { it.id == folderId && it.added }) return@submit Change(before.any { it.added }, false)
+        preserveExplicitRemoval(s, item.id)
+        val write = runCatching { requireCurrent(s); api.setPlaylistVideoBlocking(folderId, item.id, false) }
+        val after = confirmContentOperation(s, item.id, before, setOf(folderId))
+        if (after.any { it.id == folderId && it.added }) throw IOException("未能从当前收藏夹移除，请重试", write.exceptionOrNull())
+        Change(after.any { it.added }, true)
+    }
+
+    /** Add and verify the destination first. A partial move never rolls back the safe copy. */
+    fun moveToFolder(item: VideoItem, sourceId: String, targetId: String, callback: (Result<Change>) -> Unit) = submit(callback) { s ->
+        require(sourceId != targetId) { "请选择其他收藏夹" }
+        val catalog = folders(s)
+        if (catalog.none { it.id == sourceId } || catalog.none { it.id == targetId }) throw IOException("收藏夹列表已变化，请重新选择")
+        val before = memberships(s, item.id)
+        if (before.none { it.id == sourceId && it.added }) {
+            if (before.any { it.id == targetId && it.added }) return@submit Change(true, false)
+            throw IOException("视频已不在当前收藏夹，请刷新后重试")
+        }
+        var added = before
+        if (before.none { it.id == targetId && it.added }) {
+            val write = runCatching { requireCurrent(s); api.setPlaylistVideoBlocking(targetId, item.id, true) }
+            added = confirmContentOperation(s, item.id, before, setOf(targetId))
+            if (added.none { it.id == targetId && it.added }) throw IOException("未能加入目标收藏夹，原收藏已保留", write.exceptionOrNull())
+        }
+        // Even a lost response is safe to continue only after the read above proves the copy.
+        requireCurrent(s)
+        preserveExplicitRemoval(s, item.id)
+        val removed = runCatching { api.setPlaylistVideoBlocking(sourceId, item.id, false) }
+        val after = confirmContentOperation(s, item.id, added, setOf(sourceId))
+        if (after.any { it.id == sourceId && it.added }) throw IOException("已加入目标收藏夹，但原夹移除未完成；可重试移动", removed.exceptionOrNull())
+        if (after.none { it.id == targetId && it.added }) throw IOException("目标收藏夹内容已变化，请重新查看收藏状态")
+        Change(true, true)
+    }
+
+    private fun confirmContentOperation(s: PlaylistStore.Snapshot, videoId: String, before: List<PlaylistFolder>, affected: Set<String>): List<PlaylistFolder> {
+        requireCurrent(s)
+        val after = try { memberships(s, videoId) } catch (error: Exception) {
+            requireCurrent(s)
+            affected.forEach { store.invalidateFolderContent(s, it) }
+            store.markMembershipsStale(s, videoId)
+            throw IOException("收藏变更结果尚未确认，请重新打开收藏夹核对后重试", error)
+        }
+        affected.forEach { id ->
+            val delta = (if (after.any { it.id == id && it.added }) 1 else 0) - (if (before.any { it.id == id && it.added }) 1 else 0)
+            store.invalidateFolderContent(s, id, delta)
+        }
+        return after
+    }
     private fun defaultFolder(s: PlaylistStore.Snapshot, rows: List<PlaylistFolder>): PlaylistFolder {
         val id = store.defaultId(s)
         val existing = rows.firstOrNull { it.id == id } ?: rows.firstOrNull { it.title == DEFAULT_TITLE } ?: rows.firstOrNull()

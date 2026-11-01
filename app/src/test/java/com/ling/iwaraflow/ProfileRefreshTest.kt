@@ -93,6 +93,11 @@ class ProfileRefreshTest {
                 .map { (holder.itemView as ViewGroup).getChildAt(it) }.filterIsInstance<DanmakuView>().single()
             adapter.setOverlayTopInset(100)
             assertTrue(danmaku.paddingTop >= 100)
+            val player = mock(androidx.media3.common.Player::class.java)
+            org.mockito.Mockito.`when`(player.applicationLooper).thenReturn(android.os.Looper.getMainLooper())
+            org.mockito.Mockito.`when`(player.playbackState).thenReturn(androidx.media3.common.Player.STATE_READY)
+            org.mockito.Mockito.`when`(player.duration).thenReturn(60_000L)
+            holder.itemView.findViewById<androidx.media3.ui.PlayerView>(R.id.playerView).player = player
             adapter.setFullscreen(true)
             holder.itemView.measure(View.MeasureSpec.makeMeasureSpec(400, View.MeasureSpec.EXACTLY),
                 View.MeasureSpec.makeMeasureSpec(800, View.MeasureSpec.EXACTLY))

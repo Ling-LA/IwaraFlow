@@ -42,7 +42,7 @@ class PlaylistFoldersActivity : AppCompatActivity() {
         actions.addView(page.action("收藏夹") {}, LinearLayout.LayoutParams(0, -2, 1f))
         actions.addView(page.action("＋ 新建") { PlaylistPicker.createDialog(this, favorites) { reload() } })
         page.body.addView(actions)
-        status = page.text("与 Iwara 官方公开播放列表同步 · 旧版收藏自动导入", 13f).apply { setPadding(page.dp(22), 0, page.dp(22), page.dp(8)) }
+        status = page.text("与 Iwara 官方播放列表同步 · 长按收藏夹管理", 13f).apply { setPadding(page.dp(22), 0, page.dp(22), page.dp(8)) }
         page.body.addView(status)
         val legacy = LinearLayout(this).apply { gravity = Gravity.CENTER_VERTICAL; setPadding(page.dp(14), 0, page.dp(14), 0) }
         legacy.addView(page.action("旧版本地收藏 ›") {
@@ -159,6 +159,10 @@ class PlaylistFoldersActivity : AppCompatActivity() {
                     else -> "暂无预览 · 下拉重试"
                 }, 14f).apply { minHeight = page.dp(48) })
                 card.addView(row); card.setOnClickListener { open(folder) }
+                card.contentDescription = "${folder.title}，${folder.count} 个视频，长按管理收藏夹"
+                card.setOnLongClickListener {
+                    PlaylistManagement.folderMenu(this@PlaylistFoldersActivity, favorites, folder) { reload() }; true
+                }
                 // Refresh only visible cards, once per reload/content invalidation. Existing
                 // cached previews remain on screen while their official contents are refreshed.
                 if (shouldLoad) {

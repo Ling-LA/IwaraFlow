@@ -412,6 +412,19 @@ class IwaraApi(context: Context, private val apiRoot: String = DEFAULT_API_ROOT)
         playlistWrite("playlist/${UriEncoder.encodePath(playlistId)}/${UriEncoder.encodePath(videoId)}", enabled)
     }
 
+    /** Official updatePlaylist/destroyPlaylist, verified against the public 3.3.7 client. */
+    fun renamePlaylistBlocking(playlistId: String, title: String) {
+        require(playlistId.isNotBlank())
+        val clean = title.trim()
+        require(clean.isNotEmpty() && clean.length <= 100) { "收藏夹名称需为 1 至 100 个字符" }
+        playlistWrite("playlist/${UriEncoder.encodePath(playlistId)}", true, JSONObject().put("title", clean), update = true)
+    }
+
+    fun deletePlaylistBlocking(playlistId: String) {
+        require(playlistId.isNotBlank())
+        playlistWrite("playlist/${UriEncoder.encodePath(playlistId)}", false)
+    }
+
     private fun parsePlaylist(row: JSONObject?): PlaylistFolder? {
         row ?: return null
         val id = row.optString("id").takeUnless { it.isBlank() || it == "null" } ?: return null
@@ -444,13 +457,17 @@ class IwaraApi(context: Context, private val apiRoot: String = DEFAULT_API_ROOT)
         }
     }
 
-    private fun playlistWrite(path: String, enabled: Boolean, body: JSONObject? = null): String {
+    private fun playlistWrite(path: String, enabled: Boolean, body: JSONObject? = null, update: Boolean = false): String {
         val snapshot = likeStates.snapshot()
         if (!isLoggedIn()) throw IOException("请先登录 Iwara")
         ensureAccessTokenBlocking() ?: throw IOException("登录已失效，请重新登录")
         val builder = baseRequest("$apiRoot/$path", authenticated = true)
-        val request = if (enabled) builder.post(body?.toString()?.toRequestBody(jsonType) ?: ByteArray(0).toRequestBody(null)).build()
-            else builder.delete().build()
+        val payload = body?.toString()?.toRequestBody(jsonType) ?: ByteArray(0).toRequestBody(null)
+        val request = when {
+            update -> builder.put(payload).build()
+            enabled -> builder.post(payload).build()
+            else -> builder.delete().build()
+        }
         if (!likeStates.isCurrent(snapshot)) throw IOException("账号已切换，请重试")
         // A timed-out create must never be automatically retried or redirected with credentials.
         val writes = client.newBuilder().followRedirects(false).followSslRedirects(false).retryOnConnectionFailure(false).build()

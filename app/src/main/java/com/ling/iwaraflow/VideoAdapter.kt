@@ -422,7 +422,6 @@ class VideoAdapter(
         private val seekPreview = view.findViewById<TextView>(R.id.seekPreview)
         private val share = view.findViewById<TextView>(R.id.share)
         private val comments = view.findViewById<TextView>(R.id.comments)
-        private val fullscreenSocial = view.findViewById<View>(R.id.fullscreenSocial)
         private val fullscreenComments = view.findViewById<TextView>(R.id.fullscreenComments)
         private val fullscreenLikeCount = view.findViewById<TextView>(R.id.fullscreenLikeCount)
         private val reactionBurst = view.findViewById<ReactionBurstView>(R.id.reactionBurst)
@@ -1512,7 +1511,6 @@ class VideoAdapter(
         fun setChromeVisible(visible: Boolean) {
             infoPanel.visibility = if (visible) View.VISIBLE else View.GONE
             actionPanel.visibility = if (visible) View.VISIBLE else View.GONE
-            fullscreenSocial.visibility = if (fullscreenMode && !pipMode) View.VISIBLE else View.GONE
             // 时间牌在普通模式下要让开底下的信息栏；全屏没有那一栏，就往下挪到贴近底边。
             (seekPreview.layoutParams as? ViewGroup.MarginLayoutParams)?.let { lp ->
                 val dp = itemView.resources.displayMetrics.density
@@ -1529,6 +1527,7 @@ class VideoAdapter(
                 fullscreenMode -> PauseSeekBar.MODE_FULLSCREEN
                 else -> PauseSeekBar.MODE_NORMAL
             })
+            pauseSeekBar.refreshControls()
         }
 
         fun isPlaying(): Boolean = active && player?.isPlaying == true
@@ -1576,6 +1575,7 @@ class VideoAdapter(
                 p.release()
             }
             player = null
+            pauseSeekBar.refreshControls()
         }
 
         private fun displayQuality(item: VideoItem): String {

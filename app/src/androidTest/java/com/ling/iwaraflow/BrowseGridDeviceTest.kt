@@ -48,9 +48,11 @@ class BrowseGridDeviceTest {
         val preferences = context.getSharedPreferences(AppPrefs.FILE, 0)
         val prefs = AppPrefs(context)
         val oldAutoNext = prefs.autoNext
+        val oldTapToPause = prefs.tapToPause
         preferences.edit().putBoolean(PlaybackGuide.key(false), true).putBoolean(PlaybackGuide.key(true), true)
             .putBoolean(OverlayPermissionPrompt.KEY_SHOWN, true).commit()
         prefs.autoNext = false
+        prefs.tapToPause = false
         val video = File.createTempFile("grid-fixture-", ".mp4", context.cacheDir).apply {
             // The shared navigation fixture is portrait (320×568); this test also exercises
             // landscape fullscreen comments, so use an explicitly landscape neutral clip.
@@ -183,10 +185,35 @@ class BrowseGridDeviceTest {
                 (pager.getChildAt(0) as RecyclerView).findViewHolderForAdapterPosition(9)!!.itemView
                     .findViewById<View>(R.id.fullscreen).performClick()
             }
-            await("Fullscreen did not rotate or reveal social controls") {
-                pager.width > pager.height && (pager.adapter as VideoAdapter).isFullscreen &&
+            await("Fullscreen did not finish rotating") {
+                pager.width > pager.height && (pager.adapter as VideoAdapter).isFullscreen && !FullscreenMode.isChangingViewport(pager)
+            }
+            main {
+                val card = (pager.getChildAt(0) as RecyclerView).findViewHolderForAdapterPosition(9)!!.itemView
+                assertFalse(card.findViewById<View>(R.id.fullscreenSocial).isShown)
+                card.performClick()
+            }
+            await("Tapping fullscreen did not reveal transport and social controls together") {
+                (pager.getChildAt(0) as RecyclerView).findViewHolderForAdapterPosition(9)?.itemView
+                    ?.findViewById<View>(R.id.pauseSeekBar)?.isShown == true &&
                     (pager.getChildAt(0) as RecyclerView).findViewHolderForAdapterPosition(9)?.itemView
                         ?.findViewById<View>(R.id.fullscreenSocial)?.isShown == true
+            }
+            main {
+                (pager.getChildAt(0) as RecyclerView).findViewHolderForAdapterPosition(9)!!.itemView.performClick()
+            }
+            await("Second fullscreen tap did not hide transport and social controls together") {
+                val card = (pager.getChildAt(0) as RecyclerView).findViewHolderForAdapterPosition(9)?.itemView
+                card != null && !card.findViewById<View>(R.id.pauseSeekBar).isShown &&
+                    !card.findViewById<View>(R.id.fullscreenSocial).isShown
+            }
+            main {
+                (pager.getChildAt(0) as RecyclerView).findViewHolderForAdapterPosition(9)!!.itemView.performClick()
+            }
+            await("Third fullscreen tap did not restore transport and social controls together") {
+                val card = (pager.getChildAt(0) as RecyclerView).findViewHolderForAdapterPosition(9)?.itemView
+                card != null && card.findViewById<View>(R.id.pauseSeekBar).isShown &&
+                    card.findViewById<View>(R.id.fullscreenSocial).isShown
             }
             main {
                 fullscreenPhase = "comments"
@@ -237,7 +264,7 @@ class BrowseGridDeviceTest {
             }
             ProfileUiDeviceTest().screenshot("category-cards-return-018")
         } finally {
-            main { activity.finish(); prefs.autoNext = oldAutoNext }
+            main { activity.finish(); prefs.autoNext = oldAutoNext; prefs.tapToPause = oldTapToPause }
             video.delete(); cover.delete()
         }
     }

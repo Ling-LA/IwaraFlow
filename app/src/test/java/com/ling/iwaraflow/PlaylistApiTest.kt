@@ -89,6 +89,25 @@ class PlaylistApiTest {
             finally { api.close() }
         }
     }
+
+    @Test fun renameAndDeleteUseOfficialFolderRoutes() {
+        MockWebServer().use { server ->
+            server.enqueue(MockResponse().setResponseCode(204)); server.enqueue(MockResponse().setResponseCode(204))
+            val api = IwaraApi(context, server.url("/").toString().trimEnd('/'))
+            try {
+                api.renamePlaylistBlocking("folder", " 新名称 ")
+                api.deletePlaylistBlocking("folder")
+                val rename = server.takeRequest()
+                assertEquals("PUT", rename.method); assertEquals("/playlist/folder", rename.path)
+                val body = JSONObject(rename.body.readUtf8())
+                assertEquals(setOf("title"), body.keys().asSequence().toSet()); assertEquals("新名称", body.getString("title"))
+                val delete = server.takeRequest()
+                assertEquals("DELETE", delete.method); assertEquals("/playlist/folder", delete.path); assertEquals(0L, delete.bodySize)
+                assertTrue(runCatching { api.renamePlaylistBlocking("folder", " ") }.isFailure)
+                assertEquals("Invalid names must not issue a request", 2, server.requestCount)
+            } finally { api.close() }
+        }
+    }
     @Test fun emptyCreateResponseCannotResolveToPreexistingSameNameFolder() {
         MockWebServer().use { server ->
             server.enqueue(MockResponse().setResponseCode(201).setBody("{}"))

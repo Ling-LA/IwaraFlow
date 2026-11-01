@@ -17,7 +17,7 @@ data class MutedEntities(
 )
 
 // SQLiteOpenHelper only implements AutoCloseable on newer Android versions.
-class HistoryStore(context: Context, private val profileFile: String? = null) : SQLiteOpenHelper(context, profileFile ?: "iwaraflow.db", null, 11), java.io.Closeable {
+class HistoryStore(context: Context, private val profileFile: String? = null) : SQLiteOpenHelper(context, profileFile ?: "iwaraflow.db", null, 12), java.io.Closeable {
     /**
      * **UI 线程不写库**。划一条视频要写好几笔（观看记录、行为、已看标记），
      * 而这些方法都是 `@Synchronized` 的——和后台算画像抢同一把锁，用久了就是划走那一下的微卡顿。
@@ -117,6 +117,42 @@ class HistoryStore(context: Context, private val profileFile: String? = null) : 
     /** 划走 / 点赞这些都发生在 UI 线程上，写库交给写线程。 */
     fun recordInteractionAsync(item: VideoItem, action: String, weight: Double) =
         if (!appPrefs.privateBrowsing) post { recordInteraction(item, action, weight) } else Unit
+
+    /** An already-liked double tap is a small local preference signal, never another API like. */
+    fun recordExtraLikeAsync(item: VideoItem, complete: (Boolean) -> Unit = {}) {
+        val snapshot = likeStates.snapshot()
+        val copy = item.copy(tags = item.tags.toList())
+        val main = android.os.Handler(android.os.Looper.getMainLooper())
+        if (appPrefs.privateBrowsing || closed) { main.post { complete(false) }; return }
+        post {
+            val added = runCatching {
+                likeStates.isCurrent(snapshot) && snapshot.account == accountId && recordExtraLike(copy)
+            }.getOrDefault(false)
+            main.post { complete(added) }
+        }
+    }
+
+    /** A durable unique key survives interaction trimming, replays and account switches. */
+    @Synchronized
+    internal fun recordExtraLike(item: VideoItem): Boolean {
+        if (appPrefs.privateBrowsing || accountId.isBlank() || item.id.isBlank() ||
+            !likeStates.apply(item).liked || item.likeStateAccount != accountId) return false
+        // Always use the main DB: toggling per-account interest isolation cannot earn it twice.
+        val added = writableDatabase.insertWithOnConflict("extra_like_signals", null, ContentValues().apply {
+            put("account_id", accountId); put("video_id", item.id)
+            put("author", item.author.lowercase()); put("author_id", item.authorId)
+            put("tags", item.tags.map(SearchQuery::canonicalTag).distinct().joinToString("\u001F"))
+            put("created_at", System.currentTimeMillis()); put("active", 1)
+        }, SQLiteDatabase.CONFLICT_IGNORE) != -1L
+        if (added) notifyInterestChanged()
+        return added
+    }
+
+    /** Reset the signal without resetting the once-per-video allowance. */
+    fun clearExtraLikeSignals() {
+        writableDatabase.update("extra_like_signals", ContentValues().apply { put("active", 0) },
+            "account_id=?", arrayOf(accountId))
+    }
 
     fun recordWatchAsync(item: VideoItem, positionMs: Long, durationMs: Long, completed: Boolean) =
         if (!appPrefs.privateBrowsing) post { recordWatch(item, positionMs, durationMs, completed) } else Unit
@@ -226,12 +262,15 @@ class HistoryStore(context: Context, private val profileFile: String? = null) : 
         db.execSQL(IMPRESSIONS_INDEX)
         db.execSQL(PREFERENCE_TABLE)
         db.execSQL(MANUAL_TAG_TABLE)
+        db.execSQL(EXTRA_LIKE_TABLE)
+        db.execSQL(EXTRA_LIKE_INDEX)
         db.execSQL("CREATE INDEX idx_history_time ON history(watched_at DESC)")
         db.execSQL("CREATE INDEX idx_interactions_time ON interactions(created_at DESC)")
         db.execSQL("CREATE INDEX idx_seen_last_time ON seen_videos(last_seen_at DESC)")
     }
 
     override fun onUpgrade(db: SQLiteDatabase, oldVersion: Int, newVersion: Int) {
+        if (oldVersion < 12) { db.execSQL(EXTRA_LIKE_TABLE); db.execSQL(EXTRA_LIKE_INDEX) }
         if (oldVersion < 11) db.execSQL(MANUAL_TAG_TABLE)
         if (oldVersion < 2) {
             try {
@@ -674,6 +713,9 @@ class HistoryStore(context: Context, private val profileFile: String? = null) : 
             collect("history", seen)
             collect("favorites", favorites)
         }
+        val playlists = PlaylistStore(appContext)
+        val snapshot = playlists.snapshot()
+        if (snapshot.account == accountId) favorites += playlists.favoriteIds(ids, snapshot)
         return VideoStatuses(seen, favorites)
     }
 
@@ -926,6 +968,25 @@ class HistoryStore(context: Context, private val profileFile: String? = null) : 
         val tags = HashMap(longTerm.getValue(PREF_TAG))
         val videos = HashMap<String, Double>()
         val positiveTags = HashMap<String, Double>()
+        // Acknowledged double taps get no session multiplier and are account scoped even
+        // when ordinary interests are shared. Only the newest bounded window is scored;
+        // the durable unique rows remain so old gestures cannot be farmed again.
+        if (accountId.isNotBlank()) writableDatabase.query("extra_like_signals",
+            arrayOf("author", "author_id", "tags", "created_at"), "account_id=? AND active=1",
+            arrayOf(accountId), null, null, "created_at DESC", PROFILE_ROWS.toString()).use { c ->
+            while (c.moveToNext()) {
+                val weight = EXTRA_LIKE_WEIGHT * decayFactor(now - c.getLong(3))
+                val name = c.getString(0); val id = c.getString(1)
+                if (name.isNotBlank()) author[name] = (author[name] ?: 0.0) + weight
+                if (id.isNotBlank()) authorIds[id] = (authorIds[id] ?: 0.0) + weight
+                val selected = splitTags(c.getString(2)).distinct()
+                val share = TAG_SHARE / kotlin.math.sqrt(selected.size.coerceAtLeast(1).toDouble())
+                selected.forEach { tag ->
+                    tags[tag] = (tags[tag] ?: 0.0) + weight * share
+                    positiveTags[tag] = ((positiveTags[tag] ?: 0.0) + weight * share).coerceAtMost(8.0)
+                }
+            }
+        }
         val specificity = TagSpecificity()
         // 长期持续快速划走：同一作者 / 标签攒够 [LONG_TERM_SKIPS] 次划走，再额外压一层。
         val authorSkips = HashMap<String, Double>()
@@ -1376,6 +1437,12 @@ class HistoryStore(context: Context, private val profileFile: String? = null) : 
         raw?.split("\u001F")?.filter { it.isNotBlank() } ?: emptyList()
 
     companion object {
+        const val EXTRA_LIKE_WEIGHT = 0.25
+        private const val EXTRA_LIKE_TABLE = "CREATE TABLE IF NOT EXISTS extra_like_signals(" +
+            "account_id TEXT NOT NULL, video_id TEXT NOT NULL, author TEXT NOT NULL, author_id TEXT NOT NULL," +
+            "tags TEXT NOT NULL, created_at INTEGER NOT NULL, active INTEGER NOT NULL DEFAULT 1," +
+            "PRIMARY KEY(account_id, video_id))"
+        private const val EXTRA_LIKE_INDEX = "CREATE INDEX IF NOT EXISTS idx_extra_like_time ON extra_like_signals(account_id, active, created_at DESC)"
         private const val MANUAL_TAG_TABLE = "CREATE TABLE IF NOT EXISTS manual_tag_preferences(" +
             "tag TEXT PRIMARY KEY, preference INTEGER NOT NULL CHECK(preference IN (-1, 1)))"
         /** 官方历史点赞种进画像时用的动作名和权重（低于本地点赞的 2.0）。 */

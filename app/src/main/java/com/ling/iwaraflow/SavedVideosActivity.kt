@@ -28,6 +28,7 @@ class SavedVideosActivity : AppCompatActivity(), PlaybackGuideHost {
     private lateinit var api: IwaraApi
     private lateinit var history: HistoryStore
     private lateinit var prefs: AppPrefs
+    private lateinit var playlistFavorites: PlaylistFavorites
     private lateinit var mediaCache: MediaPreloadCache
     private lateinit var listPage: View
     private lateinit var feedPage: View
@@ -48,6 +49,14 @@ class SavedVideosActivity : AppCompatActivity(), PlaybackGuideHost {
     private var listBaseOffset = 0
     private var listQuery = ""
     private var ascending = false
+    private var likedOnly = false
+    private var playlistId = ""
+    private var playlistTitle = ""
+    private var playlistNextPage = 0
+    private var playlistOffline = false
+    private var likesChanged = false
+    private var likedFilterIds = emptySet<String>()
+    private var likeSubscription: java.io.Closeable? = null
     private var advanceAfterLoad = false
     private val listWorker = java.util.concurrent.Executors.newSingleThreadExecutor()
     private val listHandler = android.os.Handler(android.os.Looper.getMainLooper())
@@ -63,6 +72,7 @@ class SavedVideosActivity : AppCompatActivity(), PlaybackGuideHost {
         api = IwaraApi(this)
         history = HistoryStore(this)
         prefs = AppPrefs(this)
+        playlistFavorites = PlaylistFavorites(this, api, history)
         mediaCache = MediaPreloadCache(this)
         listPage = findViewById(R.id.savedListPage)
         feedPage = findViewById(R.id.savedFeedPage)
@@ -78,6 +88,8 @@ class SavedVideosActivity : AppCompatActivity(), PlaybackGuideHost {
             override fun handleOnBackPressed() = handleBack()
         })
         kind = intent.getStringExtra(EXTRA_KIND) ?: KIND_HISTORY
+        playlistId = intent.getStringExtra(EXTRA_PLAYLIST_ID).orEmpty()
+        playlistTitle = intent.getStringExtra(EXTRA_PLAYLIST_TITLE).orEmpty()
         findViewById<TextView>(R.id.savedTitle).text = pageTitle()
         findViewById<TextView>(R.id.savedFeedBack).text = "‹ ${pageTitle()}"
 
@@ -120,21 +132,43 @@ class SavedVideosActivity : AppCompatActivity(), PlaybackGuideHost {
         })
         EndOfFeedHint.install(pager) { listLoading || listOffset < listTotal }
         val restored = PagePlaybackState.read(savedInstanceState, prefs)
+        listQuery = savedInstanceState?.getString("library_query").orEmpty()
+        ascending = savedInstanceState?.getBoolean("library_ascending") ?: false
+        likedOnly = savedInstanceState?.getBoolean("library_liked_only") ?: false
         if (restored != null) {
-            listQuery = savedInstanceState!!.getString("library_query").orEmpty()
-            ascending = savedInstanceState.getBoolean("library_ascending")
-            listOffset = PagePlaybackState.start(savedInstanceState)
+            listOffset = PagePlaybackState.start(savedInstanceState!!)
             listBaseOffset = listOffset
+            if (kind == KIND_PLAYLIST) { listOffset = 0; listBaseOffset = 0 }
             listTotal = Int.MAX_VALUE
             restoredListIndex = restored.currentIndex
-            if (savedInstanceState.getBoolean("page_in_feed")) restoringVideo = restored.items[restored.currentIndex]
+            if (savedInstanceState!!.getBoolean("page_in_feed")) restoringVideo = restored.items[restored.currentIndex]
         }
         installLibraryControls()
+        likedFilterIds = prefs.likeStates.likedIds()
+        likeSubscription = prefs.likeStates.listen {
+            if (kind == KIND_HISTORY && likedOnly) {
+                val next = prefs.likeStates.likedIds()
+                if (next == likedFilterIds) return@listen
+                likedFilterIds = next
+                likesChanged = true
+                if (!inFeed && lifecycle.currentState.isAtLeast(Lifecycle.State.RESUMED)) {
+                    likesChanged = false
+                    loadLibraryPage(reset = true)
+                }
+            }
+        }
         loadLibraryPage(reset = restored == null)
     }
 
     private fun installLibraryControls() {
         val header = findViewById<TextView>(R.id.savedSubtitle).parent as android.widget.LinearLayout
+        if (kind == KIND_PLAYLIST) {
+            header.addView(android.widget.Button(this).apply {
+                text = "同步收藏夹"; setOnClickListener { loadLibraryPage(reset = true) }
+            })
+            installLibraryPagination()
+            return
+        }
         val controls = android.widget.LinearLayout(this).apply { gravity = android.view.Gravity.CENTER_VERTICAL }
         val input = android.widget.EditText(this).apply {
             hint = "搜索标题、作者或标签"; textSize = 14f; setSingleLine()
@@ -148,6 +182,14 @@ class SavedVideosActivity : AppCompatActivity(), PlaybackGuideHost {
         }
         controls.addView(input, android.widget.LinearLayout.LayoutParams(0, -2, 1f))
         controls.addView(sort); header.addView(controls)
+        if (kind == KIND_HISTORY) header.addView(android.widget.CheckBox(this).apply {
+            text = "仅显示已点赞视频"; tag = "history_liked_only"; isChecked = likedOnly
+            setTextColor(UiPalette.resolve(this@SavedVideosActivity, 0xFF17324A.toInt()))
+            setOnCheckedChangeListener { _, enabled ->
+                likedOnly = enabled; likedFilterIds = prefs.likeStates.likedIds()
+                likesChanged = false; loadLibraryPage(reset = true)
+            }
+        })
         input.addTextChangedListener(object : android.text.TextWatcher {
             override fun beforeTextChanged(s: CharSequence?, start: Int, count: Int, after: Int) {}
             override fun onTextChanged(s: CharSequence?, start: Int, before: Int, count: Int) {
@@ -157,6 +199,10 @@ class SavedVideosActivity : AppCompatActivity(), PlaybackGuideHost {
             }
             override fun afterTextChanged(s: android.text.Editable?) {}
         })
+        installLibraryPagination()
+    }
+
+    private fun installLibraryPagination() {
         listView.addOnScrollListener(object : RecyclerView.OnScrollListener() {
             override fun onScrolled(view: RecyclerView, dx: Int, dy: Int) {
                 if ((view.layoutManager as LinearLayoutManager).findLastVisibleItemPosition() >= items.size - 8)
@@ -167,25 +213,15 @@ class SavedVideosActivity : AppCompatActivity(), PlaybackGuideHost {
 
     private fun loadLibraryPage(reset: Boolean = false) {
         if (closed) return
-        if (reset) { listSerial++; listOffset = 0; listBaseOffset = 0; listLoading = false; listTotal = Int.MAX_VALUE }
+        if (reset) { listSerial++; listOffset = 0; listBaseOffset = 0; playlistNextPage = 0; listLoading = false; listTotal = Int.MAX_VALUE }
         if (listLoading || listOffset >= listTotal) return
         val serial = listSerial
         val offset = listOffset
         val query = listQuery
         val order = ascending
+        val filterLikes = likedOnly && kind == KIND_HISTORY
         listLoading = true
-        listWorker.execute {
-            val result = runCatching {
-                if (kind == KIND_DOWNLOADS) {
-                    val entries = DownloadLibrary.entries(this, history, offset, 48, query, order)
-                    Triple(SavedLibrary.Page(entries.map { it.item }, history.downloadCount(query)), entries, true)
-                } else Triple(SavedLibrary.page(history.libraryDatabase, kind == KIND_FAVORITES,
-                    offset, 48, query, order), emptyList<DownloadLibrary.Entry>(), false)
-            }.mapCatching { triple ->
-                val statuses = history.loadStatuses(triple.first.items.map { it.id })
-                triple.first.items.forEach { it.localFavorite = it.id in statuses.favorites }
-                triple
-            }
+        val complete: (Result<Triple<SavedLibrary.Page, List<DownloadLibrary.Entry>, Boolean>>) -> Unit = { result ->
             runOnUiThread {
                 if (closed || serial != listSerial) return@runOnUiThread
                 listLoading = false
@@ -202,6 +238,7 @@ class SavedVideosActivity : AppCompatActivity(), PlaybackGuideHost {
                     if (inFeed && !reset) feedAdapter.append(added.map { it.copy() })
                     findViewById<TextView>(R.id.savedSubtitle).text = if (downloaded) downloadsSubtitle()
                         else "共 ${page.total} 条 · 已加载 ${items.size} 条" + if (items.size < page.total) " · 下滑继续" else ""
+                    if (kind == KIND_PLAYLIST && playlistOffline) findViewById<TextView>(R.id.savedSubtitle).append(" · 离线缓存")
                     val current = if (inFeed) pager.currentItem else
                         (listView.layoutManager as LinearLayoutManager).findFirstVisibleItemPosition()
                     val remove = minOf((items.size - 2000).coerceAtLeast(0), (current - 80).coerceAtLeast(0))
@@ -212,7 +249,7 @@ class SavedVideosActivity : AppCompatActivity(), PlaybackGuideHost {
                         if (inFeed) { feedAdapter.discardConsumed(remove); pager.setCurrentItem(current - remove, false) }
                         else listView.scrollToPosition(current - remove)
                     }
-                    enrichMissingVideoDetails((from - remove).coerceAtLeast(0))
+                    if (kind != KIND_PLAYLIST) enrichMissingVideoDetails((from - remove).coerceAtLeast(0))
                     val restore = restoringVideo
                     if (restore != null) {
                         val found = items.firstOrNull { it.id == restore.id }
@@ -221,6 +258,10 @@ class SavedVideosActivity : AppCompatActivity(), PlaybackGuideHost {
                             found.resumePositionMs = restore.resumePositionMs
                             found.resumePlayWhenReady = restore.resumePlayWhenReady
                             openVideo(found)
+                        } else if (kind == KIND_PLAYLIST && listOffset < listTotal) {
+                            loadLibraryPage()
+                        } else if (kind == KIND_PLAYLIST) {
+                            restoringVideo = null
                         }
                     } else if (restoredListIndex > 0) {
                         listView.scrollToPosition(restoredListIndex); restoredListIndex = 0
@@ -236,10 +277,35 @@ class SavedVideosActivity : AppCompatActivity(), PlaybackGuideHost {
                 }
             }
         }
+        if (kind == KIND_PLAYLIST) {
+            playlistFavorites.getFolderPage(playlistId, playlistNextPage) { result ->
+                if (closed || serial != listSerial) return@getFolderPage
+                complete(result.map { page ->
+                    playlistNextPage++
+                    playlistOffline = page.offline
+                    val total = if (page.hasMore) maxOf(page.total, offset + page.items.size + 1) else offset + page.items.size
+                    page.items.forEach(prefs.likeStates::apply)
+                    Triple(SavedLibrary.Page(page.items, total), emptyList(), false)
+                })
+            }
+        } else listWorker.execute {
+            complete(runCatching {
+                if (kind == KIND_DOWNLOADS) {
+                    val entries = DownloadLibrary.entries(this, history, offset, 48, query, order)
+                    Triple(SavedLibrary.Page(entries.map { it.item }, history.downloadCount(query)), entries, true)
+                } else Triple(SavedLibrary.page(history.libraryDatabase, kind == KIND_FAVORITES,
+                    offset, 48, query, order, if (filterLikes) prefs.likeStates.likedIds() else null), emptyList<DownloadLibrary.Entry>(), false)
+            }.mapCatching { triple ->
+                val statuses = history.loadStatuses(triple.first.items.map { it.id })
+                triple.first.items.forEach { it.localFavorite = it.id in statuses.favorites; prefs.likeStates.apply(it) }
+                triple
+            })
+        }
     }
 
     private fun pageTitle(): String = when (kind) {
-        KIND_FAVORITES -> "我的收藏"
+        KIND_FAVORITES -> "旧版本地收藏"
+        KIND_PLAYLIST -> playlistTitle.ifBlank { "收藏夹" }
         KIND_DOWNLOADS -> "已下载"
         else -> "浏览历史"
     }
@@ -319,20 +385,22 @@ class SavedVideosActivity : AppCompatActivity(), PlaybackGuideHost {
         inFeed = false
         feedPage.visibility = View.GONE
         listPage.visibility = View.VISIBLE
+        if (likesChanged) { likesChanged = false; loadLibraryPage(reset = true) }
+        else if (kind == KIND_PLAYLIST) loadLibraryPage(reset = true)
     }
 
     private fun setFullscreen(enabled: Boolean) {
         window.decorView.findViewWithTag<View>("page_navigation_menu")?.visibility = if (enabled) View.GONE else View.VISIBLE
         if (closed || isFinishing || isDestroyed) return
-        if (enabled) comments.close()
+        comments.close()
         FullscreenMode.apply(this, feedAdapter, listOf(findViewById<View>(R.id.savedFeedBack)), enabled)
     }
 
     private fun handleBack() {
         if (closed) return
         when {
-            feedAdapter.isFullscreen -> setFullscreen(false)
             comments.isOpen -> comments.close()
+            feedAdapter.isFullscreen -> setFullscreen(false)
             inFeed -> showList()
             else -> finish()
         }
@@ -424,6 +492,7 @@ class SavedVideosActivity : AppCompatActivity(), PlaybackGuideHost {
         super.onResume()
         leavingForShare = false
         if (inFeed && !closed) feedAdapter.resumeActive()
+        else if (likesChanged && !closed) { likesChanged = false; loadLibraryPage(reset = true) }
     }
 
     override fun onPause() {
@@ -489,11 +558,13 @@ class SavedVideosActivity : AppCompatActivity(), PlaybackGuideHost {
             (listView.layoutManager as? LinearLayoutManager)?.findFirstVisibleItemPosition()?.coerceAtLeast(0) ?: 0
         PagePlaybackState.save(outState, prefs, if (inFeed) feedAdapter.items else items, index, inFeed, base = listBaseOffset)
         outState.putString("library_query", listQuery); outState.putBoolean("library_ascending", ascending)
+        outState.putBoolean("library_liked_only", likedOnly)
         super.onSaveInstanceState(outState)
     }
 
     override fun onDestroy() {
         closed = true
+        likeSubscription?.close()
         listSerial++
         listHandler.removeCallbacksAndMessages(null)
         listWorker.shutdownNow()
@@ -501,6 +572,7 @@ class SavedVideosActivity : AppCompatActivity(), PlaybackGuideHost {
         if (::comments.isInitialized) comments.release()
         if (::feedAdapter.isInitialized) feedAdapter.releaseAll()
         if (::mediaCache.isInitialized) mediaCache.close()
+        if (::playlistFavorites.isInitialized) playlistFavorites.close()
         api.close()
         history.close()
         super.onDestroy()
@@ -514,6 +586,9 @@ class SavedVideosActivity : AppCompatActivity(), PlaybackGuideHost {
         const val EXTRA_TITLE = "video_title"
         const val KIND_HISTORY = "history"
         const val KIND_FAVORITES = "favorites"
+        const val KIND_PLAYLIST = "playlist"
+        const val EXTRA_PLAYLIST_ID = "playlist_id"
+        const val EXTRA_PLAYLIST_TITLE = "playlist_title"
         const val KIND_DOWNLOADS = "downloads"
     }
 }

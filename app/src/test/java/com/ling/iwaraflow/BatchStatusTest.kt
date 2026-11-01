@@ -46,6 +46,21 @@ class BatchStatusTest {
         assertTrue(history.loadStatuses(emptyList()).seen.isEmpty())
     }
 
+    @Test fun officialPlaylistMembersAreFavoritesOnlyForTheCurrentAccount() {
+        val context = RuntimeEnvironment.getApplication()
+        val accounts = context.getSharedPreferences(AppPrefs.FILE, 0)
+        accounts.edit().putString(AppPrefs.KEY_ACCOUNT_ID, "alice").commit()
+        history.accountId = "alice"
+        val playlists = PlaylistStore(context)
+        playlists.confirmMemberships(playlists.snapshot(), "official", setOf("folder-1"))
+        history.setLocalFavorite(video("legacy"), true)
+        val ids = listOf("official", "legacy", "other")
+        assertEquals(setOf("official", "legacy"), history.loadStatuses(ids).favorites)
+        accounts.edit().putString(AppPrefs.KEY_ACCOUNT_ID, "bob").commit()
+        history.accountId = "bob"
+        assertEquals(setOf("legacy"), history.loadStatuses(ids).favorites)
+    }
+
     /** 超过一次能问的变量个数时要分批，而不是报错。 */
     @Test fun aLotOfIdsAreAskedInBatches() {
         val many = (0 until HistoryStore.STATUS_BATCH * 2 + 7).map { "v$it" }

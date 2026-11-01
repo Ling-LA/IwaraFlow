@@ -9,7 +9,7 @@ import android.view.View
 class CommentsHost(
     /** 视频所在的区域，用它的尺寸算面板几何；还没布局时退回屏幕尺寸。 */
     private val pager: View,
-    panelRoot: View,
+    private val panelRoot: View,
     private val scrim: View,
     private val adapter: VideoAdapter,
     api: IwaraApi,
@@ -28,13 +28,15 @@ class CommentsHost(
     /** 「为什么推荐给我」：按视频 id 给出推荐理由，只有推荐流给得出来。 */
     reasonFor: ((String) -> String?)? = null
 ) {
+    private var sidePanelWidth = 0
     val panel = CommentsPanel(
         root = panelRoot,
         api = api,
         onNeedLogin = onNeedLogin,
         onLayoutChanged = { open, top, bottom ->
             scrim.visibility = if (open) View.VISIBLE else View.GONE
-            adapter.setVideoInsets(if (open) top else 0, if (open) bottom else 0)
+            adapter.setVideoInsets(if (open) top else 0,
+                if (open && sidePanelWidth == 0) bottom else 0, if (open) sidePanelWidth else 0)
             onOpenChanged?.invoke(open)
         },
         onOpenAuthor = onOpenAuthor,
@@ -59,7 +61,15 @@ class CommentsHost(
         val metrics = pager.resources.displayMetrics
         val width = pager.width.takeIf { it > 0 } ?: metrics.widthPixels
         val height = pager.height.takeIf { it > 0 } ?: metrics.heightPixels
-        val topBar = topBarHeight()
+        val side = adapter.isFullscreen && width > height
+        sidePanelWidth = if (side) minOf((width * .46f).toInt(), (440 * metrics.density).toInt()) else 0
+        (panelRoot.layoutParams as? android.widget.FrameLayout.LayoutParams)?.let { params ->
+            params.width = if (side) sidePanelWidth else android.view.ViewGroup.LayoutParams.MATCH_PARENT
+            params.gravity = android.view.Gravity.BOTTOM or if (side) android.view.Gravity.END else android.view.Gravity.CENTER_HORIZONTAL
+            panelRoot.layoutParams = params
+        }
+        if (side) { panel.open(item, height, 0, tab); return }
+        val topBar = if (adapter.isFullscreen) 0 else topBarHeight()
         val aspect = adapter.activeVideoAspect()
         val panelHeight = CommentsPanel.panelHeight(width, height, topBar, aspect, gap = gapPx)
         val top = CommentsPanel.videoTop(width, height, topBar, aspect, panelHeight)

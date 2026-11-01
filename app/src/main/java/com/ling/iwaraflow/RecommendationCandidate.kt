@@ -44,12 +44,14 @@ data class RecommendationCandidate(
      */
     var generation: Int = 0,
     /** A bounded interest-inference explanation assigned after the final feed is assembled. */
-    var interestSuggested: Boolean = false
+    var interestSuggested: Boolean = false,
+    var seasonalTag: String = ""
 ) {
     /** 「为什么推荐给我」：挑最能说明问题的那一条理由。 */
     fun reason(): String = when {
         subscribed -> "你关注的作者更新了"
         exploration -> "为你探索的新内容"
+        seasonalTag.isNotBlank() -> "应季节日内容 #$seasonalTag"
         matchedTags.isNotEmpty() -> "你最近常看 #${matchedTags.first()}"
         matchedAuthorId.isNotBlank() -> "你喜欢这位作者的作品"
         classic -> "历史上的高赞作品"
@@ -96,6 +98,7 @@ data class RecommendationCandidate(
         const val AUTHOR = "author"
         const val CLASSICS = "classics"
         const val OFFICIAL = "official"
+        const val SEASONAL = "seasonal"
     }
 
     /** 来源分组：同一组里的几路来源说的其实是同一件事。 */
@@ -120,7 +123,7 @@ data class RecommendationCandidate(
         fun sourceGroup(label: String): String = when (label) {
             Source.TAG, Source.AUTHOR -> Group.PERSONAL
             Source.SUBSCRIBED -> Group.SOCIAL
-            Source.DATE -> Group.FRESH
+            Source.DATE, Source.SEASONAL -> Group.FRESH
             // 热门 / 流行 / 月高赞 / 老片 / 官方回退：说的都是“很多人喜欢”。
             else -> Group.QUALITY
         }

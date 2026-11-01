@@ -10,7 +10,7 @@ import kotlin.math.ln
  * 这里一个网络请求都不发、也不碰数据库，全是纯计算——照着一份候选和一份画像，
  * 算出最终该怎么排。拆开之后这半边可以单独测，改排序也不用担心动到召回。
  */
-class RecommendationRanker(private val random: Random = Random()) {
+class RecommendationRanker(private val random: Random = Random(), private val nowMs: () -> Long = System::currentTimeMillis) {
 
     /** 这一轮的口味画像，抽候选和打分共用一份。 */
     @Volatile var profile: PreferenceProfile = PreferenceProfile(emptyMap(), emptyMap())
@@ -64,7 +64,7 @@ class RecommendationRanker(private val random: Random = Random()) {
      */
     fun rank(merged: Map<String, RecommendationCandidate>): List<VideoItem> {
         val taste = profile
-        val now = System.currentTimeMillis()
+        val now = nowMs()
         merged.values.forEach { candidate ->
             // 站方数据：平滑点赞率 + 热度，见 qualityScore。
             candidate.baseQuality = qualityScore(candidate.item.likes, candidate.item.views)
@@ -125,9 +125,10 @@ class RecommendationRanker(private val random: Random = Random()) {
         val quality: Double,
         val freshness: Double,
         val taste: Double,
-        val jitter: Double
+        val jitter: Double,
+        val seasonal: Double = 0.0
     ) {
-        val total: Double get() = source + quality + freshness + taste + jitter
+        val total: Double get() = source + quality + freshness + taste + jitter + seasonal
     }
 
     internal fun scoreParts(item: VideoItem, taste: PreferenceProfile, now: Long): ScoreParts {
@@ -138,7 +139,8 @@ class RecommendationRanker(private val random: Random = Random()) {
             quality = known?.baseQuality ?: qualityScore(item.likes, item.views),
             freshness = 1.6 / (1.0 + ageDays / 30.0),
             taste = taste.rankingScore(item) * TASTE_WEIGHT,
-            jitter = ((item.id.hashCode().toLong() and 0xffff) / 65535.0) * JITTER_WEIGHT
+            jitter = ((item.id.hashCode().toLong() and 0xffff) / 65535.0) * JITTER_WEIGHT,
+            seasonal = SeasonalInterest.boost(item, taste, now)
         )
     }
 
@@ -157,6 +159,7 @@ class RecommendationRanker(private val random: Random = Random()) {
             append("\n来源 ${signed(parts.source)} · 质量 ${signed(parts.quality)}")
             append(" · 新鲜度 ${signed(parts.freshness)}")
             append("\n画像 ${signed(parts.taste)} · 扰动 ${signed(parts.jitter)}")
+            if (parts.seasonal > 0) append(" · 节日 ${signed(parts.seasonal)}")
             val hitTags = item.tags.mapNotNull { tag ->
                 taste.tagWeights[tag.lowercase()]?.let { tag to it }
             }.sortedByDescending { kotlin.math.abs(it.second) }.take(PreferenceProfile.TOP_TAGS)
@@ -191,7 +194,7 @@ class RecommendationRanker(private val random: Random = Random()) {
         followed: Set<String>,
         classics: List<VideoItem>
     ): List<VideoItem> {
-        val (recent, aged) = splitByAge(ranked, System.currentTimeMillis())
+        val (recent, aged) = splitByAge(ranked, nowMs())
         val feed = if (recent.size >= MIN_RECENT_FEED) recent else recent + aged.take(MIN_RECENT_FEED - recent.size)
         // 老片池也按“质量 × 口味”排一遍：穿插进来的应该是“你可能喜欢的经典”，不是全站经典。
         val pool = if (classicsEvery > 0) rankClassics(classics + aged) else emptyList()
@@ -278,8 +281,10 @@ class RecommendationRanker(private val random: Random = Random()) {
      */
     fun rankClassics(items: List<VideoItem>): List<VideoItem> {
         val taste = profile
+        val now = nowMs()
         return diversify(weightedOrderBy(hardMuteFilter(items, taste)) { item ->
-            qualityScore(item.likes, item.views) + taste.rankingScore(item) * CLASSIC_TASTE_WEIGHT
+            qualityScore(item.likes, item.views) + taste.rankingScore(item) * CLASSIC_TASTE_WEIGHT +
+                SeasonalInterest.boost(item, taste, now)
         })
     }
 

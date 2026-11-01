@@ -15,11 +15,13 @@ import android.os.Environment
 import android.text.InputType
 import android.util.Rational
 import android.view.View
+import android.view.ViewGroup
 import android.view.WindowInsets
 import android.widget.ArrayAdapter
 import android.widget.CheckBox
 import android.widget.EditText
 import android.widget.LinearLayout
+import android.widget.FrameLayout
 import android.widget.ProgressBar
 import android.widget.ScrollView
 import android.widget.Spinner
@@ -32,10 +34,31 @@ import androidx.core.app.ActivityCompat
 import androidx.core.content.ContextCompat
 import androidx.lifecycle.Lifecycle
 import androidx.viewpager2.widget.ViewPager2
+import androidx.recyclerview.widget.RecyclerView
+import androidx.recyclerview.widget.GridLayoutManager
+import androidx.swiperefreshlayout.widget.SwipeRefreshLayout
 
 class MainActivityV3 : AppCompatActivity(), PlaybackGuideHost {
     override val playbackGuideAdapter: VideoAdapter get() = adapter
     override fun setPlaybackGuideFullscreen(enabled: Boolean) = setFullscreen(enabled)
+    override fun preparePlaybackGuide(): (() -> Unit)? {
+        if (!showingBrowseGrid) return null
+        val state = browseStates[mode]
+        val interruptedLoad = loadingMore
+        val restartFromFirstPage = browseRefresh.isRefreshing || state?.items.isNullOrEmpty()
+        // A pending grid response must not append category cards to the temporary player.
+        // Resume that same request after dismissing the guide, including initial loads.
+        if (interruptedLoad) invalidateRequests()
+        browseRefresh.isRefreshing = false
+        loading.visibility = View.GONE
+        state?.viewport = browseGrid.layoutManager?.onSaveInstanceState()
+        if (state != null && state.items.isNotEmpty()) openBrowseVideo(state.selectedIndex.coerceIn(state.items.indices))
+        else { setBrowseSurface(false); resumeVisiblePlayback() }
+        return {
+            showBrowseGrid()
+            if (interruptedLoad) loadBrowsePage(reset = restartFromFirstPage)
+        }
+    }
 
     private lateinit var api: IwaraApi
     private lateinit var history: HistoryStore
@@ -51,6 +74,16 @@ class MainActivityV3 : AppCompatActivity(), PlaybackGuideHost {
     private lateinit var adapter: VideoAdapter
     private lateinit var topBar: View
     private lateinit var comments: CommentsHost
+    private lateinit var browseGrid: RecyclerView
+    private lateinit var browseRefresh: SwipeRefreshLayout
+    private lateinit var browseCards: BrowseVideoAdapter
+    private lateinit var browseBack: TextView
+    private val browseStates = HashMap<String, BrowseCatalogState>()
+    private var showingBrowseGrid = false
+    private var browseLikeSubscription: java.io.Closeable? = null
+    private val returnToCardsOnBack = object : OnBackPressedCallback(false) {
+        override fun handleOnBackPressed() { showBrowseGrid() }
+    }
 
     /** 评论面板开着时返回键先关面板，而不是退出应用。 */
     private val closeCommentsOnBack = object : OnBackPressedCallback(false) {
@@ -228,10 +261,14 @@ class MainActivityV3 : AppCompatActivity(), PlaybackGuideHost {
                 }
             }
         )
+        setupBrowseGrid()
+        onBackPressedDispatcher.addCallback(this, returnToCardsOnBack)
         onBackPressedDispatcher.addCallback(this, closeCommentsOnBack)
         onBackPressedDispatcher.addCallback(this, exitFullscreenOnBack)
         pager.registerOnPageChangeCallback(object : ViewPager2.OnPageChangeCallback() {
             override fun onPageSelected(position: Int) {
+                if (showingBrowseGrid) return
+                if (mode in BrowseCatalogState.MODES) browseStates[mode]?.selectedIndex = position
                 // 翻到下一条了，上一条的评论就不该还挂着。
                 comments.close()
                 adapter.setActive(position)
@@ -243,7 +280,7 @@ class MainActivityV3 : AppCompatActivity(), PlaybackGuideHost {
 
         setupTopBar()
         window.decorView.post {
-            if (!isFinishing && !isDestroyed) PlaybackGuide.showOnce(this, false) { OverlayPermissionPrompt.showOnce(this) }
+            if (!isFinishing && !isDestroyed && !showingBrowseGrid) PlaybackGuide.showOnce(this, false) { OverlayPermissionPrompt.showOnce(this) }
         }
         if (!intent.hasExtra(IwaraSharedLink.EXTRA_URL)) {
             val restoredMode = savedInstanceState?.getString("feed_mode")
@@ -251,10 +288,25 @@ class MainActivityV3 : AppCompatActivity(), PlaybackGuideHost {
                 savedInstanceState.getString("feed_snapshot")?.let(FeedSessionCodec::decode) else null
             if (intent.getBooleanExtra("return_recommend", false)) returnToRecommend()
             else if (restored != null && restoredMode in FeedSessionStore.HOME_MODES) {
-                mode = restoredMode!!; homeFeedSessions.save(mode, restored); restoreHomeSession(restored)
-                listOf(R.id.tabRecommend to "recommend", R.id.tabLatest to "date", R.id.tabTrending to "trending", R.id.tabPopular to "popularity").forEach { (id, value) ->
-                    findViewById<TextView>(id).setTextColor(if (value == mode) -1 else 0x99FFFFFF.toInt())
-                }
+                mode = restoredMode!!
+                if (mode in BrowseCatalogState.MODES) {
+                    val state = browseStates.getOrPut(mode) { BrowseCatalogState() }
+                    state.restore(restored)
+                    savedInstanceState.getString("browse_thumbnails")?.let { text -> runCatching {
+                        val covers = org.json.JSONObject(text)
+                        state.items.indices.forEach { index ->
+                            val item = state.items[index]
+                            state.items[index] = item.copy(thumbnailUrl = covers.optString(item.id))
+                        }
+                    } }
+                    savedInstanceState.getString("browse_source_pages")?.let { text -> runCatching {
+                        val pages = org.json.JSONObject(text)
+                        state.items.forEach { item -> state.rememberSourcePage(item.id, pages.optInt(item.id, restored.currentPage)) }
+                    } }
+                    if (savedInstanceState.getBoolean("browse_in_feed")) openBrowseVideo(state.selectedIndex)
+                    else showBrowseGrid()
+                } else { homeFeedSessions.save(mode, restored); restoreHomeSession(restored) }
+                setBrowseSurface(showingBrowseGrid)
             } else restoreWarmRecommendations()
         }
         // 官方点赞的完整同步放在首屏之后，避免和冷启动抢网络。
@@ -318,6 +370,159 @@ class MainActivityV3 : AppCompatActivity(), PlaybackGuideHost {
         }
     }
 
+    private fun setupBrowseGrid() {
+        browseCards = BrowseVideoAdapter { item ->
+            browseStates[mode]?.items?.indexOfFirst { it.id == item.id }?.takeIf { it >= 0 }?.let(::openBrowseVideo)
+        }
+        browseGrid = RecyclerView(this).apply {
+            tag = "category_video_grid"
+            layoutManager = GridLayoutManager(this@MainActivityV3, 2)
+            adapter = browseCards
+            clipToPadding = false
+            setPadding(dp(8), dp(8), dp(8), dp(16))
+            addOnScrollListener(object : RecyclerView.OnScrollListener() {
+                override fun onScrolled(recyclerView: RecyclerView, dx: Int, dy: Int) {
+                    if (!showingBrowseGrid || dy <= 0) return
+                    val last = (layoutManager as GridLayoutManager).findLastVisibleItemPosition()
+                    if (last >= browseCards.itemCount - 8) loadMore()
+                }
+            })
+        }
+        browseRefresh = SwipeRefreshLayout(this).apply {
+            visibility = View.GONE
+            setBackgroundColor(UiPalette.resolve(context, 0xFFEEF8FE.toInt()))
+            setColorSchemeColors(UiPalette.resolve(context, 0xFF285C7B.toInt()))
+            addView(browseGrid, ViewGroup.LayoutParams(-1, -1))
+            setOnRefreshListener { loadBrowsePage(reset = true) }
+        }
+        val root = pager.parent as FrameLayout
+        root.addView(browseRefresh, 1, FrameLayout.LayoutParams(-1, -1).apply { topMargin = dp(58) })
+        browseBack = TextView(this).apply {
+            tag = "return_to_category_cards"
+            text = "‹ 列表"; textSize = 14f; setTextColor(-1)
+            gravity = android.view.Gravity.CENTER
+            contentDescription = "返回视频卡片列表"
+            background = android.graphics.drawable.GradientDrawable().apply { setColor(0x88000000.toInt()); cornerRadius = dp(20).toFloat() }
+            visibility = View.GONE
+            setOnClickListener { showBrowseGrid() }
+        }
+        root.addView(browseBack, 2, FrameLayout.LayoutParams(dp(74), dp(40)).apply { leftMargin = dp(12); topMargin = dp(62) })
+        topBar.addOnLayoutChangeListener { _, _, _, _, bottom, _, _, _, _ ->
+            adapter.setOverlayTopInset(bottom + dp(if (!showingBrowseGrid && mode in BrowseCatalogState.MODES) 48 else 8))
+            (browseRefresh.layoutParams as FrameLayout.LayoutParams).takeIf { it.topMargin != bottom }?.also { it.topMargin = bottom; browseRefresh.layoutParams = it }
+            (browseBack.layoutParams as FrameLayout.LayoutParams).takeIf { it.topMargin != bottom + dp(4) }?.also { it.topMargin = bottom + dp(4); browseBack.layoutParams = it }
+        }
+        browseLikeSubscription = prefs.likeStates.listen { id ->
+            browseStates.values.forEach { state -> state.items.filter { id == null || it.id == id }.forEach(prefs.likeStates::apply) }
+            if (showingBrowseGrid) browseCards.submit(browseStates[mode]?.items.orEmpty())
+        }
+    }
+
+    private fun setBrowseSurface(grid: Boolean) {
+        showingBrowseGrid = grid
+        browseRefresh.visibility = if (grid) View.VISIBLE else View.GONE
+        pager.visibility = if (grid) View.GONE else View.VISIBLE
+        browseBack.visibility = if (!grid && mode in BrowseCatalogState.MODES && !adapter.isFullscreen) View.VISIBLE else View.GONE
+        returnToCardsOnBack.isEnabled = !grid && mode in BrowseCatalogState.MODES
+        val foreground = if (grid) UiPalette.resolve(this, 0xFF17324A.toInt()) else -1
+        val secondary = if (grid) UiPalette.resolve(this, 0xFF607D93.toInt()) else 0x99FFFFFF.toInt()
+        topBar.setBackgroundColor(if (grid) UiPalette.resolve(this, 0xFFDDF1FC.toInt()) else 0x26000000)
+        listOf(R.id.tabRecommend to "recommend", R.id.tabLatest to "date", R.id.tabTrending to "trending", R.id.tabPopular to "popularity").forEach { (id, value) ->
+            findViewById<TextView>(id).apply {
+                setTextColor(if (value == mode) foreground else secondary)
+                setTypeface(null, if (value == mode) android.graphics.Typeface.BOLD else android.graphics.Typeface.NORMAL)
+            }
+        }
+        listOf(R.id.btnSearch, R.id.btnMenu).forEach { findViewById<TextView>(it).setTextColor(foreground) }
+        error.setTextColor(if (grid) foreground else -1)
+        adapter.setOverlayTopInset(topBar.height + dp(if (!grid && mode in BrowseCatalogState.MODES) 48 else 8))
+    }
+
+    private fun showBrowseGrid() {
+        if (mode !in BrowseCatalogState.MODES) return
+        comments.close()
+        if (adapter.isFullscreen) setFullscreen(false)
+        adapter.savePlaybackPosition()
+        adapter.pauseAll()
+        val state = browseStates.getOrPut(mode) { BrowseCatalogState() }
+        setBrowseSurface(true)
+        browseCards.submit(state.items.onEach(prefs.likeStates::apply))
+        state.viewport?.let { browseGrid.layoutManager?.onRestoreInstanceState(it) }
+        loading.visibility = View.GONE
+        error.visibility = View.GONE
+    }
+
+    private fun openBrowseVideo(index: Int) {
+        if (showingBrowseGrid && browseRefresh.isRefreshing) return
+        val state = browseStates[mode] ?: return
+        if (index !in state.items.indices) return
+        if (showingBrowseGrid) state.viewport = browseGrid.layoutManager?.onSaveInstanceState()
+        adapter.pauseAll()
+        state.selectedIndex = index
+        adapter.replace(state.items)
+        currentPage = state.page
+        pagingEnabled = state.canLoadMore
+        feedSession = java.util.UUID.randomUUID().toString()
+        adapter.impressionSession = feedSession
+        setBrowseSurface(false)
+        pager.setCurrentItem(index, false)
+        adapter.setActive(index)
+        noteImpressions(state.items, 0)
+        if (lifecycle.currentState.isAtLeast(Lifecycle.State.RESUMED)) resumeVisiblePlayback()
+    }
+
+    private fun resumeVisiblePlayback() {
+        if (!showingBrowseGrid) adapter.resumeActive()
+    }
+
+    private fun loadBrowsePage(reset: Boolean) {
+        if (mode !in BrowseCatalogState.MODES || (!reset && loadingMore)) return
+        val requestedMode = mode
+        val state = browseStates.getOrPut(mode) { BrowseCatalogState() }
+        if (!reset && !state.canLoadMore) { browseRefresh.isRefreshing = false; return }
+        if (reset) { invalidateRequests(); browseRefresh.isRefreshing = state.items.isNotEmpty() }
+        val serial = requestSerial
+        val page = if (reset) 0 else state.page + 1
+        loadingMore = true
+        error.visibility = View.GONE
+        if (state.items.isEmpty()) loading.visibility = View.VISIBLE
+        api.getVideos(requestedMode, page, pageSize) { result ->
+            result.fold(onSuccess = { raw ->
+                // Cards need only list metadata. Playback resolves the chosen video's source on demand.
+                val filtered = if (prefs.skipSeenEverywhere && raw.isNotEmpty()) runCatching {
+                    val seen = history.loadStatuses(raw.map { it.id }).seen
+                    raw.filterNot { it.id in seen }.ifEmpty { raw }
+                }.getOrDefault(raw) else raw
+                val videos = decorate(filtered)
+                runOnUiThread {
+                    if (isFinishing || isDestroyed || serial != requestSerial || requestedMode != mode) return@runOnUiThread
+                    loadingMore = false; loading.visibility = View.GONE; browseRefresh.isRefreshing = false
+                    if (!state.accept(page, videos, raw.size, pageSize)) return@runOnUiThread
+                    currentPage = state.page; pagingEnabled = state.canLoadMore
+                    if (showingBrowseGrid) {
+                        browseCards.submit(state.items)
+                        if (reset) browseGrid.scrollToPosition(0)
+                    } else {
+                        val before = adapter.itemCount
+                        adapter.append(videos)
+                        if (pendingAdvanceAfterLoad && adapter.itemCount > before) {
+                            pendingAdvanceAfterLoad = false
+                            pager.setCurrentItem(before, true)
+                        }
+                    }
+                    if (state.items.isEmpty()) showError("暂无视频，下拉刷新后重试")
+                    window.decorView.postDelayed({ runLaunchUpdateCheck() }, 1500L)
+                }
+            }, onFailure = { failure -> runOnUiThread {
+                if (isFinishing || isDestroyed || serial != requestSerial || requestedMode != mode) return@runOnUiThread
+                loadingMore = false; loading.visibility = View.GONE; browseRefresh.isRefreshing = false
+                val message = IwaraApi.explainError(failure)
+                if (state.items.isEmpty()) showError("视频列表加载失败\n$message\n下拉刷新重试")
+                else Toast.makeText(this, "加载失败，可下拉刷新或继续滑动重试：$message", Toast.LENGTH_LONG).show()
+            } })
+        }
+    }
+
     private fun setupTopBar() {
         val recommend = findViewById<TextView>(R.id.tabRecommend)
         val trending = findViewById<TextView>(R.id.tabTrending)
@@ -342,6 +547,7 @@ class MainActivityV3 : AppCompatActivity(), PlaybackGuideHost {
                 homeFeedSessions.forget("recommend")
                 invalidateRequests()
                 mode = "recommend"
+                setBrowseSurface(false)
                 pagingEnabled = true
                 currentPage = 0
                 styleSelected(selected)
@@ -349,13 +555,22 @@ class MainActivityV3 : AppCompatActivity(), PlaybackGuideHost {
                 return
             }
 
-            if (sameHomeMode) return
+            if (sameHomeMode) {
+                if (!showingBrowseGrid && newMode in BrowseCatalogState.MODES) showBrowseGrid()
+                return
+            }
 
             saveCurrentHomeSession()
             invalidateRequests()
             mode = newMode
             pagingEnabled = true
             styleSelected(selected)
+            if (newMode in BrowseCatalogState.MODES) {
+                showBrowseGrid()
+                if (browseStates.getValue(newMode).items.isEmpty()) loadBrowsePage(reset = true)
+                return
+            }
+            setBrowseSurface(false)
 
             val saved = homeFeedSessions.restorable(newMode)
             if (saved != null) {
@@ -375,6 +590,12 @@ class MainActivityV3 : AppCompatActivity(), PlaybackGuideHost {
     }
 
     private fun saveCurrentHomeSession() {
+        if (mode in BrowseCatalogState.MODES) {
+            val state = browseStates[mode] ?: return
+            if (showingBrowseGrid) state.viewport = browseGrid.layoutManager?.onSaveInstanceState()
+            else { adapter.savePlaybackPosition(); state.selectedIndex = pager.currentItem }
+            return
+        }
         if (mode !in FeedSessionStore.HOME_MODES || adapter.items.isEmpty()) return
         adapter.savePlaybackPosition()
         val index = pager.currentItem.coerceIn(0, adapter.items.lastIndex)
@@ -398,10 +619,12 @@ class MainActivityV3 : AppCompatActivity(), PlaybackGuideHost {
         val index = session.currentIndex.coerceIn(0, adapter.itemCount - 1)
         pager.setCurrentItem(index, false)
         adapter.setActive(index)
+        if (lifecycle.currentState.isAtLeast(Lifecycle.State.RESUMED)) resumeVisiblePlayback()
     }
 
     private fun returnToRecommend() {
         mode = "recommend"
+        setBrowseSurface(false)
         pagingEnabled = true
         currentPage = 0
         styleRecommendTab()
@@ -454,6 +677,11 @@ class MainActivityV3 : AppCompatActivity(), PlaybackGuideHost {
     }
 
     private fun loadFeed(reset: Boolean) {
+        if (mode in BrowseCatalogState.MODES) {
+            if (reset) showBrowseGrid()
+            loadBrowsePage(reset)
+            return
+        }
         if (reset) {
             restoringWarmQueue = false
             if (mode == "recommend") { WarmRecommendationStore.clear(this); warmVideoIds.clear() }
@@ -579,6 +807,7 @@ class MainActivityV3 : AppCompatActivity(), PlaybackGuideHost {
         noteImpressions(head, 0)
         pager.setCurrentItem(0, false)
         adapter.setActive(0)
+        if (lifecycle.currentState.isAtLeast(Lifecycle.State.RESUMED)) resumeVisiblePlayback()
         window.decorView.postDelayed({ runLaunchUpdateCheck() }, 1500L)
     }
 
@@ -615,6 +844,7 @@ class MainActivityV3 : AppCompatActivity(), PlaybackGuideHost {
                 adapter.replace(decorate(unreachable))
                 pager.setCurrentItem(0, false)
                 adapter.setActive(0)
+                if (lifecycle.currentState.isAtLeast(Lifecycle.State.RESUMED)) resumeVisiblePlayback()
                 Toast.makeText(this, "无法预检视频源，已直接显示未验证的视频", Toast.LENGTH_LONG).show()
                 return
             }
@@ -625,6 +855,7 @@ class MainActivityV3 : AppCompatActivity(), PlaybackGuideHost {
             noteImpressions(list, 0)
             pager.setCurrentItem(0, false)
             adapter.setActive(0)
+            if (lifecycle.currentState.isAtLeast(Lifecycle.State.RESUMED)) resumeVisiblePlayback()
         }
     }
 
@@ -700,6 +931,10 @@ class MainActivityV3 : AppCompatActivity(), PlaybackGuideHost {
     }
 
     private fun loadMore() {
+        if (mode in BrowseCatalogState.MODES) {
+            if (!loadingMore && browseStates[mode]?.canLoadMore == true) loadBrowsePage(reset = false)
+            return
+        }
         if (loadingMore || awaitingFullFeed || adapter.itemCount == 0) return
         loadingMore = true
         if (mode == "recommend") loadMoreRecommend(requestSerial)
@@ -1029,12 +1264,12 @@ class MainActivityV3 : AppCompatActivity(), PlaybackGuideHost {
         item.selectedQuality = LOCAL_SOURCE_NAME
         item.localFavorite = history.isLocalFavorite(item.id)
         saveCurrentHomeSession()
-        pagingEnabled = false; mode = "single"; invalidateRequests()
+        pagingEnabled = false; mode = "single"; setBrowseSurface(false); invalidateRequests()
         loading.visibility = View.GONE
         adapter.replace(listOf(item)); pager.setCurrentItem(0, false); adapter.setActive(0)
         // 这里是从 onResume 直接调过来的，生命周期状态还没翻到 RESUMED，不能拿它当条件——
         // 否则播放一直处于禁用状态，这一页黑屏，之后切到哪个榜单都黑屏。
-        if (!openingInternalPage) adapter.resumeActive()
+        if (!openingInternalPage) resumeVisiblePlayback()
         // 下载记录里只有标题和作者名：后台补拉一次详情，把作者 id、简介、点赞数填上，
         // 这样评论区、简介页和“进作者主页”都能正常用。拉不到（离线）也不影响播放。
         val requestSerial = ++localDetailSerial
@@ -1103,6 +1338,7 @@ class MainActivityV3 : AppCompatActivity(), PlaybackGuideHost {
             result.onSuccess { item ->
                 saveCurrentHomeSession()
                 mode = "recommend"
+                setBrowseSurface(false)
                 pagingEnabled = true
                 currentPage = 0
                 emptyRefills = 0
@@ -1123,7 +1359,7 @@ class MainActivityV3 : AppCompatActivity(), PlaybackGuideHost {
                 Toast.makeText(this, "分享视频加载失败：${it.message ?: "请稍后重试"}", Toast.LENGTH_LONG).show()
                 if (adapter.items.isEmpty()) returnToRecommend()
             }
-            if (!openingInternalPage && lifecycle.currentState.isAtLeast(Lifecycle.State.RESUMED)) adapter.resumeActive()
+            if (!openingInternalPage && lifecycle.currentState.isAtLeast(Lifecycle.State.RESUMED)) resumeVisiblePlayback()
         } }
     }
 
@@ -1136,10 +1372,10 @@ class MainActivityV3 : AppCompatActivity(), PlaybackGuideHost {
             loading.visibility = View.GONE
             result.onSuccess { item ->
                 saveCurrentHomeSession()
-                item.localFavorite = history.isLocalFavorite(item.id); pagingEnabled = false; mode = "single"; invalidateRequests()
+                item.localFavorite = history.isLocalFavorite(item.id); pagingEnabled = false; mode = "single"; setBrowseSurface(false); invalidateRequests()
                 adapter.replace(listOf(item)); pager.setCurrentItem(0, false); adapter.setActive(0)
             }.onFailure { Toast.makeText(this, it.message ?: "视频加载失败", Toast.LENGTH_LONG).show() }
-            if (!openingInternalPage && lifecycle.currentState.isAtLeast(Lifecycle.State.RESUMED)) adapter.resumeActive()
+            if (!openingInternalPage && lifecycle.currentState.isAtLeast(Lifecycle.State.RESUMED)) resumeVisiblePlayback()
         } }
     }
 
@@ -1230,9 +1466,10 @@ class MainActivityV3 : AppCompatActivity(), PlaybackGuideHost {
 
     private fun setFullscreen(enabled: Boolean) {
         if (isFinishing || isDestroyed) return
-        if (enabled) comments.close()
+        comments.close()
         FullscreenMode.apply(this, adapter, listOf(topBar), enabled)
         exitFullscreenOnBack.isEnabled = enabled
+        browseBack.visibility = if (!enabled && !showingBrowseGrid && mode in BrowseCatalogState.MODES) View.VISIBLE else View.GONE
     }
 
     private fun pipParams(): PictureInPictureParams =
@@ -1256,6 +1493,7 @@ class MainActivityV3 : AppCompatActivity(), PlaybackGuideHost {
         if (isInPictureInPictureMode) comments.close()
         // 全屏时顶栏本来就是收起的，退出小窗别把它放回来。
         topBar.visibility = if (isInPictureInPictureMode || adapter.isFullscreen) View.GONE else View.VISIBLE
+        browseBack.visibility = if (!isInPictureInPictureMode && !adapter.isFullscreen && !showingBrowseGrid && mode in BrowseCatalogState.MODES) View.VISIBLE else View.GONE
         adapter.setPipMode(isInPictureInPictureMode)
         // 退出小窗时页面已经停在后台（没有被展开成全屏）：是用户把小窗关掉了。
         // onStop 那会儿还算在小窗里没停播，这里必须停，否则没画面还一直出声。
@@ -1272,13 +1510,14 @@ class MainActivityV3 : AppCompatActivity(), PlaybackGuideHost {
 
     override fun onResume() {
         super.onResume()
+        adapter.syncPlaylistFavorites(this)
         if (lastInterestRevision != history.interestRevision) {
             lastInterestRevision = history.interestRevision
             rerankQueue()
         }
         hideStatusBar()
         if (consumeSharedLink()) {
-            if (!openingInternalPage) adapter.resumeActive()
+            if (!openingInternalPage) resumeVisiblePlayback()
             return
         }
         // 作者页 / 搜索页的小窗还在别的任务里放着。这个判断要放在 openingInternalPage 之前：
@@ -1312,7 +1551,7 @@ class MainActivityV3 : AppCompatActivity(), PlaybackGuideHost {
         pendingLocalUri = null
         if (videoId != null && localUri != null) openLocalVideo(videoId, localUri, pendingTitle)
         else if (videoId != null) openSingleVideo(videoId)
-        else adapter.resumeActive()
+        else resumeVisiblePlayback()
     }
 
     /**
@@ -1325,7 +1564,7 @@ class MainActivityV3 : AppCompatActivity(), PlaybackGuideHost {
         if (!PipRegistry.dismiss(this)) return
         note("主页从图标打开：小窗没有展开，已关闭小窗")
         openingInternalPage = false
-        adapter.resumeActive()
+        resumeVisiblePlayback()
     }
 
     override fun onPause() {
@@ -1344,9 +1583,25 @@ class MainActivityV3 : AppCompatActivity(), PlaybackGuideHost {
         outState.putBoolean("opening_internal_page", openingInternalPage)
         if (!prefs.privateBrowsing && mode in FeedSessionStore.HOME_MODES) {
             saveCurrentHomeSession()
-            homeFeedSessions.restorable(mode)?.let {
+            val session = if (mode in BrowseCatalogState.MODES) browseStates[mode]?.let {
+                val index = if (showingBrowseGrid) (browseGrid.layoutManager as GridLayoutManager).findFirstVisibleItemPosition().coerceAtLeast(0) else it.selectedIndex
+                it.snapshot(index)
+            } else homeFeedSessions.restorable(mode)
+            session?.takeIf { it.items.isNotEmpty() }?.let {
                 outState.putString("feed_snapshot", FeedSessionCodec.encode(it))
                 outState.putString("feed_mode", mode); outState.putString("feed_owner", prefs.accountId)
+                if (mode in BrowseCatalogState.MODES) {
+                    outState.putBoolean("browse_in_feed", !showingBrowseGrid)
+                    val snapshotIds = FeedSessionCodec.decode(outState.getString("feed_snapshot")!!)?.items.orEmpty().map { video -> video.id }.toSet()
+                    outState.putString("browse_thumbnails", org.json.JSONObject().apply {
+                        it.items.filter { video -> video.id in snapshotIds }.forEach { video -> put(video.id, video.thumbnailUrl) }
+                    }.toString())
+                    outState.putString("browse_source_pages", org.json.JSONObject().apply {
+                        val state = browseStates.getValue(mode)
+                        snapshotIds.forEach { id -> put(id, state.sourcePage(id)) }
+                    }.toString())
+                    // Snapshot is a compact window. Its first card is the new local origin.
+                }
             }
         }
         super.onSaveInstanceState(outState)
@@ -1362,6 +1617,7 @@ class MainActivityV3 : AppCompatActivity(), PlaybackGuideHost {
 
     override fun onDestroy() {
         invalidateRequests()
+        browseLikeSubscription?.close()
         dbExecutor.shutdownNow()
         if (::comments.isInitialized) comments.release()
         adapter.releaseAll(); playableGate.close(); mediaCache.close(); recommender.close()

@@ -367,6 +367,38 @@
         android:textStyle="bold"
         android:visibility="gone" />
 
+    <!-- Fullscreen keeps comments and the public like count, without separate reaction buttons. -->
+    <LinearLayout
+        android:id="@+id/fullscreenSocial"
+        android:layout_width="wrap_content"
+        android:layout_height="48dp"
+        android:layout_gravity="top|end"
+        android:layout_margin="16dp"
+        android:background="@drawable/bg_pause_controls"
+        android:gravity="center_vertical"
+        android:paddingStart="12dp"
+        android:paddingEnd="4dp"
+        android:visibility="gone">
+
+        <TextView
+            android:id="@+id/fullscreenLikeCount"
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:textColor="#FFFFFFFF"
+            android:textSize="14sp" />
+
+        <TextView
+            android:id="@+id/fullscreenComments"
+            android:layout_width="64dp"
+            android:layout_height="match_parent"
+            android:layout_marginStart="8dp"
+            android:contentDescription="全屏评论，长按发送弹幕评论"
+            android:gravity="center"
+            android:text="评论"
+            android:textColor="#FFFFFFFF"
+            android:textSize="14sp" />
+    </LinearLayout>
+
     <!-- 排在最后：动画要盖在操作栏上面，否则在按钮位置播就被按钮挡住了。
          它不可点击，触摸事件照常穿过去。 -->
     <com.ling.iwaraflow.ReactionBurstView

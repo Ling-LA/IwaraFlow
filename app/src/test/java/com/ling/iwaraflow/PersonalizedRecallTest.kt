@@ -14,6 +14,7 @@ import java.util.concurrent.atomic.AtomicReference
 @RunWith(RobolectricTestRunner::class)
 @Config(sdk = [36])
 class PersonalizedRecallTest {
+    private val ordinaryDate = java.time.Instant.parse("2026-03-15T12:00:00Z").toEpochMilli()
     private val profile = PreferenceProfile(emptyMap(), mapOf("music" to 8.0))
     private fun video(id: String, personal: Boolean = false) = VideoItem(id, id, "author-$id",
         if (personal) listOf("music") else emptyList(), 400, views = 6000, createdAt = System.currentTimeMillis())
@@ -32,7 +33,7 @@ class PersonalizedRecallTest {
     }
 
     @Test fun interestRecallIncludesBothHighLikesAndNewUploads() {
-        val engine = RecommendationEngine(mock(IwaraApi::class.java), history(), random = Random(18))
+        val engine = RecommendationEngine(mock(IwaraApi::class.java), history(), random = Random(18), nowMs = { ordinaryDate })
         try {
             engine.useProfile(profile)
             val first = engine.requestsFor(0).filter { it.sort.startsWith(RecommendationEngine.TAG_PREFIX) }
@@ -52,7 +53,7 @@ class PersonalizedRecallTest {
             val prefix = if (call.getArgument<Int>(1) < 2) "old" else "fresh-interest"
             (0 until 20).map { video("$prefix$it", personal = true) }
         }
-        val engine = RecommendationEngine(api, history(), random = Random(12))
+        val engine = RecommendationEngine(api, history(), random = Random(12), nowMs = { ordinaryDate })
         try {
             val feed = load(engine)
             assertTrue("Previously watched interest pages must not leave only global results",
@@ -67,7 +68,7 @@ class PersonalizedRecallTest {
         `when`(api.getVideoListPageBlocking(anyString(), anyInt(), anyInt())).thenReturn(
             VideoListPage((0 until 24).map { video("global$it") }, -1))
         `when`(api.getVideosByTagBlocking(anyString(), anyInt(), anyInt(), anyString())).thenReturn(emptyList())
-        val engine = RecommendationEngine(api, history())
+        val engine = RecommendationEngine(api, history(), nowMs = { ordinaryDate })
         try {
             assertEquals(24, load(engine).size)
             verify(api, times(2)).getVideosByTagBlocking(anyString(), anyInt(), anyInt(), anyString())
@@ -90,7 +91,7 @@ class PersonalizedRecallTest {
             }
         }
         `when`(api.getVideoListPageBlocking(anyString(), anyInt(), anyInt())).thenReturn(VideoListPage(emptyList(), -1))
-        val engine = RecommendationEngine(api, history(), listBudgetMs = 500L)
+        val engine = RecommendationEngine(api, history(), listBudgetMs = 500L, nowMs = { ordinaryDate })
         try {
             val start = System.nanoTime()
             assertEquals((0 until 24).map { "ready$it" }.toSet(), load(engine).map { it.id }.toSet())
@@ -112,7 +113,7 @@ class PersonalizedRecallTest {
             if (call.getArgument<String>(0) == "trending") Thread.sleep(800L)
             VideoListPage((0 until 24).map { video("global$it") }, -1)
         }
-        val engine = RecommendationEngine(api, history(), listBudgetMs = 1000L)
+        val engine = RecommendationEngine(api, history(), listBudgetMs = 1000L, nowMs = { ordinaryDate })
         try {
             val start = System.nanoTime()
             assertEquals(24, load(engine).size)

@@ -27,6 +27,10 @@ object PageNavigation {
             .setItems(actions.map { it.first }.toTypedArray()) { _, index -> beforeNavigate(); actions[index].second() }.show()
     }
     fun saved(activity: Activity, kind: String) {
+        if (kind == SavedVideosActivity.KIND_FAVORITES) {
+            activity.startActivity(Intent(activity, PlaylistFoldersActivity::class.java))
+            return
+        }
         activity.startActivity(Intent(activity, SavedVideosActivity::class.java).putExtra(SavedVideosActivity.EXTRA_KIND, kind))
     }
     fun install(activity: Activity, feed: FrameLayout, beforeNavigate: () -> Unit): View {

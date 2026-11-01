@@ -47,7 +47,8 @@ class VideoAdapter(
     /** 长按画面上半区选了“不感兴趣”并已写进画像：页面可以跳过这条、重排候选。 */
     private val onDisliked: ((VideoItem, DislikeSheet.Kind) -> Unit)? = null,
     /** 点了全屏 / 退出全屏。页面负责转屏和收起自己的顶栏，不传就没有全屏按钮。 */
-    private val onFullscreen: ((VideoItem, Boolean) -> Unit)? = null
+    private val onFullscreen: ((VideoItem, Boolean) -> Unit)? = null,
+    private var favoriteController: PlaylistFavorites? = null
 ) : RecyclerView.Adapter<VideoAdapter.Holder>() {
 
     var onQuickComment: ((VideoItem) -> Unit)? = null
@@ -63,9 +64,11 @@ class VideoAdapter(
         if (!released) {
             items.filter { videoId == null || it.id == videoId }.forEach(likeStates::apply)
             holders.toList().forEach { it.refreshLikeState(videoId) }
+            if (videoId == null) favoriteController?.migrateLegacyIfNeeded()
         }
     }
     private var preloadTask: Runnable? = null
+    private var favoriteSubscription: java.io.Closeable? = null
     private var activePosition = RecyclerView.NO_POSITION
     private var pipMode = false
     private var fullscreenMode = false
@@ -133,6 +136,8 @@ class VideoAdapter(
         playbackEnabled = false
         released = true
         likeSubscription.close()
+        favoriteSubscription?.close()
+        favoriteController?.close()
         cancelIdlePreload()
         holders.toList().forEach { it.release() }
         holders.clear()
@@ -227,14 +232,16 @@ class VideoAdapter(
      * 画面缩进中间那块，面板不遮画面。两个都传 0 就是关掉，卡片回到各自的默认摆法
      * （横屏略偏上、竖屏铺满）。
      */
-    fun setVideoInsets(top: Int, bottom: Int) {
+    fun setVideoInsets(top: Int, bottom: Int, right: Int = 0) {
         topInset = top.coerceAtLeast(0)
         bottomInset = bottom.coerceAtLeast(0)
+        rightInset = right.coerceAtLeast(0)
         holders.toList().forEach { it.applyVideoInsets() }
     }
 
     private var topInset = 0
     private var bottomInset = 0
+    private var rightInset = 0
 
     /** 上一条被快速划走的视频；连着划走两条同类的（同作者 / 有共同标签）就加压共同的那一维。 */
     private var lastSkipped: VideoItem? = null
@@ -358,8 +365,25 @@ class VideoAdapter(
     private val resolvingPreloads = mutableSetOf<String>()
 
     override fun onCreateViewHolder(parent: ViewGroup, viewType: Int): Holder {
+        ensureFavorites(parent.context)
         val view = LayoutInflater.from(parent.context).inflate(R.layout.item_video, parent, false)
         return Holder(view).also { holders += it }
+    }
+
+    fun syncPlaylistFavorites(context: android.content.Context) {
+        if (released) return
+        ensureFavorites(context)
+        favoriteController?.migrateLegacyIfNeeded()
+    }
+
+    private fun ensureFavorites(context: android.content.Context) {
+        if (favoriteController == null) favoriteController = PlaylistFavorites(context, api, history)
+        if (favoriteSubscription == null) favoriteSubscription = favoriteController!!.listen { videoId ->
+            if (!released) {
+                items.filter { videoId == null || it.id == videoId }.forEach { it.localFavorite = favoriteController!!.isFavorite(it.id) }
+                holders.toList().forEach { it.refreshLikeState(videoId) }
+            }
+        }
     }
 
     override fun onViewRecycled(holder: Holder) {
@@ -398,6 +422,9 @@ class VideoAdapter(
         private val seekPreview = view.findViewById<TextView>(R.id.seekPreview)
         private val share = view.findViewById<TextView>(R.id.share)
         private val comments = view.findViewById<TextView>(R.id.comments)
+        private val fullscreenSocial = view.findViewById<View>(R.id.fullscreenSocial)
+        private val fullscreenComments = view.findViewById<TextView>(R.id.fullscreenComments)
+        private val fullscreenLikeCount = view.findViewById<TextView>(R.id.fullscreenLikeCount)
         private val reactionBurst = view.findViewById<ReactionBurstView>(R.id.reactionBurst)
         private val speedIndicator = view.findViewById<TextView>(R.id.speedIndicator)
         private val pauseIndicator = view.findViewById<PauseIndicatorView>(R.id.pauseIndicator)
@@ -415,7 +442,7 @@ class VideoAdapter(
         }.also { (view as android.widget.FrameLayout).addView(it,
             android.widget.FrameLayout.LayoutParams(-2, -2, android.view.Gravity.BOTTOM or android.view.Gravity.CENTER_HORIZONTAL)) }
         private val likeHold = HoldReaction(like, 0xFFFF365D.toInt(), favorite, 0xFFFFD54F.toInt()) { doubleReaction() }
-        private val favoriteHold = HoldReaction(favorite, 0xFFFFD54F.toInt(), like, 0xFFFF365D.toInt()) { doubleReaction() }
+        private val favoriteHold = CommentHold(favorite) { openFavoritePicker() }
         private val screenReactionHold = ScreenReactionHold(view) {
             if (active && !pipMode) { touchMoved = true; doubleReaction() }
         }
@@ -424,6 +451,9 @@ class VideoAdapter(
         private var bufferingSince = 0L
         private var stableSince = 0L
         private val commentHold = CommentHold(comments) {
+            bound?.takeIf { active }?.let { onQuickComment?.invoke(it) }
+        }
+        private val fullscreenCommentHold = CommentHold(fullscreenComments) {
             bound?.takeIf { active }?.let { onQuickComment?.invoke(it) }
         }
         fun appendDanmaku(videoId: String, comment: IwaraComment) {
@@ -621,6 +651,7 @@ class VideoAdapter(
             setControlsPinned(false)
             bound = item
             likeBusy = false
+            favoriteBusy = false
             recoveryAttempts = 0
             landscape = false
             aspect = 0f
@@ -633,6 +664,8 @@ class VideoAdapter(
                 onSignal?.invoke(item, "comments")
                 onComments?.invoke(item)
             }
+            fullscreenComments.visibility = if (onComments == null) View.GONE else View.VISIBLE
+            fullscreenComments.setOnClickListener { comments.performClick() }
             // 标题和标签行都能打开简介。
             val openInfo = onInfo?.let { open -> View.OnClickListener { open(item) } }
             title.setOnClickListener(openInfo)
@@ -640,15 +673,8 @@ class VideoAdapter(
             tags.setOnClickListener(openInfo)
             tags.isClickable = onInfo != null
             resetWatchSignals()
-            val favoriteBindGeneration = generation
-            history.post {
-                val saved = history.isLocalFavorite(item.id)
-                itemView.post {
-                    if (generation == favoriteBindGeneration && bound === item && !favoriteBusy) {
-                        item.localFavorite = saved; updateLikeUi(item)
-                    }
-                }
-            }
+            item.localFavorite = favoriteController?.isFavorite(item.id) == true
+            favorite.contentDescription = "收藏，长按选择收藏夹"
             applyDisplayPrefs()
             skipBack.setOnClickListener { skipBy(-prefs.skipSeconds * 1000L) }
             skipForward.setOnClickListener { skipBy(prefs.skipSeconds * 1000L) }
@@ -667,26 +693,7 @@ class VideoAdapter(
             }
             favorite.setOnClickListener {
                 if (favoriteBusy) return@setOnClickListener
-                val desired = !item.localFavorite
-                if (desired) reactionBurst.playOn(favorite, ReactionBurstView.Kind.FAVORITE)
-                favoriteBusy = true
-                history.setLocalFavoriteAsync(item, desired) { saved ->
-                    favoriteBusy = false
-                    if (bound === item) updateLikeUi(item)
-                    if (saved.isSuccess) {
-                        if (desired) {
-                            history.recordInteractionAsync(item, "favorite", 1.4)
-                            noteReaction(item, favorited = true)
-                            onSignal?.invoke(item, "favorite")
-                        } else {
-                            // 取消收藏：当初的兴趣不算数了，往回压一点。
-                            history.recordInteractionAsync(item, "unfavorite", -0.9)
-                            onSignal?.invoke(item, "unfavorite")
-                        }
-                    }
-                }
-                // 收藏有动画、取消有图标变化，不用再弹一层提示挡着视频。
-                updateLikeUi(item)
+                if (item.localFavorite) openFavoritePicker() else addFavorite(item)
             }
             accessibilityActions.forEach { androidx.core.view.ViewCompat.removeAccessibilityAction(itemView, it) }
             accessibilityActions.clear()
@@ -718,6 +725,9 @@ class VideoAdapter(
                     // 双击点赞：动画播在手指按下的位置。
                     reactionBurst.playAt(downX, downY, ReactionBurstView.Kind.LIKE)
                     if (!item.liked) toggleRemoteLike(item, true)
+                    else if (api.isLoggedIn()) history.recordExtraLikeAsync(item) { added ->
+                        if (added) onSignal?.invoke(item, "extra_like")
+                    }
                 } else {
                     lastTap = now
                     val action = Runnable {
@@ -832,29 +842,52 @@ class VideoAdapter(
 
         private var favoriteBusy = false
 
+        private fun acceptFavorite(item: VideoItem, result: Result<PlaylistFavorites.Change>, done: (() -> Unit)? = null) {
+            if (released) return
+            if (bound === item) favoriteBusy = false
+            result.onSuccess { change ->
+                item.localFavorite = change.saved
+                if (change.changed) {
+                    val action = if (change.saved) "favorite" else "unfavorite"
+                    history.recordInteractionAsync(item, action, if (change.saved) 1.4 else -0.9)
+                    if (change.saved) noteReaction(item, favorited = true)
+                    onSignal?.invoke(item, action)
+                }
+                if (bound === item) {
+                    updateLikeUi(item)
+                    if (change.saved && change.changed) reactionBurst.playOn(favorite, ReactionBurstView.Kind.FAVORITE)
+                    done?.invoke()
+                }
+            }.onFailure {
+                if (bound === item) Toast.makeText(itemView.context, "收藏同步失败：${IwaraApi.explainError(it)}", Toast.LENGTH_LONG).show()
+            }
+        }
+
+        private fun addFavorite(item: VideoItem, done: (() -> Unit)? = null) {
+            if (released || (bound === item && favoriteBusy)) return
+            if (!api.isLoggedIn()) { onNeedLogin(); return }
+            // A successful like may arrive after this holder was rebound during a swipe.
+            // Finish the original double action without locking the new video's controls.
+            if (bound === item) favoriteBusy = true
+            favoriteController?.add(item) { acceptFavorite(item, it, done) }
+        }
+
+        private fun openFavoritePicker() {
+            val item = bound ?: return
+            if (favoriteBusy || released) return
+            if (!api.isLoggedIn()) { onNeedLogin(); return }
+            var context = itemView.context
+            while (context is android.content.ContextWrapper && context !is android.app.Activity) context = context.baseContext
+            val activity = context as? android.app.Activity ?: return
+            favoriteController?.showPicker(activity, item) { acceptFavorite(item, it) }
+        }
+
         private fun doubleReaction() {
             val item = bound ?: return
             if (!active || likeBusy || favoriteBusy) return
             if (!api.isLoggedIn()) { onNeedLogin(); return }
             fun finishFavorite() {
-                if (!item.localFavorite) {
-                    favoriteBusy = true
-                    history.setLocalFavoriteAsync(item, true) { saved ->
-                        favoriteBusy = false
-                        if (saved.isSuccess) {
-                            history.recordInteractionAsync(item, "favorite", 1.4)
-                            noteReaction(item, favorited = true); onSignal?.invoke(item, "favorite")
-                        }
-                        if (bound === item) {
-                            updateLikeUi(item)
-                            if (saved.isSuccess) Toast.makeText(itemView.context, "已点赞并收藏", Toast.LENGTH_SHORT).show()
-                        }
-                    }
-                }
-                if (bound?.id == item.id) {
-                    updateLikeUi(item)
-                    if (!favoriteBusy) Toast.makeText(itemView.context, "已点赞并收藏", Toast.LENGTH_SHORT).show()
-                }
+                addFavorite(item) { Toast.makeText(itemView.context, "已点赞并收藏", Toast.LENGTH_SHORT).show() }
             }
             if (item.liked) finishFavorite() else toggleRemoteLike(item, true, onSuccess = { finishFavorite() })
         }
@@ -1018,6 +1051,7 @@ class VideoAdapter(
                 if (released || !playbackEnabled) return
                 if (active && player != null) return
                 active = true
+                bound?.let { favoriteController?.refresh(it) }
                 if (player == null) bound?.let { start(it) }
                 else player?.apply {
                     volume = 1f
@@ -1108,15 +1142,16 @@ class VideoAdapter(
          */
         fun applyVideoInsets() {
             val height = itemView.height.takeIf { it > 0 } ?: itemView.resources.displayMetrics.heightPixels
-            val panelOpen = bottomInset > 0 || topInset > 0
-            val top = if (panelOpen && !pipMode && !fullscreenMode) topInset else 0
+            val panelOpen = bottomInset > 0 || topInset > 0 || rightInset > 0
+            val right = if (pipMode) 0 else rightInset.coerceAtMost(itemView.width / 2)
+            val top = if (panelOpen && !pipMode) topInset else 0
             val bottom = when {
                 // 小窗：卡片只有两三百像素高，按整屏算出来的留白比窗口还大，画面会被挤没。
                 pipMode -> 0
                 // 全屏：画面铺满，横屏视频也不再上移——上移是为了给底下的信息栏让位，
                 // 而全屏时那一栏根本不在。
-                fullscreenMode -> 0
                 panelOpen -> bottomInset
+                fullscreenMode -> 0
                 landscape -> (height * LANDSCAPE_LIFT).toInt()
                 else -> 0
             }
@@ -1125,7 +1160,7 @@ class VideoAdapter(
             val cappedTop = top.coerceAtMost(height / 4)
             val cappedBottom = bottom.coerceAtMost((height - cappedTop - height / 6).coerceAtLeast(0))
             // Page controls live above the card, independently of PlayerView padding.
-            val chromeBottom = if (pipMode || fullscreenMode) 0 else
+            val chromeBottom = if (pipMode) 0 else if (fullscreenMode) (72 * itemView.resources.displayMetrics.density).toInt() else
                 overlayTopInset.takeIf { it > 0 } ?: (72 * itemView.resources.displayMetrics.density).toInt()
             val density = itemView.resources.displayMetrics.density
             val hintParams = networkHint.layoutParams as android.widget.FrameLayout.LayoutParams
@@ -1141,9 +1176,9 @@ class VideoAdapter(
             }
             networkHint.maxWidth = ((itemView.width.takeIf { it > 0 } ?: itemView.resources.displayMetrics.widthPixels) - 2*horizontalMargin).coerceAtLeast(1)
             val hintInset = if (networkHint.visibility == View.VISIBLE) margin + networkHint.height + (8*density).toInt() else 0
-            danmaku.setPadding(0, maxOf(cappedTop, chromeBottom).coerceAtMost(height), 0, maxOf(cappedBottom, hintInset))
-            if (playerView.paddingBottom != cappedBottom || playerView.paddingTop != cappedTop) {
-                playerView.setPadding(0, cappedTop, 0, cappedBottom)
+            danmaku.setPadding(0, maxOf(cappedTop, chromeBottom).coerceAtMost(height), right, maxOf(cappedBottom, hintInset))
+            if (playerView.paddingBottom != cappedBottom || playerView.paddingTop != cappedTop || playerView.paddingRight != right) {
+                playerView.setPadding(0, cappedTop, right, cappedBottom)
             }
         }
 
@@ -1365,6 +1400,8 @@ class VideoAdapter(
                 if (item.localFavorite) 0xFFFFD54F.toInt() else 0xFFFFFFFF.toInt()
             )
             likeCount.text = formatCount(item.likes)
+            fullscreenLikeCount.text = "${if (item.liked) "♥" else "♡"} ${formatCount(item.likes)}"
+            fullscreenLikeCount.contentDescription = "${item.likes} 个赞"
         }
 
         /** ImageView 不回传当前是哪个图标，记在 tag 上，点没点赞一读就知道。 */
@@ -1410,6 +1447,7 @@ class VideoAdapter(
         fun setChromeVisible(visible: Boolean) {
             infoPanel.visibility = if (visible) View.VISIBLE else View.GONE
             actionPanel.visibility = if (visible) View.VISIBLE else View.GONE
+            fullscreenSocial.visibility = if (fullscreenMode && !pipMode) View.VISIBLE else View.GONE
             // 时间牌在普通模式下要让开底下的信息栏；全屏没有那一栏，就往下挪到贴近底边。
             (seekPreview.layoutParams as? ViewGroup.MarginLayoutParams)?.let { lp ->
                 val dp = itemView.resources.displayMetrics.density
@@ -1445,6 +1483,7 @@ class VideoAdapter(
             reactionBurst.cancelBurst()
             likeHold.cancel(); favoriteHold.cancel(); screenReactionHold.cancel()
             commentHold.cancel()
+            fullscreenCommentHold.cancel()
             danmaku.clear(); danmakuLoaded = false; danmakuAttemptAt = -15000L
             networkHint.reset()
             applyVideoInsets()

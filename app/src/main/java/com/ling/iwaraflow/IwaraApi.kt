@@ -59,6 +59,16 @@ class IwaraApi(context: Context, private val apiRoot: String = DEFAULT_API_ROOT)
     }
     internal fun uploadAuthExpired() { session.accessToken = null }
 
+    /** The encrypted identity is invalidated whenever the refresh token changes. */
+    internal fun playlistAccountBlocking(): String {
+        if (!isLoggedIn()) throw IOException("请先登录 Iwara")
+        val revision = SecureSessionStore.accountRevision
+        val id = session.secret("verified_user_id").takeUnless { it.isNullOrBlank() || it == "null" }
+            ?: getCurrentUserBlocking().id
+        if (revision != SecureSessionStore.accountRevision || !isLoggedIn() || id.isBlank()) throw IOException("账号已切换，请重试")
+        return id
+    }
+
     private fun baseRequest(url: String, authenticated: Boolean = false): Request.Builder {
         val builder = Request.Builder()
             .url(url)
@@ -343,6 +353,118 @@ class IwaraApi(context: Context, private val apiRoot: String = DEFAULT_API_ROOT)
 
     fun getFavoriteVideos(callback: (Result<List<VideoItem>>) -> Unit) {
         enqueue(callback) { runCatching { getFavoriteVideosBlocking() } }
+    }
+
+    // Official playlists are separate from /favorites/videos (which contains likes).
+    // Protocol verified against the official 3.3.7 client and public API, 2026-11-01.
+    fun getPlaylistFoldersBlocking(userId: String, page: Int = 0): PlaylistFolderPage {
+        require(userId.isNotBlank())
+        val root = playlistRead("playlists", mapOf("user" to userId, "page" to page.toString(), "limit" to "50")) as? JSONObject
+            ?: throw IOException("收藏夹列表格式不正确")
+        val rows = root.optJSONArray("results") ?: throw IOException("收藏夹列表缺少数据")
+        val folders = (0 until rows.length()).mapNotNull { parsePlaylist(rows.optJSONObject(it)) }
+        return PlaylistFolderPage(folders, root.optInt("count", -1), hasMorePages(root, page, rows.length()))
+    }
+
+    fun getPlaylistMembershipsBlocking(videoId: String): List<PlaylistFolder> {
+        val result = playlistRead("light/playlists", mapOf("id" to videoId))
+        val rows = result as? JSONArray ?: (result as? JSONObject)?.optJSONArray("results")
+            ?: throw IOException("收藏夹归属格式不正确")
+        return (0 until rows.length()).mapNotNull { parsePlaylist(rows.optJSONObject(it)) }
+    }
+
+    fun getPlaylistPageBlocking(playlistId: String, page: Int = 0): PlaylistVideoPage {
+        val root = playlistRead("playlist/${UriEncoder.encodePath(playlistId)}", mapOf("page" to page.toString(), "limit" to "50")) as? JSONObject
+            ?: throw IOException("收藏夹内容格式不正确")
+        val folder = parsePlaylist(root.optJSONObject("playlist")) ?: throw IOException("收藏夹不存在")
+        val rows = root.optJSONArray("results") ?: throw IOException("收藏夹内容缺少数据")
+        val items = (0 until rows.length()).mapNotNull { parseVideo(rows.optJSONObject(it)) }
+        return PlaylistVideoPage(folder, items, root.optInt("count", folder.count), hasMorePages(root, page, rows.length()))
+    }
+
+    fun createPlaylistBlocking(title: String): PlaylistFolder {
+        val clean = title.trim()
+        require(clean.isNotEmpty() && clean.length <= 100) { "收藏夹名称需为 1 至 100 个字符" }
+        val snapshot = likeStates.snapshot()
+        val raw = playlistWrite("playlists", true, JSONObject().put("title", clean))
+        val root = runCatching { JSONObject(raw) }.getOrNull()
+        parsePlaylist(root?.optJSONObject("playlist") ?: root)?.let { return it }
+        // Some successful create responses contain no entity. Resolve one unambiguous title,
+        // without issuing a second POST. A same-name collision remains explicitly uncertain.
+        if (snapshot.account.isNotBlank() && likeStates.isCurrent(snapshot)) {
+            val matches = ArrayList<PlaylistFolder>()
+            for (page in 0 until 1000) {
+                if (!likeStates.isCurrent(snapshot)) throw IOException("账号已切换，请重试")
+                val batch = getPlaylistFoldersBlocking(snapshot.account, page)
+                matches += batch.folders.filter { it.title == clean }
+                if (!batch.hasMore) {
+                    if (matches.size == 1) return matches.single()
+                    break
+                }
+                if (batch.folders.isEmpty()) break
+            }
+        }
+        throw IOException("官网可能已创建收藏夹，请刷新列表确认，避免重复创建")
+    }
+
+    fun setPlaylistVideoBlocking(playlistId: String, videoId: String, enabled: Boolean) {
+        require(playlistId.isNotBlank() && videoId.isNotBlank())
+        playlistWrite("playlist/${UriEncoder.encodePath(playlistId)}/${UriEncoder.encodePath(videoId)}", enabled)
+    }
+
+    private fun parsePlaylist(row: JSONObject?): PlaylistFolder? {
+        row ?: return null
+        val id = row.optString("id").takeUnless { it.isBlank() || it == "null" } ?: return null
+        val cover = row.optJSONObject("thumbnail")
+        val file = cover?.optJSONObject("file")
+        val fileId = file?.optString("id").orEmpty()
+        val thumb = if (fileId.isNotBlank()) "$imageRoot/image/thumbnail/$fileId/thumbnail-${cover!!.optInt("thumbnail", 0).toString().padStart(2, '0')}.jpg" else ""
+        return PlaylistFolder(id, row.optString("title").takeUnless { it.isBlank() || it == "null" } ?: "未命名收藏夹",
+            row.optInt("numVideos", 0).coerceAtLeast(0), thumb, row.optBoolean("added"))
+    }
+
+    private fun playlistRead(path: String, query: Map<String, String>): Any {
+        val snapshot = likeStates.snapshot()
+        if (!isLoggedIn()) throw IOException("请先登录 Iwara")
+        ensureAccessTokenBlocking() ?: throw IOException("登录已失效，请重新登录")
+        val url = "$apiRoot/$path".toHttpUrl().newBuilder().apply { query.forEach { (k, v) -> addQueryParameter(k, v) } }.build()
+        val request = baseRequest(url.toString(), authenticated = true).get().build()
+        if (!likeStates.isCurrent(snapshot)) throw IOException("账号已切换，请重试")
+        return client.newCall(request).execute().use { response ->
+            val raw = response.body?.string().orEmpty()
+            if (!response.isSuccessful) {
+                if (response.code == 401) synchronized(SecureSessionStore.accountLock) {
+                    if (likeStates.isCurrent(snapshot)) session.accessToken = null
+                }
+                throw PlaylistHttpException(response.code, extractMessage(raw, "读取收藏夹失败（HTTP ${response.code}）"))
+            }
+            if (!likeStates.isCurrent(snapshot)) throw IOException("账号已切换，请重试")
+            likeRead.set(LikeRead(snapshot, true, false))
+            org.json.JSONTokener(raw).nextValue()
+        }
+    }
+
+    private fun playlistWrite(path: String, enabled: Boolean, body: JSONObject? = null): String {
+        val snapshot = likeStates.snapshot()
+        if (!isLoggedIn()) throw IOException("请先登录 Iwara")
+        ensureAccessTokenBlocking() ?: throw IOException("登录已失效，请重新登录")
+        val builder = baseRequest("$apiRoot/$path", authenticated = true)
+        val request = if (enabled) builder.post(body?.toString()?.toRequestBody(jsonType) ?: ByteArray(0).toRequestBody(null)).build()
+            else builder.delete().build()
+        if (!likeStates.isCurrent(snapshot)) throw IOException("账号已切换，请重试")
+        // A timed-out create must never be automatically retried or redirected with credentials.
+        val writes = client.newBuilder().followRedirects(false).followSslRedirects(false).retryOnConnectionFailure(false).build()
+        return writes.newCall(request).execute().use { response ->
+            val raw = response.body?.string().orEmpty()
+            if (!response.isSuccessful) {
+                if (response.code == 401) synchronized(SecureSessionStore.accountLock) {
+                    if (likeStates.isCurrent(snapshot)) session.accessToken = null
+                }
+                throw IOException(extractMessage(raw, "更新收藏夹失败（HTTP ${response.code}）"))
+            }
+            if (!likeStates.isCurrent(snapshot)) throw IOException("账号已切换，请重试")
+            raw
+        }
     }
 
     fun getFavoriteVideosBlocking(page: Int = 0, limit: Int = MAX_PAGE_LIMIT): List<VideoItem> =

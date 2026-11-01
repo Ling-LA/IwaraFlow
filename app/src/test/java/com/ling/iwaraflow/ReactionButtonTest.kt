@@ -35,14 +35,14 @@ class ReactionButtonTest {
         }
     }
 
-    /** 收藏走的是真的 HistoryStore：是它把 localFavorite 写回视频对象的。 */
+    /** Favorite UI reacts only after the official playlist boundary acknowledges the save. */
     private fun card(item: VideoItem): Card {
         val context = RuntimeEnvironment.getApplication()
         val api = mock(IwaraApi::class.java)
         `when`(api.isLoggedIn()).thenReturn(true)
         val history = HistoryStore(context)
         val adapter = VideoAdapter(api, history, AppPrefs(context),
-            mock(MediaPreloadCache::class.java), { _, _ -> }, {}, {}, {})
+            mock(MediaPreloadCache::class.java), { _, _ -> }, {}, {}, {}, favoriteController = acknowledgedFavoritesFixture())
         adapter.replace(listOf(item))
         val holder = adapter.onCreateViewHolder(FrameLayout(context), 0)
         adapter.onBindViewHolder(holder, 0)

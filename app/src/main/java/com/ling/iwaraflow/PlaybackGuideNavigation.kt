@@ -11,6 +11,8 @@ import java.lang.ref.WeakReference
 interface PlaybackGuideHost {
     val playbackGuideAdapter: VideoAdapter
     fun setPlaybackGuideFullscreen(enabled: Boolean)
+    /** Temporarily reveal the player when a host currently shows a browse list. */
+    fun preparePlaybackGuide(): (() -> Unit)? = null
 }
 
 object PlaybackGuideNavigation : Application.ActivityLifecycleCallbacks {

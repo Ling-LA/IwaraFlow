@@ -46,14 +46,18 @@ object PlaybackGuide {
         private val root = activity.window.decorView as ViewGroup
         private lateinit var view: GuideView
         private var finished = false
+        private var restoreSurface: (() -> Unit)? = null
         private val back = object : androidx.activity.OnBackPressedCallback(true) {
             override fun handleOnBackPressed() = finish(true)
         }
         fun start(horizontal: Boolean) {
+            // Set the pause guard before switching a card/list host to its player. Newly bound
+            // players must also stay paused until the guide and temporary surface are restored.
+            host?.playbackGuideAdapter?.setGuideVisible(true)
+            restoreSurface = host?.preparePlaybackGuide()
             view = GuideView(activity, horizontal, { setMode(it) }) { finish(true) }.apply { tag = TAG }
             root.addView(view, ViewGroup.LayoutParams(-1, -1))
             (activity as? androidx.activity.ComponentActivity)?.onBackPressedDispatcher?.addCallback(back)
-            host?.playbackGuideAdapter?.setGuideVisible(true)
             setMode(horizontal)
         }
         private fun setMode(horizontal: Boolean) {
@@ -72,8 +76,10 @@ object PlaybackGuide {
             if (!activity.isDestroyed && !activity.isFinishing) {
                 host?.setPlaybackGuideFullscreen(originalFullscreen)
                 activity.requestedOrientation = originalOrientation
+                restoreSurface?.invoke()
                 host?.playbackGuideAdapter?.setGuideVisible(false)
             }
+            restoreSurface = null
             sessions.remove(activity)
             if (notify) onDismiss()
         }
@@ -144,8 +150,9 @@ object PlaybackGuide {
             }
             collect(decor)
             val item = items.maxByOrNull { v -> Rect().let { if (v.getGlobalVisibleRect(it)) it.width().toLong()*it.height() else 0L } }
-            val nav = listOf(R.id.topBar, R.id.feedBack, R.id.searchFeedBack, R.id.savedFeedBack).mapNotNull { bounds(decor.findViewById(it)) }.maxByOrNull { it.bottom }
-            val controls = listOf(R.id.pauseControls, R.id.pauseTopRow, R.id.pauseSeekBar).mapNotNull { bounds(item?.findViewById(it)) }
+            val nav = (listOf(R.id.topBar, R.id.feedBack, R.id.searchFeedBack, R.id.savedFeedBack).mapNotNull { bounds(decor.findViewById(it)) } +
+                listOfNotNull(bounds(decor.findViewWithTag("return_to_category_cards")))).maxByOrNull { it.bottom }
+            val controls = listOf(R.id.pauseControls, R.id.pauseTopRow, R.id.pauseSeekBar, R.id.fullscreenSocial).mapNotNull { bounds(item?.findViewById(it)) }
             return Chrome(bounds(item), nav, bounds(item?.findViewById(R.id.actionPanel)), bounds(item?.findViewById(R.id.infoPanel)),
                 controls, item?.getTag(R.id.chrome_mode) != PauseSeekBar.MODE_FULLSCREEN)
         }

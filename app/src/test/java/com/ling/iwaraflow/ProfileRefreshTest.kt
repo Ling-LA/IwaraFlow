@@ -94,7 +94,19 @@ class ProfileRefreshTest {
             adapter.setOverlayTopInset(100)
             assertTrue(danmaku.paddingTop >= 100)
             adapter.setFullscreen(true)
+            holder.itemView.measure(View.MeasureSpec.makeMeasureSpec(400, View.MeasureSpec.EXACTLY),
+                View.MeasureSpec.makeMeasureSpec(800, View.MeasureSpec.EXACTLY))
+            holder.itemView.layout(0, 0, 400, 800)
+            val fullscreenSocial = holder.itemView.findViewById<View>(R.id.fullscreenSocial)
+            assertEquals(View.VISIBLE, fullscreenSocial.visibility)
+            assertTrue(fullscreenSocial.bottom > 0)
+            assertTrue("Fullscreen danmaku must remain below the comment and like-count controls",
+                danmaku.paddingTop >= fullscreenSocial.bottom)
+            adapter.setPipMode(true)
             assertEquals(0, danmaku.paddingTop)
+            adapter.setPipMode(false)
+            adapter.setFullscreen(false, resumeOnExit = false)
+            assertTrue(danmaku.paddingTop >= 100)
         } finally { adapter.releaseAll() }
     }
 

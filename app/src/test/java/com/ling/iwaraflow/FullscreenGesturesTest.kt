@@ -76,7 +76,8 @@ class FullscreenGesturesTest {
         val context = RuntimeEnvironment.getApplication()
         val api = mock(IwaraApi::class.java); `when`(api.isLoggedIn()).thenReturn(true)
         val history = HistoryStore(context)
-        val adapter = VideoAdapter(api, history, AppPrefs(context), mock(MediaPreloadCache::class.java), { _, _ -> }, {}, {}, {})
+        val adapter = VideoAdapter(api, history, AppPrefs(context), mock(MediaPreloadCache::class.java), { _, _ -> }, {}, {}, {},
+            favoriteController = acknowledgedFavoritesFixture())
         val item = VideoItem("fixture", "测试作品", "作者", emptyList(), 60, liked = true)
         adapter.replace(listOf(item))
         val holder = adapter.onCreateViewHolder(FrameLayout(context), 0); adapter.onBindViewHolder(holder, 0)

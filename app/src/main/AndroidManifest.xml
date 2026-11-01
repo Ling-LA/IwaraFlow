@@ -100,6 +100,7 @@
             android:configChanges="screenSize|smallestScreenSize|screenLayout|orientation" android:exported="false" />
         <activity android:name=".InterestActivity" android:exported="false" />
         <activity android:name=".MyActivity" android:exported="false" />
+        <activity android:name=".PlaylistFoldersActivity" android:screenOrientation="portrait" android:exported="false" />
         <activity android:name=".UploadActivity" android:exported="false" />
         <service android:name=".UploadService" android:exported="false" android:foregroundServiceType="dataSync" />
         <service android:name=".FloatingVideoService" android:exported="false" android:foregroundServiceType="mediaPlayback" />

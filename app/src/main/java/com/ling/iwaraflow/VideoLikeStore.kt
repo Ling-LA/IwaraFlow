@@ -74,6 +74,15 @@ class VideoLikeStore(context: Context) {
     }
 
     fun hasImportedLikes() = account.isNotBlank() && preferences.getBoolean("imported:$account", false)
+
+    /** A snapshot for history filtering; false acknowledgements and other accounts are excluded. */
+    fun likedIds(): Set<String> = synchronized(lock) {
+        val current = account
+        if (current.isBlank()) return@synchronized emptySet()
+        val prefix = "video:$current:"
+        preferences.all.keys.asSequence().filter { it.startsWith(prefix) }
+            .map { it.removePrefix(prefix) }.filter { read(current, it)?.liked == true }.toSet()
+    }
     fun markImported(snapshot: Snapshot) = synchronized(lock) {
         if (isCurrent(snapshot) && snapshot.account.isNotBlank()) preferences.edit().putBoolean("imported:${snapshot.account}", true).apply()
     }

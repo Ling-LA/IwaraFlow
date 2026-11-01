@@ -891,7 +891,7 @@ class SearchActivity : AppCompatActivity(), PlaybackGuideHost {
 
     private fun setFullscreen(enabled: Boolean) {
         if (exiting || isFinishing || isDestroyed) return
-        if (enabled) comments.close()
+        comments.close()
         FullscreenMode.apply(this, feedAdapter, listOf(findViewById<View>(R.id.searchFeedBack)), enabled)
     }
 

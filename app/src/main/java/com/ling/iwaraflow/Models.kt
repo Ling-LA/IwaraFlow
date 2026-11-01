@@ -193,27 +193,41 @@ data class PreferenceProfile(
     /** Keep explicit choices effective even when years of learned signals saturate the cap. */
     fun rankingScore(item: VideoItem): Double {
         val manual = manualTagScore(item)
-        return (score(item) - manual).coerceIn(-6.0, 8.0) + manual
+        val video = (videoWeights[item.id] ?: 0.0).coerceIn(-6.0, 8.0)
+        val author = item.authorId.takeIf { it.isNotBlank() }?.let { authorIdWeights[it] }
+            ?: authorWeights[item.author.lowercase()] ?: 0.0
+        val (positive, negative) = learnedTagComponents(item)
+        // A saturated author/tag preference must not swallow explicit feedback about
+        // this particular video. Apply it after the learned category budget is capped.
+        // Cap positive and negative category evidence separately for the same reason.
+        return (positive + author.coerceAtLeast(0.0)).coerceAtMost(8.0) +
+            (negative + author.coerceAtMost(0.0)).coerceAtLeast(-6.0) + manual + video
     }
 
     /**
      * 只算命中最强的几个标签，而不是把所有标签的权重直接相加：
      * 标签有 15 个的视频只要沾到几个正兴趣标签，就会无脑压过只有 3 个标签的视频。
-     * 按绝对值取前 [TOP_TAGS] 个，强负反馈的标签同样算得进来。
+     * 正负方向各取最强 [TOP_TAGS] 个，强负反馈不会被更多的正标签挤掉。
      */
-    private fun matchedTagScore(item: VideoItem): Double {
+    private fun matchedTagScore(item: VideoItem): Double = learnedTagComponents(item).let {
+        it.first + it.second + manualTagScore(item)
+    }
+
+    private fun learnedTagComponents(item: VideoItem): Pair<Double, Double> {
         val strongest = item.tags.distinctBy(SearchQuery::canonicalTag)
             .mapNotNull { tag ->
                 (tagWeights[SearchQuery.canonicalTag(tag)] ?: tagWeights[tag.lowercase()])?.coerceIn(-6.0, 8.0)
             }
             .sortedByDescending { kotlin.math.abs(it) }
-            .take(TOP_TAGS)
         // Diminishing returns within each direction: a strong positive match must
         // never shrink the strongest negative signal (or vice versa).
         fun combine(weights: List<Double>) = weights.mapIndexed { index, weight ->
             weight * if (index == 0) 1.0 else 0.2
         }.sum()
-        return combine(strongest.filter { it > 0 }) + combine(strongest.filter { it < 0 }) + manualTagScore(item)
+        // Select in each direction: four strong positive tags must not evict the
+        // strongest negative tag from the score simply because its absolute cap is lower.
+        return combine(strongest.filter { it > 0 }.take(TOP_TAGS)) to
+            combine(strongest.filter { it < 0 }.take(TOP_TAGS))
     }
 
     /** 用户明确说过不想看这个作者 / 标签。这类内容连探索位都不该给。 */
@@ -247,9 +261,17 @@ data class PreferenceProfile(
         }.sortedByDescending { it.second }.take(count).map { it.first }
     }
 
-    fun topAuthorIds(count: Int, minWeight: Double): List<String> =
-        authorIdWeights.entries.filter { it.value >= minWeight && it.key !in mutedAuthorIds }
-            .sortedByDescending { it.value }.take(count).map { it.key }
+    fun topAuthorIds(count: Int, minWeight: Double, random: java.util.Random? = null): List<String> {
+        val pool = authorIdWeights.entries.filter { it.key.isNotBlank() && it.value >= minWeight && it.key !in mutedAuthorIds }
+            .sortedByDescending { it.value }
+        if (random == null) return pool.take(count).map { it.key }
+        // The single author recall slot otherwise gets stuck on the same saturated
+        // author forever. Sample all positive authors with bounded preference weights.
+        return pool.map { entry ->
+            val weight = 1.0 + entry.value.coerceIn(0.0, 8.0)
+            entry.key to kotlin.math.ln(random.nextDouble().coerceAtLeast(1e-12)) / weight
+        }.sortedByDescending { it.second }.take(count).map { it.first }
+    }
 
     companion object {
         /** 一条视频最多按几个标签算分。 */

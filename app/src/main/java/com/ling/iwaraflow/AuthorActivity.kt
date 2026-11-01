@@ -380,7 +380,7 @@ class AuthorActivity : AppCompatActivity(), PlaybackGuideHost {
     private fun setFullscreen(enabled: Boolean) {
         window.decorView.findViewWithTag<View>("page_navigation_menu")?.visibility = if (enabled) View.GONE else View.VISIBLE
         if (exiting || isFinishing || isDestroyed) return
-        if (enabled) comments.close()
+        comments.close()
         FullscreenMode.apply(this, feedAdapter, listOf(findViewById<View>(R.id.feedBack)), enabled)
     }
 

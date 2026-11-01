@@ -28,7 +28,8 @@ class RecommendationEngine(
     private val api: IwaraApi,
     private val history: HistoryStore,
     private val listBudgetMs: Long = DEFAULT_LIST_BUDGET_MS,
-    private val random: Random = Random()
+    private val random: Random = Random(),
+    private val nowMs: () -> Long = System::currentTimeMillis
 ) {
     private val io = Executors.newSingleThreadExecutor()
     private val followingIo = Executors.newSingleThreadExecutor()
@@ -80,7 +81,7 @@ class RecommendationEngine(
     private fun learnedWeight(label: String): Double = learnedWeights[label] ?: 1.0
 
     /** 排序那一半：打分、多样性、探索位、老片穿插、关注插入，见 [RecommendationRanker]。 */
-    private val ranker = RecommendationRanker(random)
+    private val ranker = RecommendationRanker(random, nowMs)
 
     /** 这一轮的口味画像。召回（按标签 / 作者拉页）和排序共用一份。 */
     private var profile: PreferenceProfile
@@ -327,7 +328,8 @@ class RecommendationEngine(
         val loggedIn = api.isLoggedIn()
         if (round == 0) { sampledPages = emptyList(); recallNote = "" }
         val tags = profile.topTags(RECALL_TAGS, RECALL_TAG_MIN_WEIGHT, random)
-        val authors = profile.topAuthorIds(RECALL_AUTHORS, RECALL_AUTHOR_MIN_WEIGHT)
+        val authors = profile.topAuthorIds(RECALL_AUTHORS, RECALL_AUTHOR_MIN_WEIGHT, random)
+        val seasonal = SeasonalInterest.active(nowMs()).firstOrNull { SeasonalInterest.eligible(profile, it) }
         tags.forEach { tag ->
             // Both recent uploads and well-liked work within the actual interest.
             // Later rounds leave the two latest pages instead of falling back only
@@ -338,6 +340,10 @@ class RecommendationEngine(
             }
         }
         authors.forEach { requests += PageRequest(AUTHOR_PREFIX + it, if (round == 0) 0 else round, 2.5) }
+        // Replace one broad archive request, keeping the same connection/time budget.
+        // Only one seasonal source is admitted, and it still passes all normal filters.
+        if (seasonal != null) requests += PageRequest(SEASONAL_PREFIX + seasonal.tag, round, 1.8,
+            tagSort = if (round == 0) "date" else "likes")
         if (round == 0) {
             if (loggedIn) requests += PageRequest(SUBSCRIBED, 0, SUBSCRIBED_WEIGHT)
             RANKINGS.forEach { (sort, weight) -> requests += PageRequest(sort, 0, weight) }
@@ -350,6 +356,7 @@ class RecommendationEngine(
             if (tags.isNotEmpty() || authors.isNotEmpty()) {
                 recallNote = "标签 ${tags.joinToString(",")} 作者 ${authors.size} 位"
             }
+            if (seasonal != null) recallNote += " · 节日 ${seasonal.name}"
             if (learnedWeights.isNotEmpty()) {
                 val learned = learnedWeights.entries.sortedByDescending { it.value }
                     .joinToString("，") { "${it.key}×%.2f".format(it.value) }
@@ -361,7 +368,7 @@ class RecommendationEngine(
             requests += PageRequest(SUBSCRIBED, samplePage(SUBSCRIBED, SUBSCRIBED_DEPTH), SUBSCRIBED_WEIGHT * 0.85)
         }
         requests += PageRequest("date", samplePage("date", ARCHIVE_DEPTH), 2.2)
-        requests += PageRequest("popularity", samplePage("popularity", POPULAR_DEPTH), 2.4)
+        if (seasonal == null) requests += PageRequest("popularity", samplePage("popularity", POPULAR_DEPTH), 2.4)
         if (round > 0) requests += PageRequest("date", samplePage("date", ARCHIVE_DEPTH), 2.0)
         return requests
     }
@@ -406,6 +413,7 @@ class RecommendationEngine(
 
     /** 这一路召回叫什么名字，用来回答「为什么推荐给我」。 */
     private fun sourceLabel(request: PageRequest): String = when {
+        request.sort.startsWith(SEASONAL_PREFIX) -> RecommendationCandidate.Source.SEASONAL
         request.sort == SUBSCRIBED -> RecommendationCandidate.Source.SUBSCRIBED
         request.month.isNotBlank() -> RecommendationCandidate.Source.MONTH_TOP
         request.sort.startsWith(TAG_PREFIX) -> RecommendationCandidate.Source.TAG
@@ -426,6 +434,8 @@ class RecommendationEngine(
             request to pool.submit<VideoListPage> {
                 when {
                     request.sort == SUBSCRIBED -> api.getSubscribedVideoPageBlocking(request.page, PAGE_SIZE)
+                    request.sort.startsWith(SEASONAL_PREFIX) ->
+                        VideoListPage(api.getVideosByTagBlocking(request.sort.removePrefix(SEASONAL_PREFIX), request.page, PAGE_SIZE, request.tagSort), -1)
                     request.month.isNotBlank() -> api.getMonthTopBlocking(request.month, request.page, PAGE_SIZE)
                     request.sort.startsWith(TAG_PREFIX) ->
                         VideoListPage(api.getVideosByTagBlocking(request.sort.removePrefix(TAG_PREFIX), request.page, PAGE_SIZE, request.tagSort), -1)
@@ -454,7 +464,14 @@ class RecommendationEngine(
             } else {
                 noteTotal(request.sort, response.total)
             }
-            val videos = response.videos
+            val videos = if (request.sort.startsWith(SEASONAL_PREFIX)) {
+                val occasion = SeasonalInterest.active(nowMs()).firstOrNull {
+                    it.tag == request.sort.removePrefix(SEASONAL_PREFIX)
+                }
+                response.videos.filter { item ->
+                    occasion != null && item.tags.any { SearchQuery.canonicalTag(it) in occasion.aliases }
+                }
+            } else response.videos
             if (videos.isEmpty()) { if (request.month.isBlank()) noteEmptyPage(request.sort, request.page); return@forEach }
             if (request.sort == SUBSCRIBED) videos.forEach { subscribed += it.id }
             val label = sourceLabel(request)
@@ -474,6 +491,7 @@ class RecommendationEngine(
                 // 同一分组里只留最高分，不叠加，见 RecommendationCandidate.noteSource。
                 candidate.noteSource(label, sourceBoost)
                 when {
+                    request.sort.startsWith(SEASONAL_PREFIX) -> candidate.seasonalTag = request.sort.removePrefix(SEASONAL_PREFIX)
                     request.sort.startsWith(TAG_PREFIX) -> candidate.matchedTags += request.sort.removePrefix(TAG_PREFIX)
                     request.sort.startsWith(AUTHOR_PREFIX) -> candidate.matchedAuthorId = request.sort.removePrefix(AUTHOR_PREFIX)
                     request.sort == SUBSCRIBED -> candidate.subscribed = true
@@ -617,6 +635,7 @@ class RecommendationEngine(
         /** 个性化召回的请求：标签 / 作者 id 接在前缀后面。 */
         internal const val TAG_PREFIX = "__tag__:"
         internal const val AUTHOR_PREFIX = "__author__:"
+        internal const val SEASONAL_PREFIX = "__seasonal__:"
         internal const val RECALL_TAGS = 2
         internal const val RECALL_AUTHORS = 1
         /** 标签 / 作者权重至少到这里才值得专门拉一页（一次本地点赞给作者 2.0、给每个标签 0.9）。 */

@@ -15,12 +15,12 @@ class DataManagementActivity : AppCompatActivity() {
         if (uri != null) work {
             val text = LocalDataBackup.export(history.libraryDatabase, history.interestDatabase, history.systemTagMultipliers())
             contentResolver.openOutputStream(uri, "wt")!!.bufferedWriter().use { it.write(text) }
-            "收藏与兴趣已导出（不包含登录密钥和浏览历史）"
+            "旧版收藏与兴趣已导出（不包含官方播放列表、登录密钥和浏览历史）"
         }
     }
     private val importFile = registerForActivityResult(ActivityResultContracts.OpenDocument()) { uri ->
-        if (uri != null) AlertDialog.Builder(this).setTitle("合并收藏与兴趣？")
-            .setMessage("已有条目保留，新增条目会合并到本机。仅导入你信任的备份。")
+        if (uri != null) AlertDialog.Builder(this).setTitle("合并旧版收藏与兴趣？")
+            .setMessage("已有条目保留，新增条目会合并到本机。导入后可在我的收藏中点击“重试同步”，将旧收藏添加至官网。仅导入你信任的备份。")
             .setPositiveButton("合并") { _, _ -> work {
                 val text = contentResolver.openInputStream(uri)!!.use { stream ->
                     val output = java.io.ByteArrayOutputStream()
@@ -74,17 +74,17 @@ class DataManagementActivity : AppCompatActivity() {
                 Toast.makeText(this@DataManagementActivity, "已切换兴趣范围，返回推荐页后生效", Toast.LENGTH_LONG).show()
             }
         })
-        card.addView(page.text("默认共用本机兴趣。开启后，每个账号及未登录状态分别保存系统兴趣、手动兴趣和屏蔽；原共享兴趣保留。历史和收藏可通过下面的独立开关调整；导入导出作用于各自当前范围。", 13f))
+        card.addView(page.text("默认共用本机兴趣。开启后，每个账号及未登录状态分别保存系统兴趣、手动兴趣和屏蔽；原共享兴趣保留。历史和旧版收藏可通过下面的独立开关调整；导入导出作用于各自当前范围。", 13f))
         card.addView(androidx.appcompat.widget.SwitchCompat(this).apply {
-            text = "按账号隔离历史与收藏"; isChecked = prefs.isolateLibrary
+            text = "按账号隔离历史与旧版收藏"; isChecked = prefs.isolateLibrary
             setOnCheckedChangeListener { _, enabled ->
                 prefs.isolateLibrary = enabled
                 Toast.makeText(this@DataManagementActivity, "已切换范围，重新打开列表后生效；原数据保留", Toast.LENGTH_LONG).show()
             }
         })
-        card.addView(page.text("关闭时共享设备记录；开启时账号与未登录状态各自独立。不会自动把原共享记录复制给某个账号，关闭后仍可查看原记录。备份中的收藏来自当前范围。", 13f))
-        card.addView(page.action("导出收藏与兴趣") { exportFile.launch("IwaraFlow-backup.json") })
-        card.addView(page.action("导入收藏与兴趣") { importFile.launch(arrayOf("application/json", "text/plain")) })
+        card.addView(page.text("关闭时共享设备记录；开启时账号与未登录状态各自独立，原共享记录仍保留。备份仅包含当前范围的旧版本地收藏与兴趣；官方播放列表始终按账号分别同步，不受此开关影响。", 13f))
+        card.addView(page.action("导出旧版收藏与兴趣") { exportFile.launch("IwaraFlow-backup.json") })
+        card.addView(page.action("导入旧版收藏与兴趣") { importFile.launch(arrayOf("application/json", "text/plain")) })
         card.addView(page.action("清除浏览历史") { confirm("清除浏览历史", "会清除本机浏览记录与本机已看标记，收藏和兴趣保留。") {
             history.libraryDatabase.delete("history", null, null)
             history.libraryDatabase.delete("seen_videos", "account_id=''", null)
@@ -96,6 +96,7 @@ class DataManagementActivity : AppCompatActivity() {
             db.beginTransaction()
             try { listOf("preference_entities", "interactions").forEach { db.delete(it, null, null) }; db.setTransactionSuccessful() }
             finally { db.endTransaction() }
+            history.clearExtraLikeSignals()
             history.writableDatabase.delete("recommendation_impressions", null, null)
             history.invalidateInterests(); "系统画像已重置"
         } })

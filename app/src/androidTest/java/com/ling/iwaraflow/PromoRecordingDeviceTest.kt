@@ -27,6 +27,12 @@ import org.junit.Assume.assumeTrue
 import org.junit.Test
 import org.junit.runner.RunWith
 import java.io.File
+import java.io.IOException
+import java.net.InetSocketAddress
+import java.net.Proxy
+import java.net.ProxySelector
+import java.net.SocketAddress
+import java.net.URI
 
 /** Opt-in recording aid. Real phone/UI/player, explicitly neutral local demonstration data.
  * Never installed into or connected to the signed app's account, playlists or private files.
@@ -50,6 +56,11 @@ class PromoRecordingDeviceTest {
         val stop = File(context.filesDir, "promo-stop").apply { delete() }
         val ready = File(context.filesDir, "promo-ready.json").apply { delete() }
         val account = "neutral-promo-${SystemClock.uptimeMillis()}"
+        fun fixtureToken(kind: String) = "fixture." + Base64.encodeToString(
+            JSONObject().put("sub", account).put("kind", kind).put("exp", System.currentTimeMillis() / 1000 + 86400)
+                .toString().toByteArray(), Base64.URL_SAFE or Base64.NO_WRAP or Base64.NO_PADDING) + ".signature"
+        val refreshFixture = fixtureToken("refresh")
+        val accessFixture = fixtureToken("access")
         val prefs = AppPrefs(context)
         val session = SecureSessionStore(context)
         // QA-only seed account. No credential is read from the real application's package.
@@ -107,6 +118,8 @@ class PromoRecordingDeviceTest {
             override fun dispatch(request: RecordedRequest): MockResponse = synchronized(folders) {
                 val url = request.requestUrl!!; val path = url.pathSegments
                 when {
+                    path == listOf("user", "token") && request.method == "POST" ->
+                        response(JSONObject().put("accessToken", accessFixture))
                     path == listOf("playlists") && request.method == "POST" -> {
                         val id = "demo-folder-${folders.size}"; folders[id] = JSONObject(request.body.readUtf8()).getString("title")
                         members[id] = linkedSetOf(); response(folder(id))
@@ -131,9 +144,25 @@ class PromoRecordingDeviceTest {
             }
         }
         server.start()
-        val api = IwaraApi(context, server.url("/").toString().trimEnd('/')).also {
-            field(it, "client").set(it, OkHttpClient.Builder().sslSocketFactory(clientTls.sslSocketFactory(), clientTls.trustManager).build())
+        val localUrl = server.url("/")
+        val api = IwaraApi(context, localUrl.toString().trimEnd('/')).also {
+            field(it, "client").set(it, OkHttpClient.Builder().proxy(Proxy.NO_PROXY)
+                .followRedirects(false).followSslRedirects(false)
+                .addInterceptor { chain ->
+                    val url = chain.request().url
+                    check(url.host == localUrl.host && url.port == localUrl.port) { "Recording API must remain local" }
+                    chain.proceed(chain.request())
+                }.sslSocketFactory(clientTls.sslSocketFactory(), clientTls.trustManager).build())
         }
+        // Block default clients created during Activity startup or an unexpected navigation.
+        // A local unavailable proxy fails closed; it cannot forward fixture credentials to
+        // Iwara, update services, or another remote host. Only this QA process is affected.
+        val previousProxy = ProxySelector.getDefault()
+        ProxySelector.setDefault(object : ProxySelector() {
+            override fun select(uri: URI): List<Proxy> = if (uri.host in setOf("localhost", "127.0.0.1", "::1"))
+                listOf(Proxy.NO_PROXY) else listOf(Proxy(Proxy.Type.HTTP, InetSocketAddress("127.0.0.1", 9)))
+            override fun connectFailed(uri: URI, sa: SocketAddress, ioe: IOException) = Unit
+        })
         var activity: Activity? = null
         try {
             if (scene == "interest") {
@@ -145,6 +174,11 @@ class PromoRecordingDeviceTest {
                 main {
                     invoke(home, "invalidateRequests")
                     (field(home, "api").get(home) as IwaraApi).close()
+                    field(home, "api").set(home, api)
+                    (field(home, "likedSync").get(home) as LikedVideoSync).close()
+                    (field(home, "playableGate").get(home) as PlayableVideoGate).close()
+                    field(home, "playableGate").set(home, PlayableVideoGate(api))
+                    (field(home, "updates").get(home) as UpdateManager).close()
                     val engine = field(home, "recommender").get(home) as RecommendationEngine
                     engine.close()
                     val ranker = field(engine, "ranker").get(engine) as RecommendationRanker
@@ -159,13 +193,21 @@ class PromoRecordingDeviceTest {
                     adapter.onUpcomingChanged = null
                     val panel = (field(home, "comments").get(home) as CommentsHost).panel
                     field(panel, "api").set(panel, api)
-                    session.refreshToken = "neutral-local-fixture"
-                    session.accessToken = "fixture." + Base64.encodeToString(JSONObject().put("exp", System.currentTimeMillis()/1000 + 3600)
-                        .toString().toByteArray(), Base64.URL_SAFE or Base64.NO_WRAP or Base64.NO_PADDING) + ".signature"
-                    session.putSecret("verified_user_id", account)
+                    synchronized(SecureSessionStore.accountLock) {
+                        session.refreshToken = refreshFixture
+                        session.accessToken = accessFixture
+                        session.putSecret("verified_user_id", account)
+                    }
                     field(home, "mode").set(home, "recommend")
                     invoke(home, "setBrowseSurface", false); invoke(home, "styleRecommendTab")
                     invoke(home, "restoreHomeSession", FeedSessionStore.Session(items, 0, 0, false))
+                }
+                // Exercise the production refresh check and our local token endpoint before
+                // declaring readiness. A malformed refresh fixture must fail here, not while
+                // the recorder is holding the screen for a double reaction.
+                session.accessToken = null
+                check(api.uploadAccessToken() == accessFixture && api.playlistAccountBlocking() == account) {
+                    "Neutral fixture authentication is not ready"
                 }
             }
             main { activity!!.window.addFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON) }
@@ -190,8 +232,12 @@ class PromoRecordingDeviceTest {
                         if (player?.playbackState == Player.STATE_READY) playerReady = true
                     }
                 }
+                if (scene == "player") check(api.isLoggedIn() && session.refreshToken == refreshFixture) {
+                    "Neutral recording session unexpectedly expired; discard this capture and restart the fixture"
+                }
                 if (playerReady && !ready.exists()) ready.writeText(JSONObject().put("ready", true).put("scene", scene)
                     .put("package", context.packageName).put("source", "real_phone_neutral_demo_data")
+                    .put("authentication", if (scene == "player") "validated_local_fixture" else "not_required")
                     .put("media_source", if (media == custom) "original_custom_clip" else asset)
                     .put("landscape_fixture", landscape).put("max_seconds", seconds).toString())
                 check(playerReady || SystemClock.uptimeMillis() < readinessDeadline) { "Neutral player did not become ready" }
@@ -200,6 +246,7 @@ class PromoRecordingDeviceTest {
         } finally {
             // Keep the last screen visible for the recorder; stop/restart QA when changing scenes.
             api.close(); server.close()
+            ProxySelector.setDefault(previousProxy)
             File(context.filesDir, "promo-stopped").writeText("$scene:${System.currentTimeMillis()}")
         }
     }

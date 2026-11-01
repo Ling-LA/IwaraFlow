@@ -49,6 +49,7 @@ class WarmRecommendationDeviceTest {
         val promoMedia = InstrumentationRegistry.getArguments().getString("promoMedia") == "true"
         val bytes = if (promoMedia) {
             require(context.packageName == "com.ling.iwaraflow.qa")
+            SecureSessionStore(context).clearAuthentication()
             java.io.File(context.filesDir, "promo-custom.mp4").readBytes()
         } else ins.context.assets.open("navigation-fixture.mp4").use { it.readBytes() }
         assertTrue(bytes.size > WarmRecommendationStore.MIN_PREFIX_BYTES)

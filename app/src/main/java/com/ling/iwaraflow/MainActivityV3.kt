@@ -63,6 +63,7 @@ class MainActivityV3 : AppCompatActivity(), PlaybackGuideHost {
     private lateinit var api: IwaraApi
     private lateinit var history: HistoryStore
     private lateinit var prefs: AppPrefs
+    private lateinit var startupNetworkHelp: StartupNetworkHelp
     private lateinit var recommender: RecommendationEngine
     private lateinit var playableGate: PlayableVideoGate
     private lateinit var mediaCache: MediaPreloadCache
@@ -204,6 +205,7 @@ class MainActivityV3 : AppCompatActivity(), PlaybackGuideHost {
         history = HistoryStore(this)
         history.warmUp()
         prefs = AppPrefs(this)
+        startupNetworkHelp = StartupNetworkHelp()
         recommender = RecommendationEngine(api, history).apply { classicsEvery = prefs.classicsEvery }
         playableGate = PlayableVideoGate(api)
         mediaCache = MediaPreloadCache(this)
@@ -517,7 +519,7 @@ class MainActivityV3 : AppCompatActivity(), PlaybackGuideHost {
                 if (isFinishing || isDestroyed || serial != requestSerial || requestedMode != mode) return@runOnUiThread
                 loadingMore = false; loading.visibility = View.GONE; browseRefresh.isRefreshing = false
                 val message = IwaraApi.explainError(failure)
-                if (state.items.isEmpty()) showError("视频列表加载失败\n$message\n下拉刷新重试")
+                if (state.items.isEmpty()) showError("视频列表加载失败\n$message\n下拉刷新重试", failure)
                 else Toast.makeText(this, "加载失败，可下拉刷新或继续滑动重试：$message", Toast.LENGTH_LONG).show()
             } })
         }
@@ -726,7 +728,7 @@ class MainActivityV3 : AppCompatActivity(), PlaybackGuideHost {
                         awaitingFullFeed = false
                         loading.visibility = View.GONE
                         note("推荐加载失败：${it.message?.take(120)}")
-                        showError(NetworkProxy.explain(it.message) ?: "推荐加载失败\n${it.message}")
+                        showError(NetworkProxy.explain(it.message) ?: "推荐加载失败\n${it.message}", it)
                     }
                 }
             }
@@ -761,7 +763,7 @@ class MainActivityV3 : AppCompatActivity(), PlaybackGuideHost {
                     loadingMore = false
                     note("$mode 第 $currentPage 页加载失败：${it.message?.take(120)}")
                     if (reset) showError(NetworkProxy.explain(it.message)
-                        ?: "Iwara 数据加载失败\n${it.message}\n\n请确认网络可以访问 iwara.tv")
+                        ?: "Iwara 数据加载失败\n${it.message}\n\n请确认网络可以访问 iwara.tv", it)
                 }
             }
         }
@@ -1613,7 +1615,9 @@ class MainActivityV3 : AppCompatActivity(), PlaybackGuideHost {
         super.onStop()
     }
 
-    private fun showError(message: String) { error.text = message; error.visibility = View.VISIBLE }
+    private fun showError(message: String, failure: Throwable? = null) {
+        startupNetworkHelp.bind(error, message, failure)
+    }
 
     override fun onDestroy() {
         invalidateRequests()

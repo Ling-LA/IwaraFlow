@@ -31,7 +31,8 @@ class ShareIntentTest {
         assertNotNull("选择器里要包着一个 ACTION_SEND", send)
         assertEquals(Intent.ACTION_SEND, send!!.action)
         assertEquals("text/plain", send.type)
-        assertEquals("标题：片名\n作者：作者\n链接：https://www.iwara.tv/video/abc123", send.getStringExtra(Intent.EXTRA_TEXT))
+        assertEquals("标题：片名\n作者：作者\n链接：https://www.iwara.tv/video/abc123\n\nIwaraFlow 官方下载：https://github.com/Ling-LA/IwaraFlow/releases/latest",
+            send.getStringExtra(Intent.EXTRA_TEXT))
     }
 
     @Test fun aVideoWithoutAnIdHasNothingToShare() {

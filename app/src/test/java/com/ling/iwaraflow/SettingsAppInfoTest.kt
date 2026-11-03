@@ -47,15 +47,28 @@ class SettingsAppInfoTest {
         }
     }
 
-    @Test fun settingsAboutStillOpensGithubWithoutLeavingTheSettingsPage() {
+    @Test fun settingsAboutLabelsPromotionAndOpensLinksOnlyOnClickWithoutFinishingSettings() {
         mockConstruction(UpdateManager::class.java).use {
             val controller = Robolectric.buildActivity(SettingsActivity::class.java).setup()
             val activity = controller.get()
             (text(activity.window.decorView, "关于").parent as View).performClick()
             val dialog = ShadowDialog.getLatestDialog() as AlertDialog
+            assertNull("Opening About must not open any external link automatically", shadowOf(activity).nextStartedActivity)
             val link = views(dialog.window!!.decorView).first { it.contentDescription == "打开 IwaraFlow GitHub 项目" }
             link.performClick()
             assertEquals(AboutDialog.GITHUB, shadowOf(activity).nextStartedActivity.dataString)
+            val destinations = listOf("https://cloud.no626.net/register?aff=pPRUgU8c", "https://ikuuu.top/auth/register?code=EgAG")
+            assertEquals(destinations, AppLinks.NETWORK_PROMOTIONS)
+            destinations.forEachIndexed { index, destination ->
+                val promotion = views(dialog.window!!.decorView).filterIsInstance<TextView>()
+                    .single { it.contentDescription == "打开网络服务推广链接 ${index + 1}" }
+                assertEquals("网络服务推广链接 ${index + 1}\n$destination", promotion.text.toString())
+                promotion.performClick()
+                val external = shadowOf(activity).nextStartedActivity
+                assertEquals(android.content.Intent.ACTION_VIEW, external.action)
+                assertTrue(external.hasCategory(android.content.Intent.CATEGORY_BROWSABLE))
+                assertEquals(destination, external.dataString)
+            }
             assertFalse(activity.isFinishing)
             dialog.dismiss()
             controller.pause().stop().destroy()

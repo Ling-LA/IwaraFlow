@@ -155,6 +155,7 @@ class RecommendationEngine(
     }
 
     private fun loadBlocking(skipSeen: Boolean): List<VideoItem> {
+        lastFailure = null
         // 新的一轮：这一轮记下的候选不再沿用上一轮的来源分和标记，见 RecommendationCandidate.generation。
         ranker.startGeneration()
         learnedWeights = runCatching { history.learnedSourceWeights() }.getOrDefault(emptyMap())
@@ -180,7 +181,8 @@ class RecommendationEngine(
                 // 把底下那个真正的错误带出来。诊断里只写“全部失败”等于什么都没说：
                 // 两份国内机器的报告就是靠 date 榜单单独记的 "Connection reset" 才看出是网络被掐。
                 val cause = lastFailure?.message?.takeIf { it.isNotBlank() }
-                throw IllegalStateException(if (cause != null) "所有推荐榜单请求均失败（$cause）" else "所有推荐榜单请求均失败")
+                throw IllegalStateException(
+                    if (cause != null) "所有推荐榜单请求均失败（$cause）" else "所有推荐榜单请求均失败", lastFailure)
             }
 
             likedFuture?.let { f ->

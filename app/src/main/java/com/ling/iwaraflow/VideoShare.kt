@@ -12,7 +12,7 @@ object VideoShare {
         val link = linkFor(item)
         val title = item.title.trim().ifBlank { "未命名视频" }
         val author = item.author.trim().ifBlank { item.authorUsername.trim().ifBlank { "未知作者" } }
-        return "标题：$title\n作者：$author\n链接：$link"
+        return "标题：$title\n作者：$author\n链接：$link\n\nIwaraFlow 官方下载：${AppLinks.DOWNLOAD}"
     }
 
     /**
@@ -53,6 +53,7 @@ object VideoShare {
         return buildString {
             append("作者：").append(name.ifBlank { "未知作者" })
             if (author.username.isNotBlank()) append("\n链接：").append(authorLinkFor(author))
+            append("\n\nIwaraFlow 官方下载：").append(AppLinks.DOWNLOAD)
         }
     }
 

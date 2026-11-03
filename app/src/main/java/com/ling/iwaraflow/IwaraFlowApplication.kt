@@ -14,7 +14,8 @@ class IwaraFlowApplication : Application() {
         Translator.onFailure = { NavigationDiagnostics.note(this, it) }
         // 翻译配置里有密钥，读它要走加密存储（Keystore 建主密钥有几十毫秒），
         // 放后台线程，别卡在启动路径上。翻译只有打开面板时才会用到，来得及。
-        Thread({ runCatching { Translator.configure(prefs.translation) } }, "IwaraFlow-translation-config")
+        val translationGeneration = Translator.startupConfigurationGeneration()
+        Thread({ runCatching { Translator.configureFromStartup(prefs.translation, translationGeneration) } }, "IwaraFlow-translation-config")
             .apply { isDaemon = true }.start()
     }
 }

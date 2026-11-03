@@ -927,6 +927,9 @@ class IwaraApi(context: Context, private val apiRoot: String = DEFAULT_API_ROOT)
     companion object {
         const val DEFAULT_API_ROOT = "https://apiq.iwara.tv"
 
+        /** Preserve HTTP-vs-transport classification even when an error body omits its status. */
+        internal fun isHttpFailure(error: Throwable): Boolean = error is ApiHttpException
+
         /** Iwara 列表接口的服务端上限，请求更大的 limit 也只会返回这么多。 */
         const val MAX_PAGE_LIMIT = 50
 

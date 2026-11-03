@@ -54,7 +54,7 @@ class PlaylistIntegrationTest {
             activity.get().setContentView(holder.itemView)
             adapter.onBindViewHolder(holder, 0)
             field(holder, "active").setBoolean(holder, true)
-            invoke(holder, "doubleReaction")
+            invoke(holder, "doubleReaction", false)
             // Reuse the holder while the original remote like has not completed.
             adapter.onBindViewHolder(holder, 1)
             likeResponse(Result.success(Unit))

@@ -17,6 +17,10 @@ import java.util.Random
 @RunWith(RobolectricTestRunner::class)
 @Config(sdk = [36])
 class PlayerUpgradeTest {
+    @org.junit.Before fun manualFrameClock() {
+        org.robolectric.shadows.ShadowChoreographer.setPaused(true)
+        org.robolectric.shadows.ShadowChoreographer.setFrameDelay(Duration.ofMillis(16))
+    }
     @Test fun holdRequiresOneAndAHalfSecondsAndDoesNotClickOnRelease() {
         val view = ImageView(RuntimeEnvironment.getApplication())
         var doubles = 0; var clicks = 0
@@ -67,8 +71,9 @@ class PlayerUpgradeTest {
         }
         val first = arc("ring"); val second = arc("partnerRing")
         assertEquals(first.first, second.first, .01f)
-        // One 16 ms animation frame spans up to 3.84 degrees at 1.5 seconds.
-        assertEquals(180f, first.first, 4f)
+        val confirmation = android.view.ViewConfiguration.getLongPressTimeout().toLong().coerceAtLeast(450L)
+        val expected = (750 - confirmation).toFloat() / (1500 - confirmation) * 360
+        assertEquals(expected, first.first, 7f)
         assertEquals(0xFFFF365D.toInt(), first.second); assertEquals(0xFFFFD54F.toInt(), second.second)
         touch(like, MotionEvent.ACTION_CANCEL)
         shadowOf(Looper.getMainLooper()).idleFor(Duration.ofSeconds(4))

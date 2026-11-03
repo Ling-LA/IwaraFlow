@@ -18,6 +18,7 @@ class AuthorFollowButton @JvmOverloads constructor(
 
     private var busy = false
     private var lastVideoId: String? = null
+    private var stateGeneration = 0
 
     init {
         gravity = android.view.Gravity.CENTER
@@ -64,11 +65,12 @@ class AuthorFollowButton @JvmOverloads constructor(
             return
         }
         val expectedVideo = item.id
+        val expectedGeneration = stateGeneration
         api().getAuthorProfile(item.authorUsername) { result ->
             result.onSuccess { author ->
                 post {
                     val current = currentItemAndAdapter() ?: return@post
-                    if (current.first.id != expectedVideo) return@post
+                    if (current.first.id != expectedVideo || expectedGeneration != stateGeneration) return@post
                     updateAuthorState(current.second, current.first, author.following)
                     showFollowing(author.following)
                 }
@@ -89,6 +91,7 @@ class AuthorFollowButton @JvmOverloads constructor(
             return
         }
         busy = true
+        stateGeneration++
         isEnabled = false
         text = "…"
 
@@ -136,6 +139,7 @@ class AuthorFollowButton @JvmOverloads constructor(
 
     /** 外部（例如从作者页返回）直接给出的关注状态。 */
     fun render(following: Boolean) {
+        stateGeneration++
         if (busy) return
         showFollowing(following)
     }

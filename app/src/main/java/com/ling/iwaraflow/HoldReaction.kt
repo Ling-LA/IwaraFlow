@@ -31,7 +31,17 @@ class HoldReaction(private val view: View, color: Int, private val partner: View
     private val ring = Ring(color)
     private val partnerRing = Ring(partnerColor)
     private val handler = android.os.Handler(android.os.Looper.getMainLooper())
-    private var animation: Runnable? = null
+    private val progress = HoldProgress({ value ->
+        ring.progress = value; ring.invalidateSelf()
+        partnerRing.progress = value; partnerRing.invalidateSelf()
+    }) { if (!cancelled && !fired) { fired = true; complete() } }
+    private val begin = Runnable {
+        if (!cancelled && !fired) {
+            ring.setBounds(0, 0, view.width, view.height); view.overlay.add(ring)
+            partner?.let { partnerRing.setBounds(0, 0, it.width, it.height); it.overlay.add(partnerRing) }
+            progress.start(DURATION_MS - (android.os.SystemClock.uptimeMillis() - startedAt))
+        }
+    }
     private var fired = false
     private var cancelled = false
     private var startX = 0f
@@ -45,19 +55,8 @@ class HoldReaction(private val view: View, color: Int, private val partner: View
                     startX = event.x; startY = event.y
                     startedAt = android.os.SystemClock.uptimeMillis()
                     view.parent?.requestDisallowInterceptTouchEvent(true)
-                    ring.setBounds(0, 0, view.width, view.height); view.overlay.add(ring)
-                    partner?.let { partnerRing.setBounds(0, 0, it.width, it.height); it.overlay.add(partnerRing) }
-                    animation = object : Runnable {
-                        override fun run() {
-                            if (cancelled || fired) return
-                            val elapsed = android.os.SystemClock.uptimeMillis() - startedAt
-                            ring.progress = (elapsed / DURATION_MS.toFloat()).coerceIn(0f, 1f); ring.invalidateSelf()
-                            partnerRing.progress = ring.progress; partnerRing.invalidateSelf()
-                            if (elapsed >= DURATION_MS) { fired = true; complete() }
-                            else handler.postDelayed(this, minOf(16L, DURATION_MS - elapsed))
-                        }
-                    }
-                    handler.post(animation!!)
+                    // A tap must not create overlay layers or start rendering two rings.
+                    handler.postDelayed(begin, android.view.ViewConfiguration.getLongPressTimeout().toLong().coerceAtLeast(450L))
                 }
                 MotionEvent.ACTION_MOVE -> {
                     val slop = android.view.ViewConfiguration.get(view.context).scaledTouchSlop * 2
@@ -76,7 +75,7 @@ class HoldReaction(private val view: View, color: Int, private val partner: View
         }
     }
     fun cancel() {
-        cancelled = true; animation?.let(handler::removeCallbacks); animation = null
+        cancelled = true; handler.removeCallbacks(begin); progress.cancel()
         ring.progress = 0f; partnerRing.progress = 0f
         view.overlay.remove(ring); partner?.overlay?.remove(partnerRing)
     }

@@ -461,7 +461,7 @@ class VideoAdapter(
         private val likeHold = HoldReaction(like, 0xFFFF365D.toInt(), favorite, 0xFFFFD54F.toInt()) { doubleReaction() }
         private val favoriteHold = CommentHold(favorite) { openFavoritePicker() }
         private val screenReactionHold = ScreenReactionHold(view) {
-            if (active && !pipMode) { touchMoved = true; doubleReaction() }
+            if (active && !pipMode) { touchMoved = true; doubleReaction(includeFollow = true) }
         }
         private val accessibilityActions = mutableListOf<Int>()
         private var downAction = FullscreenGesture.Action.SPEED
@@ -504,6 +504,7 @@ class VideoAdapter(
         private var active = false
         private var generation = 0
         private var likeBusy = false
+        private var reactionFollowBusy = false
         private var recoveryAttempts = 0
         private val tapHandler = Handler(Looper.getMainLooper())
         private val watchdogHandler = Handler(Looper.getMainLooper())
@@ -592,7 +593,7 @@ class VideoAdapter(
         }
 
         /**
-         * 普通模式及竖屏全屏为上中下三区；横屏全屏为左中右三区，中央按住 1.5 秒双连。
+         * 普通模式及竖屏全屏为上中下三区；横屏全屏为左中右三区，中央按住 1.5 秒三连。
          * 一次按压只采用 DOWN 时的分区，小窗不触发这些操作。
          */
         private val holdToSpeed = Runnable {
@@ -672,6 +673,8 @@ class VideoAdapter(
             setControlsPinned(false)
             bound = item
             likeBusy = false
+            reactionFollowBusy = false
+            itemView.findViewById<AuthorFollowButton>(R.id.authorFollow).isEnabled = true
             favoriteBusy = false
             recoveryAttempts = 0
             landscape = false
@@ -721,7 +724,7 @@ class VideoAdapter(
             }
             accessibilityActions.forEach { androidx.core.view.ViewCompat.removeAccessibilityAction(itemView, it) }
             accessibilityActions.clear()
-            accessibilityActions += androidx.core.view.ViewCompat.addAccessibilityAction(itemView, "点赞并收藏") { _, _ -> doubleReaction(); true }
+            accessibilityActions += androidx.core.view.ViewCompat.addAccessibilityAction(itemView, "点赞、收藏并关注作者") { _, _ -> doubleReaction(includeFollow = true); true }
             accessibilityActions += androidx.core.view.ViewCompat.addAccessibilityAction(itemView, "减少推荐或屏蔽") { _, _ ->
                 DislikeSheet.show(itemView.context, item, history) { target, kind -> onDisliked?.invoke(target, kind) }; true
             }
@@ -881,8 +884,8 @@ class VideoAdapter(
                 if (bound === item) {
                     updateLikeUi(item)
                     if (change.saved && change.changed) reactionBurst.playOn(favorite, ReactionBurstView.Kind.FAVORITE)
-                    done?.invoke()
                 }
+                done?.invoke()
             }.onFailure {
                 if (bound === item) Toast.makeText(itemView.context, "收藏同步失败：${IwaraApi.explainError(it)}", Toast.LENGTH_LONG).show()
             }
@@ -914,14 +917,65 @@ class VideoAdapter(
             favoriteController?.remove(item) { acceptFavorite(item, it) }
         }
 
-        private fun doubleReaction() {
+        private fun doubleReaction(includeFollow: Boolean = false) {
             val item = bound ?: return
-            if (!active || likeBusy || favoriteBusy) return
+            if (!active || likeBusy || favoriteBusy || reactionFollowBusy) return
             if (!api.isLoggedIn()) { onNeedLogin(); return }
+            val session = likeStates.snapshot()
             fun finishFavorite() {
-                addFavorite(item) { Toast.makeText(itemView.context, "已点赞并收藏", Toast.LENGTH_SHORT).show() }
+                if (released || !likeStates.isCurrent(session)) return
+                addFavorite(item) {
+                    if (!likeStates.isCurrent(session)) return@addFavorite
+                    if (includeFollow) finishReactionFollow(item, session)
+                    else if (bound === item) Toast.makeText(itemView.context, "已点赞并收藏", Toast.LENGTH_SHORT).show()
+                }
             }
             if (item.liked) finishFavorite() else toggleRemoteLike(item, true, onSuccess = { finishFavorite() })
+        }
+
+        /** The screen gesture only adds a follow; it can never toggle an existing follow off. */
+        private fun finishReactionFollow(item: VideoItem, session: VideoLikeStore.Snapshot) {
+            if (released || !likeStates.isCurrent(session)) return
+            val button = itemView.findViewById<AuthorFollowButton>(R.id.authorFollow)
+            if (bound === item && !button.isEnabled) {
+                Toast.makeText(itemView.context, "已点赞并收藏，作者关注操作正在处理中", Toast.LENGTH_SHORT).show()
+                return
+            }
+            if (bound === item) { reactionFollowBusy = true; button.isEnabled = false }
+            fun finish(error: Throwable? = null, self: Boolean = false) {
+                if (bound === item) { reactionFollowBusy = false; button.isEnabled = true }
+                if (released || !likeStates.isCurrent(session)) return
+                if (error == null && !self) {
+                    item.authorFollowing = true
+                    applyFollowState(AuthorActivity.FollowResult(item.authorId, item.authorUsername, true))
+                    RecommendationEngine.notifyFollowChanged(item.authorId, true)
+                }
+                if (bound === item) Toast.makeText(itemView.context, when {
+                    error != null -> "已点赞并收藏，关注失败：${IwaraApi.explainError(error)}"
+                    self -> "已点赞并收藏，自己的作品无需关注"
+                    else -> "已完成三连：点赞、收藏、关注"
+                }, Toast.LENGTH_SHORT).show()
+            }
+            fun follow(id: String, following: Boolean) {
+                if (released || !likeStates.isCurrent(session)) { finish(java.io.IOException("账号已切换")); return }
+                when {
+                    id.isBlank() -> finish(java.io.IOException("缺少作者资料"))
+                    id == session.account -> finish(self = true)
+                    following -> finish()
+                    else -> api.followUser(id, true) { result -> itemView.post { finish(result.exceptionOrNull()) } }
+                }
+            }
+            if (item.authorFollowing) { finish(); return }
+            if (item.authorUsername.isBlank()) { follow(item.authorId, false); return }
+            api.getAuthorProfile(item.authorUsername) { result -> itemView.post {
+                if (!likeStates.isCurrent(session) || released) { finish(java.io.IOException("账号已切换")); return@post }
+                result.onSuccess { author ->
+                    item.authorId = author.id.ifBlank { item.authorId }
+                    follow(item.authorId, author.following)
+                }.onFailure { error ->
+                    if (item.authorId.isNotBlank()) follow(item.authorId, false) else finish(error)
+                }
+            } }
         }
 
         private fun lowerQuality() {
@@ -1457,9 +1511,11 @@ class VideoAdapter(
 
         /** ImageView 不回传当前是哪个图标，记在 tag 上，点没点赞一读就知道。 */
         private fun ImageView.setIcon(iconRes: Int, tint: Int) {
-            setImageResource(iconRes)
-            imageTintList = ColorStateList.valueOf(tint)
-            setTag(R.id.reaction_icon, iconRes)
+            if (getTag(R.id.reaction_icon) != iconRes) {
+                setImageResource(iconRes)
+                setTag(R.id.reaction_icon, iconRes)
+            }
+            if (imageTintList?.defaultColor != tint) imageTintList = ColorStateList.valueOf(tint)
         }
 
         private fun showQualityChooser(item: VideoItem, forDownload: Boolean) {

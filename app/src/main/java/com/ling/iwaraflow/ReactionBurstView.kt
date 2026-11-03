@@ -53,6 +53,9 @@ class ReactionBurstView @JvmOverloads constructor(
     private var color = Color.WHITE
     private var animator: ValueAnimator? = null
     private var progress = 0f
+    private val prepared = java.util.EnumMap<Kind, AnimatedImageDrawable>(Kind::class.java)
+    private val preparing = mutableSetOf<Kind>()
+    @Volatile private var preparationGeneration = 0
 
     /** 上一次动画的中心，本视图坐标系。空动画时保持上一次的值。 */
     var burstCenterX = 0f
@@ -75,8 +78,41 @@ class ReactionBurstView @JvmOverloads constructor(
         color = kind.color
         cancelBurst()
         visibility = VISIBLE
-        val animation = decodeGif(kind)
+        // Never open/decode an animated image on the playback/UI thread. The vector
+        // fallback provides immediate feedback until background preparation finishes.
+        val animation = prepared[kind]
+        prepareGif(kind)
         if (animation != null) startGif(animation, kind) else startDrawn(kind)
+    }
+
+    override fun onAttachedToWindow() {
+        super.onAttachedToWindow()
+        Kind.entries.forEach(::prepareGif)
+    }
+
+    private fun prepareGif(kind: Kind) {
+        if (!isAttachedToWindow || prepared.containsKey(kind) || !preparing.add(kind)) return
+        val expected = preparationGeneration
+        gifWorker.execute {
+            if (preparationGeneration != expected) return@execute
+            val decoded = decodeGif(kind)
+            main.post {
+                if (preparationGeneration == expected && isAttachedToWindow) {
+                    preparing.remove(kind)
+                    if (decoded != null) {
+                        // Register once. Android may have already queued an end callback when
+                        // stop() returns; clearing its callback list can crash that queued task.
+                        decoded.registerAnimationCallback(object : Animatable2.AnimationCallback() {
+                            override fun onAnimationEnd(drawable: Drawable) {
+                                // An old stop callback must not hide a newly restarted burst.
+                                if (gif === drawable && !decoded.isRunning) cancelBurst()
+                            }
+                        })
+                        prepared[kind] = decoded
+                    }
+                }
+            }
+        }
     }
 
     /** 素材播不出来时还有一套自己画的动画，总比点了没反应强。 */
@@ -111,11 +147,6 @@ class ReactionBurstView @JvmOverloads constructor(
         )
         // 素材本身是无限循环的，这里只放一遍。
         animation.repeatCount = 0
-        animation.registerAnimationCallback(object : Animatable2.AnimationCallback() {
-            override fun onAnimationEnd(drawable: Drawable) {
-                if (gif === drawable) cancelBurst()
-            }
-        })
         animation.start()
         invalidate()
     }
@@ -130,11 +161,12 @@ class ReactionBurstView @JvmOverloads constructor(
     fun cancelBurst() {
         animator?.cancel()
         animator = null
-        gif?.let {
+        val stopped = gif
+        gif = null
+        stopped?.let {
             it.stop()
             it.callback = null
         }
-        gif = null
         progress = 0f
         visibility = GONE
     }
@@ -142,6 +174,9 @@ class ReactionBurstView @JvmOverloads constructor(
     override fun onDetachedFromWindow() {
         super.onDetachedFromWindow()
         cancelBurst()
+        preparationGeneration++
+        prepared.clear()
+        preparing.clear()
     }
 
     /**
@@ -197,6 +232,10 @@ class ReactionBurstView @JvmOverloads constructor(
         from + (to - from) * fraction.coerceIn(0f, 1f)
 
     companion object {
+        private val main = android.os.Handler(android.os.Looper.getMainLooper())
+        private val gifWorker = java.util.concurrent.Executors.newSingleThreadExecutor { task ->
+            Thread(task, "reaction-image-decode").apply { isDaemon = true }
+        }
         const val DURATION_MS = 720L
         private const val ICON_DP = 62f
         private const val PARTICLES = 7

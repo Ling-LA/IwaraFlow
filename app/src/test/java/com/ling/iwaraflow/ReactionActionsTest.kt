@@ -94,8 +94,8 @@ class ReactionActionsTest {
             holder.itemView.performClick(); holder.itemView.performClick()
             flush()
         }
-        fun combinedHold() = holder.javaClass.getDeclaredMethod("doubleReaction")
-            .apply { isAccessible = true }.invoke(holder)
+        fun combinedHold() = holder.javaClass.getDeclaredMethod("doubleReaction", Boolean::class.javaPrimitiveType)
+            .apply { isAccessible = true }.invoke(holder, false)
         override fun close() {
             adapter.releaseAll(); history.close(); activity.pause().stop().destroy()
         }

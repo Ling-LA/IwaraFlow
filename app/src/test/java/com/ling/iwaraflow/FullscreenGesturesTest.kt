@@ -22,6 +22,10 @@ import java.time.Duration
 @RunWith(RobolectricTestRunner::class)
 @Config(sdk = [36])
 class FullscreenGesturesTest {
+    @org.junit.Before fun manualFrameClock() {
+        org.robolectric.shadows.ShadowChoreographer.setPaused(true)
+        org.robolectric.shadows.ShadowChoreographer.setFrameDelay(Duration.ofMillis(16))
+    }
     private fun idle(ms: Long) = shadowOf(Looper.getMainLooper()).idleFor(Duration.ofMillis(ms))
     private fun touch(view: View, action: Int, x: Float, y: Float) {
         val now = SystemClock.uptimeMillis()
@@ -191,18 +195,19 @@ class FullscreenGesturesTest {
             assertFalse(prefs.getBoolean(PlaybackGuide.key(true), false))
             assertNull(activity.window.decorView.findViewWithTag<View>("playback_gesture_guide"))
             `when`(adapter.activeVideoAspect()).thenReturn(1.8f)
-            FullscreenMode.apply(activity, adapter, emptyList(), true); idle(1)
+            FullscreenMode.apply(activity, adapter, emptyList(), true); idle(32)
             assertTrue(prefs.getBoolean(PlaybackGuide.key(true), false))
             assertNotNull(activity.window.decorView.findViewWithTag<View>("playback_gesture_guide"))
         } finally { PlaybackGuide.dismiss(activity); controller.pause().stop().destroy() }
     }
-    @Test fun fullscreenAnimationIsLargeAndCenteredAtThePressPoint() {
+    @Test fun fullscreenAnimationIsCompactAndCenteredAtThePressPoint() {
         val context = RuntimeEnvironment.getApplication(); val density = context.resources.displayMetrics.density
         val view = View(context); view.layout(0, 0, (800*density).toInt(), (360*density).toInt())
         val hold = ScreenReactionHold(view) {}
         hold.start(400*density, 180*density)
         val drawable = hold.javaClass.getDeclaredField("ring").apply { isAccessible = true }.get(hold) as android.graphics.drawable.Drawable
-        assertTrue(drawable.bounds.width() >= 240*density)
+        assertEquals(96*density, drawable.bounds.width().toFloat(), 1f)
+        assertEquals(drawable.bounds.width(), drawable.bounds.height())
         assertEquals(400*density, drawable.bounds.exactCenterX(), 1f)
         assertEquals(180*density, drawable.bounds.exactCenterY(), 1f)
         hold.cancel()

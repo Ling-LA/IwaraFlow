@@ -1,0 +1,10 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- One three-finger hand for three actions. No opaque background. -->
+<vector xmlns:android="http://schemas.android.com/apk/res/android"
+    android:width="64dp" android:height="64dp"
+    android:viewportWidth="64" android:viewportHeight="64">
+    <path android:fillColor="#FF557A" android:pathData="M24,54 L23,59 L46,59 L45,54 Z" />
+    <path android:fillColor="#00000000" android:strokeColor="#FFFFFF"
+        android:strokeWidth="3.5" android:strokeLineCap="round" android:strokeLineJoin="round"
+        android:pathData="M23,54 C19,49 16,45 13,40 L7,30 C5,26 10,22 13,25 L20,32 L20,14 C20,8 28,8 28,14 L28,29 L28,9 C28,3 36,3 36,9 L36,29 L36,13 C36,7 44,7 44,13 L44,33 L48,30 C52,28 57,31 56,36 L52,45 C51,49 48,52 45,54 Z M44,33 L37,39 C34,42 33,46 34,49" />
+</vector>

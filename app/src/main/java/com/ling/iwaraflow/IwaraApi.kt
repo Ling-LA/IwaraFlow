@@ -592,7 +592,10 @@ class IwaraApi(context: Context, private val apiRoot: String = DEFAULT_API_ROOT)
         relationWrite("$apiRoot/video/$videoId/like", liked, callback,
             accepted = { likeStates.confirm(snapshot, videoId, liked) }, validSession = { likeStates.isCurrent(snapshot) })
     }
-    fun followUser(userId: String, following: Boolean, callback: (Result<Unit>) -> Unit) = relationWrite("$apiRoot/user/$userId/followers", following, callback)
+    fun followUser(userId: String, following: Boolean, callback: (Result<Unit>) -> Unit) {
+        val snapshot = likeStates.snapshot()
+        relationWrite("$apiRoot/user/$userId/followers", following, callback, validSession = { likeStates.isCurrent(snapshot) })
+    }
     fun setFriend(userId: String, enabled: Boolean, callback: (Result<Unit>) -> Unit) = relationWrite("$apiRoot/user/$userId/friends", enabled, callback)
 
     private fun relationWrite(url: String, enabled: Boolean, callback: (Result<Unit>) -> Unit, accepted: () -> Unit = {}, validSession: () -> Boolean = { true }) {

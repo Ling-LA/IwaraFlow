@@ -306,7 +306,7 @@ class ProfileUiDeviceTest {
             lateinit var fullHold: ScreenReactionHold
             main { fullHold = ScreenReactionHold(root) {}; fullHold.start(root.width/2f, root.height/2f) }
             android.os.SystemClock.sleep(900)
-            screenshot("fullscreen-double-reaction")
+            screenshot("fullscreen-triple-reaction")
             main { fullHold.cancel(); PlaybackGuide.show(activity, true) }
             screenshot("fullscreen-guide-landscape")
             main { PlaybackGuide.dismiss(activity) }

@@ -223,7 +223,7 @@ class SettingsDialogController(
         }
 
         panel.addView(sectionTitle("操作帮助"))
-        panel.addView(actionRow("操作引导", "查看横屏 / 竖屏的三段长按、双连、加速和播放手势。") { PlaybackGuideNavigation.open(activity) })
+        panel.addView(actionRow("操作引导", "查看横屏 / 竖屏的三段长按、三连、加速和播放手势。") { PlaybackGuideNavigation.open(activity) })
         panel.addView(sectionTitle("维护"))
         panel.addView(actionRow("数据与存储", "管理缓存、旧版收藏和兴趣备份，清理历史及推荐画像。") {
             activity.startActivity(android.content.Intent(activity, DataManagementActivity::class.java))

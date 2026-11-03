@@ -35,6 +35,7 @@ class ReactionPerformanceDeviceTest {
             .putExtra(AuthorActivity.EXTRA_ID, "fixture").addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)) as AuthorActivity
         val frameThread = HandlerThread("reaction-frame-metrics").apply { start() }
         val frames = ConcurrentLinkedQueue<Long>()
+        var metricsAttached = false
         val listener = Window.OnFrameMetricsAvailableListener { _, metrics, _ -> frames.add(metrics.getMetric(FrameMetrics.TOTAL_DURATION)) }
         lateinit var root: FrameLayout
         lateinit var burst: ReactionBurstView
@@ -89,6 +90,7 @@ class ReactionPerformanceDeviceTest {
                     burst.cancelBurst()
                 }
                 activity.window.addOnFrameMetricsAvailableListener(listener, Handler(frameThread.looper))
+                metricsAttached = true
                 screenHold.start(root.width / 2f, root.height / 2f)
             }
             SystemClock.sleep(500)
@@ -114,7 +116,7 @@ class ReactionPerformanceDeviceTest {
                 touch(MotionEvent.ACTION_DOWN); SystemClock.sleep(1700); touch(MotionEvent.ACTION_UP)
                 assertEquals(it + 1, buttonCompletions.get())
             }
-            main { activity.window.removeOnFrameMetricsAvailableListener(listener) }
+            main { activity.window.removeOnFrameMetricsAvailableListener(listener); metricsAttached = false }
             assertTrue("The animation must actually render frames", frames.size > 20)
             fun percentile(values: List<Double>, p: Double) = values.sorted()[((values.size - 1) * p).toInt()]
             val record = org.json.JSONObject().put("sdk", android.os.Build.VERSION.SDK_INT)
@@ -126,7 +128,7 @@ class ReactionPerformanceDeviceTest {
             android.os.ParcelFileDescriptor.AutoCloseInputStream(test.uiAutomation.executeShellCommand("cp ${report.absolutePath} /sdcard/Download/IwaraFlow-ui-checks/reaction-performance.json")).use { it.readBytes() }
             android.util.Log.i("ReactionPerformance", record.toString())
         } finally {
-            main { activity.window.removeOnFrameMetricsAvailableListener(listener); activity.finish() }
+            main { if (metricsAttached) activity.window.removeOnFrameMetricsAvailableListener(listener); activity.finish() }
             frameThread.quitSafely()
         }
     }

@@ -8,7 +8,7 @@ import android.graphics.drawable.Drawable
 import android.view.View
 import androidx.appcompat.content.res.AppCompatResources
 
-/** One compact, transparent three-finger emblem, shown only after long-press confirmation. */
+/** One compact, transparent thumbs-up emblem, shown only after long-press confirmation. */
 internal class ScreenReactionHold(private val view: View, complete: () -> Unit) {
     private val density = view.resources.displayMetrics.density
     // Inflate once while binding the card, never on the first animation frame.

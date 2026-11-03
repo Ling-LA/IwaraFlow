@@ -4,6 +4,9 @@ import android.os.Looper
 import android.widget.FrameLayout
 import androidx.media3.exoplayer.ExoPlayer
 import androidx.media3.exoplayer.source.SilenceMediaSource
+import androidx.media3.common.util.HandlerWrapper
+import java.util.concurrent.CountDownLatch
+import java.util.concurrent.TimeUnit
 import org.junit.Assert.*
 import org.junit.Test
 import org.junit.runner.RunWith
@@ -86,7 +89,21 @@ class PlaybackIntentTest {
         assertFalse(item.resumePlayWhenReady)
     }
     @Test fun headphoneDisconnectPausesAndStaysPausedOnReturn() = fixture { adapter, holder, item ->
-        RuntimeEnvironment.getApplication().sendBroadcast(android.content.Intent(android.media.AudioManager.ACTION_AUDIO_BECOMING_NOISY))
+        // Media3 1.11 registers this receiver on its background handler. Sending the
+        // broadcast immediately after constructing the player can race registration.
+        val p = player(holder)
+        val manager = p.javaClass.getDeclaredField("audioBecomingNoisyManager")
+            .apply { isAccessible = true }.get(p)
+        val handler = manager.javaClass.getDeclaredField("backgroundHandler")
+            .apply { isAccessible = true }.get(manager) as HandlerWrapper
+        val registered = CountDownLatch(1)
+        assertTrue(handler.post { registered.countDown() })
+        assertTrue("The player must finish registering its audio receiver", registered.await(5, TimeUnit.SECONDS))
+        val context = RuntimeEnvironment.getApplication()
+        val noisy = android.content.Intent(android.media.AudioManager.ACTION_AUDIO_BECOMING_NOISY)
+        assertTrue(shadowOf(context).getReceiversForIntent(noisy).isNotEmpty())
+        assertTrue("The broadcast must pause an initially playing player", p.playWhenReady)
+        context.sendBroadcast(noisy)
         shadowOf(Looper.getMainLooper()).idle()
         assertFalse(player(holder).playWhenReady)
         assertFalse(item.resumePlayWhenReady)

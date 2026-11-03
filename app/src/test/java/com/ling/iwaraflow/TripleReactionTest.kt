@@ -68,9 +68,9 @@ class TripleReactionTest {
             call.getArgument<(Result<Unit>) -> Unit>(2)(Result.success(Unit)); null
         }.`when`(api).likeVideo(anyString(), anyBoolean(), any<(Result<Unit>) -> Unit>() ?: {})
         doAnswer { call ->
-            fixture.follows += call.getArgument<String>(0) to call.getArgument<Boolean>(1)
+            fixture.follows += call.getArgument<String>(0) to true
             fixture.followReply = call.getArgument(2); null
-        }.`when`(api).followUser(anyString(), anyBoolean(), any<(Result<Unit>) -> Unit>() ?: {})
+        }.`when`(api).ensureUserFollowed(anyString(), anyString(), any<(Result<Unit>) -> Unit>() ?: {})
         try { block(fixture) } finally { adapter.releaseAll(); history.close(); host.pause().stop().destroy() }
     }
     @Test fun screenHoldAddsLikeFavoriteAndFollowAndDoesNotRepeat() = fixture { f ->
@@ -113,6 +113,7 @@ class TripleReactionTest {
     }
     @Test fun serverFollowStateAvoidsAnUnnecessaryWrite() = fixture { f ->
         f.item.authorUsername = "creator-name"
+        f.item.authorId = ""
         doAnswer { call ->
             call.getArgument<(Result<IwaraAuthor>) -> Unit>(1)(Result.success(IwaraAuthor("creator", "Creator", "creator-name", following = true)))
             null

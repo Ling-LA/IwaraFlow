@@ -594,27 +594,74 @@ class IwaraApi(context: Context, private val apiRoot: String = DEFAULT_API_ROOT)
     }
     fun followUser(userId: String, following: Boolean, callback: (Result<Unit>) -> Unit) {
         val snapshot = likeStates.snapshot()
-        relationWrite("$apiRoot/user/$userId/followers", following, callback, validSession = { likeStates.isCurrent(snapshot) })
+        val key = FollowWriteState.Key(apiRoot, snapshot.account, snapshot.session, userId)
+        enqueue(callback) { runCatching {
+            synchronized(FollowWriteState.lock(key)) {
+                relationWriteBlocking("$apiRoot/user/$userId/followers", following, validSession = { likeStates.isCurrent(snapshot) })
+                FollowWriteState.confirm(key, following)
+            }
+        } }
+    }
+
+    /** Three-link action: only add a follow. Repeated videos/pages share the confirmed result. */
+    fun ensureUserFollowed(userId: String, username: String, callback: (Result<Unit>) -> Unit) {
+        val snapshot = likeStates.snapshot()
+        val key = FollowWriteState.Key(apiRoot, snapshot.account, snapshot.session, userId)
+        fun requireSession() {
+            if (!likeStates.isCurrent(snapshot)) throw IOException("账号已切换，请重试")
+            if (!isLoggedIn()) throw IOException("请先登录 Iwara")
+        }
+        fun serverFollowing(): Boolean {
+            if (username.isBlank()) return false
+            requireSession()
+            val author = getAuthorProfileBlocking(username)
+            requireSession()
+            return author.id == userId && author.following
+        }
+        enqueue(callback) { runCatching {
+            synchronized(FollowWriteState.lock(key)) {
+                requireSession()
+                if (userId.isBlank()) throw IOException("缺少作者资料")
+                if (userId == snapshot.account) return@synchronized
+                val recent = FollowWriteState.recent(key)
+                if (recent == true) return@synchronized
+                // A fresh explicit unfollow takes precedence over a lagging profile read.
+                if (recent == false || !runCatching { serverFollowing() }.getOrDefault(false)) {
+                    try {
+                        relationWriteBlocking("$apiRoot/user/$userId/followers", true, validSession = { likeStates.isCurrent(snapshot) })
+                    } catch (failure: Exception) {
+                        // A website/other-page follow may win between GET and POST, or the
+                        // acknowledgement may be lost. Only verified membership means success.
+                        if (!runCatching { serverFollowing() }.getOrDefault(false)) throw failure
+                    }
+                }
+                requireSession()
+                FollowWriteState.confirm(key, true)
+            }
+        } }
     }
     fun setFriend(userId: String, enabled: Boolean, callback: (Result<Unit>) -> Unit) = relationWrite("$apiRoot/user/$userId/friends", enabled, callback)
 
     private fun relationWrite(url: String, enabled: Boolean, callback: (Result<Unit>) -> Unit, accepted: () -> Unit = {}, validSession: () -> Boolean = { true }) {
-        enqueue(callback) { runCatching {
-            if (!validSession()) throw IOException("账号已切换，请重试")
-            if (!isLoggedIn()) throw IOException("请先登录 Iwara")
-            ensureAccessTokenBlocking() ?: throw IOException("登录已失效，请重新登录")
-            val builder = baseRequest(url, authenticated = true)
-            val request = if (enabled) builder.post(ByteArray(0).toRequestBody(null)).build() else builder.delete().build()
-            if (!validSession()) throw IOException("账号已切换，请重试")
-            client.newCall(request).execute().use { response ->
-                val raw = response.body?.string().orEmpty()
-                if (!response.isSuccessful) {
-                    if (response.code == 401) session.accessToken = null
-                    throw IOException(extractMessage(raw, "操作失败（HTTP ${response.code}）"))
-                }
+        enqueue(callback) { runCatching { relationWriteBlocking(url, enabled, accepted, validSession) } }
+    }
+
+    private fun relationWriteBlocking(url: String, enabled: Boolean, accepted: () -> Unit = {}, validSession: () -> Boolean = { true }) {
+        if (!validSession()) throw IOException("账号已切换，请重试")
+        if (!isLoggedIn()) throw IOException("请先登录 Iwara")
+        ensureAccessTokenBlocking() ?: throw IOException("登录已失效，请重新登录")
+        val builder = baseRequest(url, authenticated = true)
+        val request = if (enabled) builder.post(ByteArray(0).toRequestBody(null)).build() else builder.delete().build()
+        if (!validSession()) throw IOException("账号已切换，请重试")
+        client.newCall(request).execute().use { response ->
+            val raw = response.body?.string().orEmpty()
+            if (!response.isSuccessful) {
+                if (response.code == 401) session.accessToken = null
+                throw IOException(extractMessage(raw, "操作失败（HTTP ${response.code}）"))
             }
-            accepted()
-        } }
+        }
+        if (!validSession()) throw IOException("账号已切换，请重试")
+        accepted()
     }
 
     fun getFriendStatus(userId: String, callback: (Result<String>) -> Unit) {

@@ -962,11 +962,11 @@ class VideoAdapter(
                     id.isBlank() -> finish(java.io.IOException("缺少作者资料"))
                     id == session.account -> finish(self = true)
                     following -> finish()
-                    else -> api.followUser(id, true) { result -> itemView.post { finish(result.exceptionOrNull()) } }
+                    else -> api.ensureUserFollowed(id, item.authorUsername) { result -> itemView.post { finish(result.exceptionOrNull()) } }
                 }
             }
             if (item.authorFollowing) { finish(); return }
-            if (item.authorUsername.isBlank()) { follow(item.authorId, false); return }
+            if (item.authorId.isNotBlank() || item.authorUsername.isBlank()) { follow(item.authorId, false); return }
             api.getAuthorProfile(item.authorUsername) { result -> itemView.post {
                 if (!likeStates.isCurrent(session) || released) { finish(java.io.IOException("账号已切换")); return@post }
                 result.onSuccess { author ->

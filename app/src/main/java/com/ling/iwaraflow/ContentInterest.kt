@@ -10,7 +10,8 @@ object ContentInterest {
     private val links = Regex("https?://\\S+|www\\.\\S+|[\\w.+-]+@[\\w.-]+", RegexOption.IGNORE_CASE)
     private val markup = Regex("<[^>]*>|!\\[[^]]*]\\([^)]*\\)")
     private val promotion = Regex("patreon|fantia|fanbox|gumroad|subscribe|subscription|sponsor|commission|discord|telegram|support me|download|follow me|all rights|转载|订阅|赞助|推广|下载|禁止|版权|支持我|お借り|配布|転載|支援|구독|후원|다운로드|무단", RegexOption.IGNORE_CASE)
-    private val words = Regex("[\\p{IsLatin}]{3,24}|[\\p{IsCyrillic}]{3,24}|[가-힣]{2,12}|[ァ-ヺー]{2,16}|[\\p{IsHan}]{2,24}")
+    // Android 9's ICU does not accept the Java-style IsLatin / IsHan script aliases.
+    private val words = Regex("[\\p{script=Latin}]{3,24}|[\\p{script=Cyrillic}]{3,24}|[가-힣]{2,12}|[ァ-ヺー]{2,16}|[\\p{script=Han}]{2,24}")
     private val stop = setOf("the", "and", "with", "for", "this", "that", "from", "have", "you", "your", "are", "was", "not", "but", "will", "can", "video", "videos", "new", "full", "version", "preview", "model", "motion", "camera", "stage", "effect", "mmd", "blender", "test", "please", "thanks", "thank", "作品", "视频", "作品紹介", "新作", "测试", "演示", "更新", "大家", "这个", "今回", "動画", "영상", "모델")
     private val cache = object : LinkedHashMap<String, Features>(128, .75f, true) {
         override fun removeEldestEntry(eldest: MutableMap.MutableEntry<String, Features>?) = size > 512

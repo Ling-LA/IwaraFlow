@@ -160,6 +160,11 @@ class Release019DeviceTest {
     }
 
     @Test fun persistedTitleAndDescriptionEvidenceChangesRealDeviceRanking() {
+        // Exercise the device's ICU regex engine, not the desktop JVM implementation.
+        assertTrue(SearchQuery.literal("robot").matchesTitle("Robot dance"))
+        assertFalse(SearchQuery.literal("robot").matchesTitle("éroboté"))
+        val scripts = ContentInterest.features(VideoItem("scripts", "étoile привет", "", emptyList(), 0))
+        assertTrue(scripts.title.containsAll(listOf("étoile", "привет")))
         val prefs = AppPrefs(context)
         val oldPrivate = prefs.privateBrowsing; val oldIsolated = prefs.isolateInterests
         val name = "text-device-${System.nanoTime()}.db"

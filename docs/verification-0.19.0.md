@@ -41,3 +41,7 @@ HyperOS 阻止了初始 instrumentation 的后台启动页面。测试期间仅�
 - 规则测试验证的是学习、限幅与排序行为，不能直接证明个人满意度。未知名称、列表未提供简介、实际网络抖动仍可能影响推荐和加载体验。
 
 发布工作流还会在 Android 28 / 33 / 36 上执行导航与升级兼容检查，全部通过才发布签名 APK。可在 [GitHub Actions](https://github.com/Ling-LA/IwaraFlow/actions/workflows/build-apk.yml) 查看对应提交记录。
+
+第一轮 Android 9 检查发现 ICU 正则不支持 `IsLatin` 等脚本别名，导致文字分析类初始化失败；改为兼容写法 `script=Latin` / `script=Han`，搜索词边界同步修正，并在真机用例中验证重音字母边界和西里尔文字提取。Android 文档明确注明 `Is` 脚本前缀从 Android 10 才支持，见 [Pattern 文档](https://developer.android.com/reference/java/util/regex/Pattern)。失败的首轮没有发布安装包。
+
+修正后，本地 59 项推荐/搜索相关测试通过；Android 16 真机重新运行 4 项本版功能测试，全部通过（19.109 秒）。发布仍须以修正提交对应的完整工作流结果为准。

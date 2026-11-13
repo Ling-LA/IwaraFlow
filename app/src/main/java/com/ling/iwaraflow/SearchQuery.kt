@@ -94,8 +94,8 @@ data class SearchQuery(val groups: List<List<String>>) {
         }
 
         private fun termPattern(needle: String): Regex = synchronized(patterns) { patterns.getOrPut(needle) {
-                val left = if (needle.first().isAsciiWord()) "(?<![\\p{IsLatin}0-9])" else ""
-                val right = if (needle.last().isAsciiWord()) "(?![\\p{IsLatin}0-9])" else ""
+                val left = if (needle.first().isAsciiWord()) "(?<![\\p{script=Latin}0-9])" else ""
+                val right = if (needle.last().isAsciiWord()) "(?![\\p{script=Latin}0-9])" else ""
                 val phrase = needle.split(Regex("\\s+")).joinToString("\\s+", transform = Regex::escape)
                 Regex(left + phrase + right)
             } }

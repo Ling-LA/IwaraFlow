@@ -17,7 +17,7 @@ data class MutedEntities(
 )
 
 // SQLiteOpenHelper only implements AutoCloseable on newer Android versions.
-class HistoryStore(context: Context, private val profileFile: String? = null) : SQLiteOpenHelper(context, profileFile ?: "iwaraflow.db", null, 12), java.io.Closeable {
+class HistoryStore(context: Context, private val profileFile: String? = null) : SQLiteOpenHelper(context, profileFile ?: "iwaraflow.db", null, 13), java.io.Closeable {
     /**
      * **UI 线程不写库**。划一条视频要写好几笔（观看记录、行为、已看标记），
      * 而这些方法都是 `@Synchronized` 的——和后台算画像抢同一把锁，用久了就是划走那一下的微卡顿。
@@ -245,7 +245,9 @@ class HistoryStore(context: Context, private val profileFile: String? = null) : 
                 weight REAL NOT NULL,
                 created_at INTEGER NOT NULL,
                 author_id TEXT NOT NULL DEFAULT '',
-                account_id TEXT NOT NULL DEFAULT ''
+                account_id TEXT NOT NULL DEFAULT '',
+                title_features TEXT NOT NULL DEFAULT '',
+                body_features TEXT NOT NULL DEFAULT ''
             )""".trimIndent()
         )
         db.execSQL(
@@ -270,6 +272,13 @@ class HistoryStore(context: Context, private val profileFile: String? = null) : 
     }
 
     override fun onUpgrade(db: SQLiteDatabase, oldVersion: Int, newVersion: Int) {
+        if (oldVersion < 13) {
+            val columns = db.rawQuery("PRAGMA table_info(interactions)", null).use { c ->
+                buildSet { while (c.moveToNext()) add(c.getString(c.getColumnIndexOrThrow("name"))) }
+            }
+            for (column in listOf("title_features", "body_features")) if (column !in columns)
+                db.execSQL("ALTER TABLE interactions ADD COLUMN $column TEXT NOT NULL DEFAULT ''")
+        }
         if (oldVersion < 12) { db.execSQL(EXTRA_LIKE_TABLE); db.execSQL(EXTRA_LIKE_INDEX) }
         if (oldVersion < 11) db.execSQL(MANUAL_TAG_TABLE)
         if (oldVersion < 2) {
@@ -336,6 +345,24 @@ class HistoryStore(context: Context, private val profileFile: String? = null) : 
             // 现在每发生一次行为就往聚合表里累加（旧分先按时间衰减），老兴趣只会慢慢淡掉。
             db.execSQL(PREFERENCE_TABLE)
             backfillPreferences(db)
+        }
+        val hasSavedTitles = db.rawQuery("SELECT COUNT(*) FROM sqlite_master WHERE type='table' AND name IN ('history','favorites')", null)
+            .use { it.moveToFirst(); it.getInt(0) == 2 }
+        if (oldVersion < 13 && hasSavedTitles) {
+            // Reuse only titles already kept on this device; never fetch old descriptions.
+            // Keep action, time and account unchanged, so migration creates no new signals.
+            db.rawQuery("SELECT i.id, COALESCE(h.title, f.title, '') FROM interactions i " +
+                "LEFT JOIN history h ON h.video_id=i.video_id LEFT JOIN favorites f ON f.video_id=i.video_id " +
+                "ORDER BY i.created_at DESC LIMIT $PROFILE_ROWS", null).use { cursor ->
+                while (cursor.moveToNext()) {
+                    val title = cursor.getString(1)
+                    if (title.isBlank()) continue
+                    val features = ContentInterest.features(VideoItem("", title, "", emptyList(), 0))
+                    db.update("interactions", ContentValues().apply {
+                        put("title_features", features.title.joinToString("\u001f"))
+                    }, "id=?", arrayOf(cursor.getLong(0).toString()))
+                }
+            }
         }
     }
 
@@ -905,6 +932,9 @@ class HistoryStore(context: Context, private val profileFile: String? = null) : 
             put("weight", weight)
             put("created_at", now)
             put("account_id", account)
+            val features = ContentInterest.features(item)
+            put("title_features", features.title.joinToString("\u001f"))
+            put("body_features", features.body.joinToString("\u001f"))
         }
         return values
     }
@@ -995,15 +1025,18 @@ class HistoryStore(context: Context, private val profileFile: String? = null) : 
         // 明确点过「不感兴趣：作者 / 标签」的：这类内容在打分之前就被剔掉，连探索位都不给。
         // 读的是独立的 muted_entities 表，不是下面这个滚动窗口——拉黑是永久的。
         val muted = mutedEntities()
+        val textLearning = ContentInterest.Learning()
         interestDatabase.query(
             "interactions",
-            arrayOf("author", "tags", "weight", "created_at", "author_id", "action", "video_id"),
+            arrayOf("author", "tags", "weight", "created_at", "author_id", "action", "video_id", "title_features", "body_features"),
             // 别的账号导进来的点赞不算这个账号的口味；本机行为（account_id 为空）永远算数。
             ACCOUNT_SCOPE, arrayOf(accountId), null, null, "created_at DESC", PROFILE_ROWS.toString()
         ).use { c ->
             while (c.moveToNext()) {
                 val at = c.getLong(3)
                 val action = c.getString(5)
+                textLearning.observe(c.getString(6), c.getString(4).ifBlank { c.getString(0) }, action,
+                    c.getDouble(2), now - at, splitTags(c.getString(7)), splitTags(c.getString(8)))
                 val ageDays = ((now - at).coerceAtLeast(0) / 86_400_000.0)
                 if (action in setOf("watch", "complete", ACTION_SKIP, "like", "favorite", "follow", "unlike", "unfavorite")) {
                     specificity.observe(c.getString(6).orEmpty(), splitTags(c.getString(1)),
@@ -1069,10 +1102,10 @@ class HistoryStore(context: Context, private val profileFile: String? = null) : 
             val selectivity = if (score > 0) specificityMultipliers[key] ?: 1.0 else 1.0
             (score * confidence * selectivity * (multipliers[key] ?: 1.0)).coerceIn(-6.0, 8.0)
         }
-        return PreferenceProfile(author.mapValues { it.value.coerceIn(-6.0, 8.0) }, boundedTags,
+        return SeasonalInterest.withoutExpiredLearning(PreferenceProfile(author.mapValues { it.value.coerceIn(-6.0, 8.0) }, boundedTags,
             authorIds.mapValues { it.value.coerceIn(-6.0, 8.0) }, videos.mapValues { it.value.coerceIn(-6.0, 8.0) },
             muted.authors, muted.authorIds, muted.tags, manualTagPreferences(),
-            positiveTags.filter { (key, _) -> (multipliers[key] ?: 1.0) > 0 })
+            positiveTags.filter { (key, _) -> (multipliers[key] ?: 1.0) > 0 }, textLearning.weights(now)), now)
     }
 
     /** Device-local, explicit preferences do not decay and are never used by search. */

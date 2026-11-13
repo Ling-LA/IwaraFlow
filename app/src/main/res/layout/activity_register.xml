@@ -26,7 +26,7 @@
                 android:layout_height="match_parent"
                 android:layout_weight="1"
                 android:gravity="center_vertical"
-                android:text="‹  返回"
+                android:text="@string/ui_29ebafb31c58"
                 android:textColor="@color/page_accent"
                 android:textSize="16sp"
                 android:textStyle="bold" />
@@ -36,7 +36,7 @@
                 android:layout_width="wrap_content"
                 android:layout_height="match_parent"
                 android:gravity="center_vertical"
-                android:text="用浏览器打开"
+                android:text="@string/ui_61d8c577a53a"
                 android:textColor="@color/page_accent"
                 android:textSize="14sp" />
         </LinearLayout>
@@ -45,7 +45,7 @@
             android:layout_width="match_parent"
             android:layout_height="wrap_content"
             android:layout_marginTop="6dp"
-            android:text="注册 Iwara 账号"
+            android:text="@string/ui_2ddbec5e3c0d"
             android:textColor="@color/page_text"
             android:textSize="25sp"
             android:textStyle="bold" />
@@ -55,7 +55,7 @@
             android:layout_width="match_parent"
             android:layout_height="wrap_content"
             android:layout_marginTop="4dp"
-            android:text="正在打开官网注册页…"
+            android:text="@string/ui_dd9901bb166b"
             android:textColor="@color/page_secondary"
             android:textSize="13sp" />
     </LinearLayout>

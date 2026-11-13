@@ -1,0 +1,701 @@
+# Chinese source<TAB>English<TAB>Japanese<TAB>Korean. Placeholders must be preserved.
+上传	Upload	アップロード	업로드
+保存	Save	保存	저장
+公开	Public	公開	공개
+关于	About	このアプリについて	앱 정보
+关闭	Close	閉じる	닫기
+刚刚	Just now	たった今	방금
+匿名	Anonymous	匿名	익명
+取消	Cancel	キャンセル	취소
+合并	Merge	統合	병합
+密码	Password	パスワード	비밀번호
+导入	Import	インポート	가져오기
+应用	Apply	適用	적용
+成人	Adult	成人向け	성인
+我的	Me	マイページ	내 정보
+打开	Open	開く	열기
+推荐	For you	おすすめ	추천
+最新	Latest	最新	최신
+流行	Trending	トレンド	트렌드
+人气	Popular	人気	인기
+搜索	Search	検索	검색
+播放	Play	再生	재생
+暂停	Pause	一時停止	일시 정지
+最高	Best	最高	최고
+未知	Unknown	不明	알 수 없음
+标签	Tags	タグ	태그
+标题	Title	タイトル	제목
+注册	Sign up	登録	가입
+点赞	Like	いいね	좋아요
+登录	Log in	ログイン	로그인
+确认	Confirm	確認	확인
+简介	Info	概要	소개
+维护	Maintenance	メンテナンス	유지 관리
+网络	Network	ネットワーク	네트워크
+翻译	Translation	翻訳	번역
+设置	Settings	設定	설정
+评论	Comments	コメント	댓글
+弹幕	Danmaku	弾幕	탄막
+关注	Follow	フォロー	팔로우
+收藏	Save	お気に入り	즐겨찾기
+下载	Download	ダウンロード	다운로드
+全屏	Fullscreen	全画面	전체 화면
+分享	Share	共有	공유
+不限额	Unlimited	無制限	무제한
+仅好友	Friends only	友達のみ	친구만
+作者名	Creator	投稿者	제작자
+作者：	Creator: 	投稿者：	제작자:\u0020
+全年龄	General	全年齢	전체 이용가
+去授权	Grant permission	許可する	권한 허용
+已下载	Downloads	ダウンロード済み	다운로드됨
+已关注	Following	フォロー中	팔로우 중
+已提交	Submitted	送信済み	제출됨
+收藏夹	Collections	コレクション	보관함
+知道了	Got it	わかりました	알겠어요
+视频名	Title	動画名	영상 제목
++ 关注	+ Follow	+ フォロー	+ 팔로우
+‹ 列表	‹ List	‹ 一覧	‹ 목록
+‹  返回	‹ Back	‹ 戻る	‹ 뒤로
+上传任务	Uploads	アップロードタスク	업로드 작업
+上传视频	Upload video	動画をアップロード	영상 업로드
+不感兴趣	Not interested	興味なし	관심 없음
+以后再说	Later	後で	나중에
+倒序 ↓	Desc ↓	降順 ↓	내림차순 ↓
+关注了你	Follows you	あなたをフォロー中	나를 팔로우함
+兴趣管理	Interests	興味の管理	관심사 관리
+内容分级	Rating	レーティング	콘텐츠 등급
+分享链接	Share link	リンクを共有	링크 공유
+加载中…	Loading…	読み込み中…	불러오는 중…
+取消点赞	Unlike	いいねを取り消す	좋아요 취소
+可见范围	Visibility	公開範囲	공개 범위
+后台继续	Continue in background	バックグラウンドで続行	백그라운드에서 계속
+回到主页	Home	ホームに戻る	홈으로
+官网规则	Official rules	公式ルール	공식 규칙
+应用信息	App information	アプリ情報	앱 정보
+当前任务	Current task	現在のタスク	현재 작업
+我的关注	Following	フォロー中	내 팔로잉
+我的收藏	My collections	マイコレクション	내 보관함
+我的粉丝	Followers	フォロワー	내 팔로워
+手动重试	Retry manually	手動で再試行	수동 재시도
+推荐首屏	First recommendations	最初のおすすめ	첫 추천 화면
+提交投稿	Publish	投稿する	게시
+操作帮助	Help	操作ヘルプ	도움말
+操作引导	Gesture guide	操作ガイド	조작 안내
+收起回复	Hide replies	返信を折りたたむ	답글 접기
+暂不开启	Not now	今はしない	지금은 안 함
+暂无简介	No description	概要はありません	소개 없음
+暂无视频	No videos	動画はありません	영상 없음
+更新内容	What's new	更新内容	업데이트 내용
+最新在前	Newest first	新しい順	최신순
+最早在前	Oldest first	古い順	오래된순
+未知作者	Unknown creator	投稿者不明	알 수 없는 제작자
+未知日期	Unknown date	日付不明	날짜 알 수 없음
+本地文件	Local file	ローカルファイル	로컬 파일
+检查更新	Check for updates	更新を確認	업데이트 확인
+浏览历史	Watch history	視聴履歴	시청 기록
+画质\n	Quality\n	画質\n	화질\n
+留在此页	Stay here	このページに留まる	이 페이지에 머물기
+登录中…	Logging in…	ログイン中…	로그인 중…
+立即更新	Update now	今すぐ更新	지금 업데이트
+继续播放	Resume	再生を続ける	계속 재생
+翻译中…	Translating…	翻訳中…	번역 중…
+诊断信息	Diagnostics	診断情報	진단 정보
+读取中…	Loading…	読み込み中…	불러오는 중…
+跳转页面	Open page	ページを開く	페이지 열기
+返回检查	Go back and check	戻って確認	돌아가서 확인
+重试同步	Retry sync	同期を再試行	동기화 재시도
+重试提交	Retry submission	送信を再試行	제출 재시도
+页面菜单	Page menu	ページメニュー	페이지 메뉴
+顺序 ↑	Asc ↑	昇順 ↑	오름차순 ↑
+＋ 新建	＋ New	＋ 新規	＋ 새로 만들기
+App 内	In app	アプリ内	앱 내부
+\n链接：	\nLink: 	\nリンク：	\n링크:\u0020
+✓ 已关注	✓ Following	✓ フォロー中	✓ 팔로우 중
+不使用代理	No proxy	プロキシなし	프록시 사용 안 함
+不公开列出	Unlisted	限定公開	일부 공개
+不穿插老片	No classics	過去の作品を挿入しない	이전 작품 제외
+仅使用原词	Original terms only	入力した語のみ	원래 검색어만 사용
+先写点内容	Write something first	内容を入力してください	내용을 먼저 입력하세요
+关注数优先	Most followers	フォロワー数順	팔로워 수 우선
+创作者须知	Creator guide	投稿者ガイド	제작자 안내
+发布页跳转	Open publishing page	投稿ページを開く	게시 페이지 열기
+发现新版本	Update available	新しいバージョンがあります	새 버전 있음
+启用多语言	Multilingual matching	多言語検索を有効にする	다국어 매칭 사용
+已加入下载	Download queued	ダウンロードを追加しました	다운로드 대기열에 추가됨
+已退出登录	Logged out	ログアウトしました	로그아웃됨
+搜索关键词	Search terms	検索キーワード	검색어
+播放清晰度	Playback quality	再生画質	재생 화질
+数据与存储	Data and storage	データとストレージ	데이터 및 저장소
+暂停并返回	Pause and go back	一時停止して戻る	일시 정지 후 돌아가기
+未命名视频	Untitled video	無題の動画	제목 없는 영상
+正在提交…	Submitting…	送信中…	제출 중…
+设置已保存	Settings saved	設定を保存しました	설정 저장됨
+说点什么…	Write a comment…	コメントを入力…	댓글을 입력하세요…
+账号已切换	Account switched	アカウントを切り替えました	계정 전환됨
+链接已复制	Link copied	リンクをコピーしました	링크 복사됨
+面板已关闭	Panel closed	パネルを閉じました	패널 닫힘
+预算已更新	Budget updated	上限を更新しました	사용량 한도 변경됨
+默认清晰度	Default quality	既定の画質	기본 화질
++ 添加好友	+ Add friend	+ 友達に追加	+ 친구 추가
+GET 请求	GET request	GET リクエスト	GET 요청
+✓ 已是好友	✓ Friends	✓ 友達	✓ 친구
+上传日期未知	Upload date unknown	投稿日不明	업로드 날짜 알 수 없음
+上传正在进行	Upload in progress	アップロード中	업로드 진행 중
+不再推荐 #	Hide tag #	タグを非表示 #	태그 숨기기 #
+不再推荐 @	Hide creator @	投稿者を非表示 @	제작자 숨기기 @
+仅限好友观看	Only friends can watch	友達のみ視聴可能	친구만 시청 가능
+关注操作失败	Could not update follow status	フォロー操作に失敗しました	팔로우 변경 실패
+关闭操作引导	Close guide	ガイドを閉じる	조작 안내 닫기
+分享作者主页	Share creator profile	投稿者のプロフィールを共有	제작자 프로필 공유
+分享视频链接	Share video	動画リンクを共有	영상 링크 공유
+同步点赞记录	Sync likes	いいねを同期	좋아요 기록 동기화
+好友操作失败	Friend action failed	友達操作に失敗しました	친구 작업 실패
+导入旧版收藏	Import legacy favorites	旧お気に入りをインポート	이전 즐겨찾기 가져오기
+尚未选择视频	No video selected	動画が未選択です	선택한 영상 없음
+已下载的视频	Downloaded videos	ダウンロード済み動画	다운로드한 영상
+已点赞并收藏	Liked and saved	いいねと保存が完了しました	좋아요 및 저장 완료
+搜索本地列表	Search local list	ローカル一覧を検索	로컬 목록 검색
+播放操作引导	Playback guide	再生操作ガイド	재생 조작 안내
+无法读取视频	Cannot read video	動画を読み込めません	영상을 읽을 수 없음
+旧版本地收藏	Legacy local favorites	旧ローカルお気に入り	이전 로컬 즐겨찾기
+暂停当前上传	Pause current upload	現在のアップロードを一時停止	현재 업로드 일시 정지
+暂无上传视频	No uploaded videos	投稿した動画はありません	업로드한 영상 없음
+暂无提交记录	No submissions	投稿記録はありません	제출 기록 없음
+查看上传任务	View uploads	アップロードタスクを見る	업로드 작업 보기
+查看作者主页	View creator profile	投稿者のプロフィールを見る	제작자 프로필 보기
+查看横屏操作	Landscape guide	横画面の操作を見る	가로 화면 안내
+查看竖屏操作	Portrait guide	縦画面の操作を見る	세로 화면 안내
+没有观看权限	Access denied	視聴権限がありません	시청 권한 없음
+清除浏览历史	Clear watch history	視聴履歴を消去	시청 기록 삭제
+点赞同步失败	Like sync failed	いいねの同期に失敗しました	좋아요 동기화 실패
+用浏览器打开	Open in browser	ブラウザで開く	브라우저에서 열기
+缺少作者信息	Creator information unavailable	投稿者情報がありません	제작자 정보 없음
+缺少作者资料	Creator profile unavailable	投稿者のプロフィールがありません	제작자 프로필 없음
+视频加载失败	Video failed to load	動画の読み込みに失敗しました	영상 로딩 실패
+视频文件为空	Video file is empty	動画ファイルが空です	빈 영상 파일
+评论发送失败	Comment failed to send	コメントの送信に失敗しました	댓글 전송 실패
+请先选择视频	Select a video first	先に動画を選択してください	영상을 먼저 선택하세요
+ · 下滑继续	 · Scroll for more	 · スクロールして続きを表示	 · 스크롤하여 더 보기
+ · 离线缓存	 · Offline cache	 · オフラインキャッシュ	 · 오프라인 캐시
+%1$s 个赞	%1$s likes	%1$s いいね	좋아요 %1$s개
+%1$s 天前	%1$s days ago	%1$s 日前	%1$s일 전
+%1$s 粉丝	%1$s followers	フォロワー %1$s 人	팔로워 %1$s명
+HTTP 代理	HTTP proxy	HTTP プロキシ	HTTP 프록시
+POST 请求	POST request	POST リクエスト	POST 요청
+允许悬浮窗播放	Allow floating playback	フローティング再生を許可	플로팅 재생 허용
+减少推荐或屏蔽	Show less or block	おすすめを減らす・非表示	추천 줄이기 또는 차단
+创作者常见问题	Creator FAQ	投稿者向け FAQ	제작자 FAQ
+回复 %1$s	Reply to %1$s	%1$s に返信	%1$s에게 답글
+已跳过这条视频	Video skipped	この動画をスキップしました	영상 건너뜀
+按账号隔离兴趣	Separate interests by account	興味をアカウントごとに分離	계정별 관심사 분리
+正在加载预览…	Loading previews…	プレビューを読み込み中…	미리보기 로딩 중…
+正在重新连接…	Reconnecting…	再接続中…	다시 연결 중…
+浏览历史已清除	Watch history cleared	視聴履歴を消去しました	시청 기록 삭제됨
+画中画启动失败	Picture-in-picture failed	ピクチャーインピクチャーの起動に失敗しました	화면 속 화면 실행 실패
+画质\n%1$s	Quality\n%1$s	画質\n%1$s	화질\n%1$s
+系统画像已重置	Learned interests reset	学習した興味をリセットしました	학습된 관심사 초기화됨
+视频仍在处理中	Video is still processing	動画を処理中です	영상 처리 중
+评论 %1$s	Comments %1$s	コメント %1$s	댓글 %1$s
+该作者没有资料	No creator profile	投稿者の情報はありません	제작자 정보 없음
+该用户没有作品	This user has no videos	このユーザーには作品がありません	이 사용자의 작품 없음
+请检查投稿信息	Check submission details	投稿情報を確認してください	게시 정보를 확인하세요
+选择下一个视频	Select next video	次の動画を選択	다음 영상 선택
+选择下载清晰度	Download quality	ダウンロード画質を選択	다운로드 화질 선택
+重新加载当前流	Reload this feed	現在のフィードを再読み込み	현재 피드 새로고침
+%1$s 分钟前	%1$s minutes ago	%1$s 分前	%1$s분 전
+%1$s 小时前	%1$s hours ago	%1$s 時間前	%1$s시간 전
+%1$s 次播放	%1$s views	%1$s 回再生	조회수 %1$s회
+%1$s（原画）	%1$s (source)	%1$s（オリジナル）	%1$s (원본)
+Iwara 邮箱	Iwara email	Iwara メールアドレス	Iwara 이메일
+⏳ 取消好友申请	⏳ Cancel friend request	⏳ 友達申請を取り消す	⏳ 친구 요청 취소
+上次预缓存的推荐	Previously preloaded recommendations	前回先読みしたおすすめ	이전에 미리 불러온 추천
+下拉刷新搜索结果	Pull to refresh results	下に引いて検索結果を更新	아래로 당겨 검색 결과 새로고침
+仅显示已点赞视频	Liked videos only	いいねした動画のみ	좋아요한 영상만
+关闭不感兴趣选项	Close interest options	興味なしの選択肢を閉じる	관심 없음 옵션 닫기
+回复 @%1$s	Reply to @%1$s	@%1$s に返信	@%1$s에게 답글
+打不开 %1$s	Cannot open %1$s	%1$s を開けません	%1$s 열기 실패
+按钮区\n独立操作	Buttons\nSeparate actions	ボタンエリア\n個別に操作	버튼 영역\n개별 조작
+播放器已自动恢复	Player recovered	プレーヤーが復旧しました	플레이어 복구됨
+播放画面操作指引	Video gesture guide	再生画面の操作ガイド	영상 화면 조작 안내
+操作失败，请重试	Action failed. Try again.	操作に失敗しました。再試行してください	작업 실패. 다시 시도하세요
+旧版本地收藏 ›	Legacy favorites ›	旧ローカルお気に入り ›	이전 로컬 즐겨찾기 ›
+显示推荐调试信息	Show recommendation diagnostics	おすすめの診断情報を表示	추천 진단 정보 표시
+查看官网规则原文	Read official rules	公式ルールの原文を見る	공식 규칙 원문 보기
+横屏全屏操作引导	Landscape fullscreen guide	横向き全画面の操作ガイド	가로 전체 화면 조작 안내
+正在下载应用更新	Downloading update	アプリの更新をダウンロード中	앱 업데이트 다운로드 중
+正在发送，请稍候	Sending, please wait	送信中です。お待ちください	전송 중입니다. 잠시 기다리세요
+正在检查新版本…	Checking for updates…	新しいバージョンを確認中…	새 버전 확인 중…
+正在读取清晰度…	Loading quality options…	画質の選択肢を読み込み中…	화질 옵션 불러오는 중…
+登录 Iwara	Log in to Iwara	Iwara にログイン	Iwara 로그인
+确认未发布，重试	Not published — retry	未投稿を確認して再試行	미게시 확인 후 재시도
+视频缓存容量上限	Video cache limit	動画キャッシュの上限	영상 캐시 한도
+请输入邮箱和密码	Enter email and password	メールアドレスとパスワードを入力してください	이메일과 비밀번호를 입력하세요
+返回视频卡片列表	Back to video cards	動画カード一覧に戻る	영상 카드 목록으로
+还没有下载过视频	No downloads yet	ダウンロードした動画はありません	다운로드한 영상 없음
+重置系统推荐画像	Reset learned interests	学習した興味をリセット	학습된 추천 관심사 초기화
+ · 下滑继续加载	 · Scroll to load more	 · スクロールしてさらに読み込む	 · 스크롤하여 더 불러오기
+SOCKS5 代理	SOCKS5 proxy	SOCKS5 プロキシ	SOCKS5 프록시
+下载失败：%1$s	Download failed: %1$s	ダウンロード失敗：%1$s	다운로드 실패: %1$s
+作品 %1$s 条	%1$s videos	作品 %1$s 件	작품 %1$s개
+减少推荐：当前视频	Show this video less	この動画のおすすめを減らす	현재 영상 추천 줄이기
+备份超过 5 MB	Backup exceeds 5 MB	バックアップが 5 MB を超えています	백업이 5 MB를 초과함
+导入旧版收藏与兴趣	Import legacy favorites and interests	旧お気に入りと興味をインポート	이전 즐겨찾기 및 관심사 가져오기
+导出旧版收藏与兴趣	Export legacy favorites and interests	旧お気に入りと興味をエクスポート	이전 즐겨찾기 및 관심사 내보내기
+已减少此视频的推荐	This video will appear less	この動画のおすすめを減らしました	이 영상의 추천을 줄였습니다
+播放错误：%1$s	Playback error: %1$s	再生エラー：%1$s	재생 오류: %1$s
+暂停时显示播放三角	Show play button when paused	一時停止中に再生ボタンを表示	일시 정지 시 재생 버튼 표시
+最高可用 / 原画	Best available / Source	最高画質 / オリジナル	최고 화질 / 원본
+查看我的作品  ›	My videos  ›	自分の作品を見る  ›	내 작품 보기  ›
+正在加载作者作品…	Loading creator videos…	投稿者の作品を読み込み中…	제작자 작품 로딩 중…
+正在加载更多作品…	Loading more videos…	さらに作品を読み込み中…	추가 작품 로딩 중…
+正在导入旧版收藏…	Importing legacy favorites…	旧お気に入りをインポート中…	이전 즐겨찾기 가져오는 중…
+正在读取个人主页…	Loading profile…	プロフィールを読み込み中…	프로필 로딩 중…
+正在读取作者作品…	Loading creator videos…	投稿者の作品を読み込み中…	제작자 작품 로딩 중…
+正在读取作者资料…	Loading creator profile…	投稿者のプロフィールを読み込み中…	제작자 프로필 로딩 중…
+正在读取官网规则…	Loading official rules…	公式ルールを読み込み中…	공식 규칙 로딩 중…
+正在读取我的作品…	Loading my videos…	自分の作品を読み込み中…	내 작품 로딩 중…
+正在读取缓存占用…	Calculating cache usage…	キャッシュ使用量を確認中…	캐시 사용량 계산 중…
+没有可用的分享应用	No sharing app available	共有できるアプリがありません	공유할 앱 없음
+点一下画面暂停播放	Tap video to pause	画面をタップして一時停止	화면을 한 번 탭하여 일시 정지
+确认投稿结果后重试	Check publishing status before retrying	投稿結果を確認してから再試行	게시 결과 확인 후 재시도
+粉丝 %1$s 位	%1$s followers	フォロワー %1$s 人	팔로워 %1$s명
+视频已删除或不存在	Video deleted or unavailable	動画が削除されたか存在しません	영상이 삭제되었거나 없음
+视频渲染与压缩指南	Rendering and encoding guide	レンダリングと圧縮ガイド	렌더링 및 압축 안내
+该视频没有作者资料	Creator profile unavailable for this video	この動画の投稿者情報がありません	이 영상의 제작자 정보 없음
+读取失败，点击重试	Failed to load. Tap to retry.	読み込み失敗。タップして再試行	로딩 실패. 탭하여 재시도
+选择 MP4 视频	Select MP4 video	MP4 動画を選択	MP4 영상 선택
+长按上方：不感兴趣	Hold top: Not interested	上部を長押し：興味なし	상단 길게 누르기: 관심 없음
+前进	Forward	早送り	앞으로
+发送	Send	送信	전송
+后退	Back	巻き戻し	뒤로
+回复	Reply	返信	답글
+头像	Avatar	アバター	프로필 사진
+小窗	Floating window	小窓	작은 창
+分享到	Share to	共有先	공유 대상
+播放量	Views	再生数	조회수
+更多…	More…	その他…	더 보기…
+点赞数	Likes	いいね数	좋아요 수
+上传时间	Uploaded	投稿日	업로드 날짜
+下载视频	Download video	動画をダウンロード	영상 다운로드
+作者头像	Creator avatar	投稿者のアバター	제작자 프로필 사진
+分享作者	Share creator	投稿者を共有	제작자 공유
+复制链接	Copy link	リンクをコピー	링크 복사
+排除已看	Hide watched	視聴済みを除外	시청한 영상 제외
+添加好友	Add friend	友達に追加	친구 추가
+界面语言	App language	表示言語	앱 언어
+退出全屏	Exit fullscreen	全画面を終了	전체 화면 종료
+%.1f万	%.1f×10k	%.1f万	%.1f만
+%.1f 万	%.1f×10k	%.1f 万	%.1f만
+已关注用户	Following	フォロー中のユーザー	팔로우 중인 사용자
+画质\n最高	Quality\nBest	画質\n最高	화질\n최고
+视频缩略图	Video thumbnail	動画のサムネイル	영상 썸네일
+调整匹配词	Match terms	検索語を調整	매칭어 조정
+%1$s 赞	%1$s likes	%1$s いいね	좋아요 %1$s개
+2× 加速中	Playing at 2×	2 倍速再生中	2배속 재생 중
+‹ 作者作品	‹ Creator videos	‹ 投稿者の作品	‹ 제작자 작품
+‹ 搜索结果	‹ Search results	‹ 検索結果	‹ 검색 결과
+‹ 返回列表	‹ Back to list	‹ 一覧に戻る	‹ 목록으로
+\n推荐理由：%1$s	\nRecommended because: %1$s	\nおすすめの理由：%1$s	\n추천 이유: %1$s
+  ·  正在搜索…	  ·  Searching…	  ·  検索中…	  ·  검색 중…
+ · 本页 %1$s	 · %1$s on this page	 · このページ %1$s 件	 · 이 페이지 %1$s개
+ · 正在加载更多…	 · Loading more…	 · 追加読み込み中…	 · 추가 로딩 중…
+%1$s 个视频 ›	%1$s videos ›	動画 %1$s 件 ›	영상 %1$s개 ›
+AI 精准多语言匹配	AI precise multilingual matching	AI による正確な多言語検索	AI 정밀 다국어 매칭
+合并旧版收藏与兴趣？	Merge legacy favorites and interests?	旧お気に入りと興味を統合しますか？	이전 즐겨찾기와 관심사를 병합할까요?
+屏蔽作者 @%1$s	Block creator @%1$s	投稿者 @%1$s を非表示	제작자 @%1$s 차단
+屏蔽标签 #%1$s	Block tag #%1$s	タグ #%1$s を非表示	태그 #%1$s 차단
+已发送到 Iwara	Sent to Iwara	Iwara に送信しました	Iwara에 전송됨
+已导入 %1$s 条	Imported %1$s items	%1$s 件インポートしました	%1$s개 가져옴
+已屏蔽，搜索不受影响	Blocked in recommendations; search is unchanged	おすすめから除外しました。検索には影響しません	추천에서 차단됨. 검색에는 영향 없음
+当前版本 v%1$s	Current version v%1$s	現在のバージョン v%1$s	현재 버전 v%1$s
+搜索标题、作者或标签	Search titles, creators or tags	タイトル・投稿者・タグを検索	제목, 제작자 또는 태그 검색
+搜索标题、标签或作者	Search titles, tags or creators	タイトル・タグ・投稿者を検索	제목, 태그 또는 제작자 검색
+收藏，长按选择收藏夹	Save; hold to choose a collection	保存。長押しでコレクションを選択	저장. 길게 눌러 보관함 선택
+新版本  v%1$s	New version  v%1$s	新バージョン  v%1$s	새 버전  v%1$s
+本次登录的已提交记录	Submissions for this login	今回のログインでの投稿記録	현재 로그인에서 제출한 기록
+正在准备分享缩略图…	Preparing share thumbnail…	共有用サムネイルを準備中…	공유 썸네일 준비 중…
+正在打开官网注册页…	Opening official signup page…	公式登録ページを開いています…	공식 가입 페이지 여는 중…
+没有可打开链接的应用	No app can open this link	リンクを開けるアプリがありません	링크를 열 수 있는 앱 없음
+点赞、收藏并关注作者	Like, save and follow creator	いいね・保存・投稿者をフォロー	좋아요, 저장 및 제작자 팔로우
+端口，例如 7890	Port, e.g. 7890	ポート（例：7890）	포트 (예: 7890)
+请先登录 Iwara	Log in to Iwara first	先に Iwara にログインしてください	먼저 Iwara에 로그인하세요
+请选择 MP4 视频	Select an MP4 video	MP4 動画を選択してください	MP4 영상을 선택하세요
+这一页没有可播放视频	No playable videos on this page	このページに再生できる動画はありません	이 페이지에 재생 가능한 영상 없음
+长按下方：2× 加速	Hold bottom: 2× speed	下部を長押し：2 倍速	하단 길게 누르기: 2배속
+  ·  %1$s 条	  ·  %1$s results	  ·  %1$s 件	  ·  %1$s개
+  ·  下滑继续加载	  ·  Scroll for more	  ·  スクロールして続きを表示	  ·  스크롤하여 더 보기
+  ·  没有找到结果	  ·  No results	  ·  結果がありません	  ·  검색 결과 없음
+ · 已排除看过的视频	 · Watched videos excluded	 · 視聴済みを除外	 · 시청한 영상 제외됨
+ · 按已加载结果排序	 · Sorting loaded results	 · 読み込み済みの結果を並べ替え	 · 불러온 결과 기준 정렬
+%1$s · 下拉重试	%1$s · Pull to retry	%1$s · 下に引いて再試行	%1$s · 아래로 당겨 재시도
+%1$s · 显示原文	%1$s · Show original	%1$s · 原文を表示	%1$s · 원문 보기
+AI 正在核对匹配词…	AI is checking matching terms…	AI が検索語を確認中…	AI가 매칭어 확인 중…
+下载创建失败：%1$s	Could not start download: %1$s	ダウンロードを開始できません：%1$s	다운로드 시작 실패: %1$s
+作品加载失败，点击重试	Videos failed to load. Tap to retry.	作品を読み込めません。タップして再試行	작품 로딩 실패. 탭하여 재시도
+作品加载失败：%1$s	Videos failed to load: %1$s	作品の読み込み失敗：%1$s	작품 로딩 실패: %1$s
+刷新推荐时排除已看视频	Exclude watched videos on refresh	更新時に視聴済み動画を除外	추천 새로고침 시 시청한 영상 제외
+原文 · 查看中文翻译	Original · Translate to Chinese	原文 · 中国語訳を表示	원문 · 중국어 번역 보기
+已确认上次投稿未发布？	Confirmed the previous upload was not published?	前回の投稿が未公開であることを確認しましたか？	이전 게시물이 게시되지 않았음을 확인했나요?
+打开 Iwara 视频	Open Iwara video	Iwara 動画を開く	Iwara 영상 열기
+推荐加载失败\n%1$s	Recommendations failed to load\n%1$s	おすすめを読み込めませんでした\n%1$s	추천 로딩 실패\n%1$s
+推荐加载失败：%1$s	Recommendations failed to load: %1$s	おすすめの読み込み失敗：%1$s	추천 로딩 실패: %1$s
+搜索 Iwara 视频	Search Iwara videos	Iwara 動画を検索	Iwara 영상 검색
+播放失败 · 点击重试	Playback failed · Tap to retry	再生失敗 · タップして再試行	재생 실패 · 탭하여 재시도
+播放完毕自动进入下一条	Play next video automatically	再生終了後に次の動画へ	재생이 끝나면 자동으로 다음 영상 재생
+收藏同步失败：%1$s	Collection sync failed: %1$s	コレクションの同期失敗：%1$s	보관함 동기화 실패: %1$s
+暂无预览 · 下拉重试	No preview · Pull to retry	プレビューなし · 下に引いて再試行	미리보기 없음 · 아래로 당겨 재시도
+更新下载失败：%1$s	Update download failed: %1$s	更新のダウンロード失敗：%1$s	업데이트 다운로드 실패: %1$s
+查看播放性能与推荐诊断	Playback and recommendation diagnostics	再生性能とおすすめの診断を見る	재생 성능 및 추천 진단 보기
+检查更新失败：%1$s	Update check failed: %1$s	更新の確認失敗：%1$s	업데이트 확인 실패: %1$s
+每 8 条穿插一条老片	One classic every 8 videos	8 本ごとに過去の作品を 1 本	8개마다 이전 작품 1개
+每日移动网络预加载预算	Daily mobile preload budget	モバイル回線の先読み日次上限	일일 모바일 미리 불러오기 한도
+注册 Iwara 账号	Create Iwara account	Iwara アカウントを登録	Iwara 계정 가입
+清理未在播放的视频缓存	Clear unused video cache	再生中以外の動画キャッシュを消去	재생 중이 아닌 영상 캐시 정리
+简介读取失败：%1$s	Description failed to load: %1$s	概要の読み込み失敗：%1$s	소개 로딩 실패: %1$s
+评论加载失败：%1$s	Comments failed to load: %1$s	コメントの読み込み失敗：%1$s	댓글 로딩 실패: %1$s
+还没有评论，来说第一句	No comments yet. Be the first!	まだコメントがありません。最初のコメントをどうぞ	아직 댓글이 없어요. 첫 댓글을 남겨보세요
+退出 Iwara 登录	Log out of Iwara	Iwara からログアウト	Iwara 로그아웃
+\n%1$s · 查看作品	\n%1$s · View video	\n%1$s · 作品を見る	\n%1$s · 작품 보기
+  ·  正在加载更多…	  ·  Loading more…	  ·  追加読み込み中…	  ·  추가 로딩 중…
+ · %1$s 个可播放	 · %1$s playable	 · %1$s 件再生可能	 · %1$s개 재생 가능
+API Key / 密钥	API key	API キー	API 키
+修复问题并改进使用体验。	Bug fixes and usability improvements.	不具合修正と使いやすさの改善。	버그 수정 및 사용성 개선.
+共 %1$s 条回复 ›	%1$s replies ›	返信 %1$s 件 ›	답글 %1$s개 ›
+关于 IwaraFlow	About IwaraFlow	IwaraFlow について	IwaraFlow 정보
+切到后台时自动进入画中画	Picture-in-picture when leaving app	バックグラウンドで自動画中画	백그라운드 전환 시 자동 화면 속 화면
+取消收藏，长按管理收藏夹	Unsave; hold to manage collections	保存を解除。長押しでコレクションを管理	저장 취소. 길게 눌러 보관함 관리
+已关注 %1$s 位作者	Following %1$s creators	%1$s 人の投稿者をフォロー中	제작자 %1$s명 팔로우 중
+已加入系统下载：%1$s	System download started: %1$s	システムのダウンロードに追加：%1$s	시스템 다운로드에 추가됨: %1$s
+已合并 %1$s 条记录	Merged %1$s records	%1$s 件の記録を統合しました	기록 %1$s개 병합됨
+打开上传页 / 继续任务	Open upload page / Resume	アップロード画面 / 再開	업로드 페이지 열기 / 계속
+按账号隔离历史与旧版收藏	Separate history and legacy favorites by account	履歴と旧お気に入りをアカウントごとに分離	계정별 기록 및 이전 즐겨찾기 분리
+暂无视频，下拉刷新后重试	No videos. Pull to refresh.	動画がありません。下に引いて更新してください	영상 없음. 아래로 당겨 새로고침하세요
+更新包下载失败：%1$s	Update package download failed: %1$s	更新パッケージのダウンロード失敗：%1$s	업데이트 패키지 다운로드 실패: %1$s
+每 12 条穿插一条老片	One classic every 12 videos	12 本ごとに過去の作品を 1 本	12개마다 이전 작품 1개
+每 16 条穿插一条老片	One classic every 16 videos	16 本ごとに過去の作品を 1 本	16개마다 이전 작품 1개
+每 24 条穿插一条老片	One classic every 24 videos	24 本ごとに過去の作品を 1 本	24개마다 이전 작품 1개
+没有找到能接收链接的应用	No app available to receive links	リンクを受け取るアプリがありません	링크를 받을 수 있는 앱 없음
+清晰度获取失败：%1$s	Could not load quality options: %1$s	画質の取得失敗：%1$s	화질 옵션 로딩 실패: %1$s
+源语言字段路径（可留空）	Source language field path (optional)	原文言語のフィールドパス（省略可）	원문 언어 필드 경로 (선택)
+画中画启动失败：%1$s	Picture-in-picture failed: %1$s	画中画の起動失敗：%1$s	화면 속 화면 실행 실패: %1$s
+这个作者没有可分享的资料	No profile to share for this creator	共有できる投稿者の情報がありません	이 제작자의 공유 가능한 정보 없음
+这个视频没有可分享的链接	No shareable link for this video	共有できる動画リンクがありません	이 영상의 공유 가능한 링크 없음
+个人主页读取失败，点击重试	Profile failed to load. Tap to retry.	プロフィールを読み込めません。タップして再試行	프로필 로딩 실패. 탭하여 재시도
+作者资料加载失败：%1$s	Creator profile failed to load: %1$s	投稿者情報の読み込み失敗：%1$s	제작자 정보 로딩 실패: %1$s
+例如 MMD、标签、作者名	e.g. MMD, tags or creator names	例：MMD・タグ・投稿者名	예: MMD, 태그, 제작자 이름
+全屏评论，长按发送弹幕评论	Fullscreen comments; hold to send danmaku	全画面コメント。長押しで弾幕を送信	전체 화면 댓글. 길게 눌러 탄막 보내기
+分享视频加载失败：%1$s	Shared video failed to load: %1$s	共有動画の読み込み失敗：%1$s	공유 영상 로딩 실패: %1$s
+回复 @%1$s：%2$s	Reply to @%1$s: %2$s	@%1$s に返信：%2$s	@%1$s에게 답글: %2$s
+打开 Iwara 作者主页	Open Iwara creator profile	Iwara 投稿者プロフィールを開く	Iwara 제작자 프로필 열기
+无法打开安装程序：%1$s	Cannot open installer: %1$s	インストーラーを開けません：%1$s	설치 프로그램 열기 실패: %1$s
+更新包开始下载 v%1$s	Downloading update v%1$s	更新 v%1$s をダウンロード開始	업데이트 v%1$s 다운로드 시작
+网络服务推广链接 %1$s	Network service affiliate link %1$s	ネットワークサービスの紹介リンク %1$s	네트워크 서비스 제휴 링크 %1$s
+网络稳定时提前加载后续视频	Preload next videos on stable networks	ネットワークが安定している時に次の動画を先読み	네트워크 안정 시 다음 영상 미리 불러오기
+请先在主页登录 Iwara	Log in to Iwara from Home first	先にホームで Iwara にログインしてください	먼저 홈에서 Iwara에 로그인하세요
+读取作者资料失败：%1$s	Creator profile failed to load: %1$s	投稿者情報の読み込み失敗：%1$s	제작자 정보 로딩 실패: %1$s
+  ·  下滑或点击继续加载	  ·  Scroll or tap for more	  ·  スクロールまたはタップでさらに読み込む	  ·  스크롤 또는 탭하여 더 보기
+  ·  加载失败：%1$s	  ·  Failed to load: %1$s	  ·  読み込み失敗：%1$s	  ·  로딩 실패: %1$s
+%1$s；备用通道：%2$s	%1$s; fallback: %2$s	%1$s；代替経路：%2$s	%1$s; 대체 경로: %2$s
+关键词 / Iwara 链接	Keywords / Iwara link	キーワード / Iwara リンク	검색어 / Iwara 링크
+前进 / 后退 %1$s 秒	Skip forward / back %1$s seconds	%1$s 秒送り / 戻し	%1$s초 앞으로 / 뒤로
+已安排后台清理，当前视频保留	Cleanup scheduled; current video is kept	バックグラウンドで消去します。再生中の動画は保持されます	백그라운드 정리 예약됨. 현재 영상은 유지
+已完成三连：点赞、收藏、关注	Liked, saved and followed	いいね・保存・フォロー完了	좋아요, 저장 및 팔로우 완료
+当前已是最新版本 v%1$s	You're up to date: v%1$s	最新バージョンです：v%1$s	최신 버전입니다: v%1$s
+查看 Iwara 规则  ↗	Iwara rules  ↗	Iwara のルール  ↗	Iwara 규칙 보기  ↗
+翻译失败：%1$s · 重试	Translation failed: %1$s · Retry	翻訳失敗：%1$s · 再試行	번역 실패: %1$s · 재시도
+视频不能超过 600 MiB	Video must be under 600 MiB	動画は 600 MiB 以下にしてください	영상은 600 MiB 이하여야 합니다
+请授予存储权限后再次点击下载	Grant storage permission, then retry download	ストレージ権限を許可して再度ダウンロードしてください	저장소 권한 허용 후 다시 다운로드하세요
+账号已切换，请重新打开收藏夹	Account changed. Reopen the collection.	アカウントが変わりました。コレクションを開き直してください	계정이 변경되었습니다. 보관함을 다시 여세요
+  ·  正在后台检查可播放性	  ·  Checking playback availability	  ·  再生可否を確認中	  ·  재생 가능 여부 확인 중
+%1$s列表加载失败：%2$s	%1$s list failed to load: %2$s	%1$s 一覧の読み込み失敗：%2$s	%1$s 목록 로딩 실패: %2$s
+主机，例如 127.0.0.1	Host, e.g. 127.0.0.1	ホスト（例：127.0.0.1）	호스트 (예: 127.0.0.1)
+打开网络服务推广链接 %1$s	Open network affiliate link %1$s	ネットワークサービスの紹介リンク %1$s を開く	네트워크 제휴 링크 %1$s 열기
+缩略图暂不可用，已改为分享链接	Thumbnail unavailable; sharing the link instead	サムネイルを取得できないためリンクを共有します	썸네일을 사용할 수 없어 링크를 공유합니다
+补充该关键词的别名，用逗号分隔	Add equivalent names, separated by commas	同義の別名をコンマで区切って追加	동일한 의미의 별칭을 쉼표로 구분하여 추가
+  ·  暂无匹配，点击继续搜索	  ·  No matches yet; tap to keep searching	  ·  該当なし。タップして検索を続ける	  ·  아직 일치 항목 없음. 탭하여 계속 검색
+%1$s，%2$s，%3$s 赞	%1$s, %2$s, %3$s likes	%1$s、%2$s、%3$s いいね	%1$s, %2$s, 좋아요 %3$s개
+已切换兴趣范围，返回推荐页后生效	Interest scope changed; applies on returning to recommendations	興味の範囲を切り替えました。おすすめに戻ると反映されます	관심사 범위 변경됨. 추천 화면으로 돌아가면 적용됩니다
+已点赞并收藏，关注失败：%1$s	Liked and saved; follow failed: %1$s	いいねと保存は完了。フォロー失敗：%1$s	좋아요 및 저장 완료. 팔로우 실패: %1$s
+已点赞并收藏，自己的作品无需关注	Liked and saved; this is your own video	いいねと保存が完了。自分の作品のためフォローは不要です	좋아요 및 저장 완료. 자신의 작품은 팔로우할 필요가 없습니다
+当前视频播放源刷新失败：%1$s	Could not refresh video source: %1$s	再生ソースの更新失敗：%1$s	현재 영상 소스 갱신 실패: %1$s
+当前视频播放源解析失败：%1$s	Could not resolve video source: %1$s	再生ソースの解析失敗：%1$s	현재 영상 소스 분석 실패: %1$s
+我已阅读并同意 Iwara 规则	I have read and accept the Iwara rules	Iwara のルールを読み、同意します	Iwara 규칙을 읽고 동의합니다
+正在同步 Iwara 点赞记录…	Syncing Iwara likes…	Iwara のいいねを同期中…	Iwara 좋아요 기록 동기화 중…
+正在读取 Iwara 关注列表…	Loading Iwara following…	Iwara のフォロー一覧を読み込み中…	Iwara 팔로잉 목록 로딩 중…
+正在读取 Iwara 粉丝列表…	Loading Iwara followers…	Iwara のフォロワーを読み込み中…	Iwara 팔로워 목록 로딩 중…
+请输入关键词或 Iwara 链接	Enter keywords or an Iwara link	キーワードまたは Iwara リンクを入力してください	검색어 또는 Iwara 링크를 입력하세요
+  ·  %1$s 条当前不可播放	  ·  %1$s currently unavailable	  ·  現在 %1$s 件再生不可	  ·  현재 %1$s개 재생 불가
+  ·  没有找到带这个标签的视频	  ·  No videos with this tag	  ·  このタグの動画はありません	  ·  이 태그의 영상 없음
+← 左滑快退     右滑快进 →	← Swipe left to rewind     Swipe right to seek →	← 左スワイプで巻き戻し     右で早送り →	← 왼쪽으로 밀어 되감기     오른쪽으로 밀어 빨리감기 →
+⊘\n长按上方空白画面\n不感兴趣选项	⊘\nHold the empty top area\nInterest options	⊘\n上部の空白部分を長押し\n興味なしの選択肢	⊘\n상단 빈 화면 길게 누르기\n관심 없음 옵션
+中间 1.5 秒：点赞＋收藏＋关注	Hold center 1.5s: Like + Save + Follow	中央を 1.5 秒長押し：いいね＋保存＋フォロー	중앙 1.5초: 좋아요＋저장＋팔로우
+作品 %1$s 条 · 正在加载…	%1$s videos · Loading…	作品 %1$s 件 · 読み込み中…	작품 %1$s개 · 로딩 중…
+发到 Iwara，和网页端评论一样	Posted to Iwara, like a website comment	Web のコメントと同様に Iwara に送信されます	웹 댓글과 동일하게 Iwara에 게시됩니다
+发送弹幕评论（同步到 Iwara）	Send danmaku comment (also posted to Iwara)	弾幕コメントを送信（Iwara にも投稿）	탄막 댓글 보내기 (Iwara에도 게시)
+移动 / 计量网络也预加载后续视频	Preload on mobile / metered networks too	モバイル・従量制回線でも先読みする	모바일 / 종량제 네트워크에서도 미리 불러오기
+评论，长按 0.5 秒发送弹幕评论	Comments; hold 0.5s to send danmaku	コメント。0.5 秒長押しで弾幕を送信	댓글. 0.5초 길게 눌러 탄막 보내기
+%1$s · 后续加载失败：%2$s	%1$s · More results failed: %2$s	%1$s · 続きの読み込み失敗：%2$s	%1$s · 추가 로딩 실패: %2$s
+不记录浏览与推荐行为（收藏仍可保存）	Don't record viewing or recommendation activity (saving still works)	閲覧・おすすめの行動を記録しない（保存は可能）	시청 및 추천 활동 기록 안 함 (저장은 가능)
+匹配词：同组任一，不同关键词全部匹配	Match any alias per group; all groups required	同じグループは別名のいずれか、異なるグループはすべて一致	그룹 내 별칭 중 하나, 모든 검색어 그룹은 일치해야 함
+已点赞并收藏，作者关注操作正在处理中	Liked and saved; follow request is in progress	いいねと保存が完了。フォロー処理中です	좋아요 및 저장 완료. 팔로우 요청 처리 중
+显示本地缓存 · 同步失败：%1$s	Showing local cache · Sync failed: %1$s	ローカルキャッシュを表示 · 同期失敗：%1$s	로컬 캐시 표시 · 동기화 실패: %1$s
+暂停时左下角的两个按钮一次跳多少秒。	How far the bottom-left skip buttons seek.	左下の送り・戻しボタンで移動する秒数。	왼쪽 하단 이동 버튼으로 건너뛸 시간입니다.
+检查新版本、查看更新说明并下载安装包。	Check releases, read notes and download updates.	新バージョン・更新内容を確認し、更新をダウンロードします。	새 버전과 변경 사항을 확인하고 업데이트를 다운로드합니다.
+版本、作者和 GitHub 项目地址。	Version, author and GitHub project.	バージョン・作者・GitHub プロジェクト。	버전, 개발자 및 GitHub 프로젝트.
+AI 精准匹配需先在设置配置 AI 翻译	Configure AI translation in Settings for precise matching	正確な AI 検索には設定で AI 翻訳を構成してください	정밀 매칭을 사용하려면 설정에서 AI 번역을 구성하세요
+AI 建议匹配词，请在调整匹配词中核对	AI-suggested terms; review them in Match terms	AI が提案した語です。「検索語を調整」で確認してください	AI 추천 검색어입니다. 매칭어 조정에서 확인하세요
+更新包开始下载，完成后会自动打开安装界面	Downloading update; installer opens when ready	更新をダウンロード中です。完了後にインストーラーを開きます	업데이트 다운로드 중. 완료 후 설치 화면이 열립니다
+视频列表加载失败\n%1$s\n下拉刷新重试	Video list failed to load\n%1$s\nPull to retry	動画一覧の読み込み失敗\n%1$s\n下に引いて再試行	영상 목록 로딩 실패\n%1$s\n아래로 당겨 재시도
+%1$s，%2$s 个视频，长按管理收藏夹	%1$s, %2$s videos; hold to manage	%1$s、動画 %2$s 件。長押しで管理	%1$s, 영상 %2$s개. 길게 눌러 관리
+「最新 / 流行 / 人气」也排除已看视频	Hide watched in Latest / Trending / Popular too	最新・トレンド・人気でも視聴済みを除外	최신 / 트렌드 / 인기에서도 시청한 영상 제외
+上次发布中断，请先查看我的作品确认投稿结果	Previous publish was interrupted. Check My videos first.	前回の投稿が中断されました。先に自分の作品で確認してください。	이전 게시가 중단되었습니다. 내 작품에서 결과를 먼저 확인하세요.
+共 %1$s 个 · 已加载 %2$s 个	%1$s total · %2$s loaded	全 %1$s 件 · %2$s 件読み込み済み	총 %1$s개 · %2$s개 로딩됨
+共 %1$s 条 · 已加载 %2$s 条	%1$s total · %2$s loaded	全 %1$s 件 · %2$s 件読み込み済み	총 %1$s개 · %2$s개 로딩됨
+已切换范围，重新打开列表后生效；原数据保留	Scope changed. Reopen the list; original data is kept.	範囲を変更しました。一覧を開き直すと反映されます。元のデータは保持されます。	범위가 변경되었습니다. 목록을 다시 열면 적용되며 기존 데이터는 유지됩니다.
+打开复制的 Iwara 链接，长按关闭提示	Open copied Iwara link; hold to dismiss	コピーした Iwara リンクを開く。長押しで閉じる	복사한 Iwara 링크 열기. 길게 눌러 닫기
+未能保存不感兴趣设置，请检查存储空间后重试	Could not save interest choice. Check storage and retry.	興味の設定を保存できません。空き容量を確認して再試行してください。	관심사 설정 저장 실패. 저장 공간을 확인하고 다시 시도하세요.
+本地文件播放失败（%1$s），改为在线播放	Local playback failed (%1$s); switching to streaming	ローカル再生失敗（%1$s）。ストリーミングに切り替えます	로컬 재생 실패 (%1$s). 스트리밍으로 전환합니다
+请先返回主页登录 Iwara，再来上传视频	Log in to Iwara from Home before uploading	ホームで Iwara にログインしてからアップロードしてください	홈에서 Iwara에 로그인한 후 업로드하세요
+三连\n按住中间 1.5 秒\n点赞＋收藏＋关注	Triple action\nHold center for 1.5s\nLike + Save + Follow	三連操作\n中央を 1.5 秒長押し\nいいね＋保存＋フォロー	3종 동작\n중앙을 1.5초 길게 누르기\n좋아요＋저장＋팔로우
+三连\n按住中间 1.5 秒\n点赞＋收藏＋关注\n提前松开即可取消	Triple action\nHold center for 1.5s\nLike + Save + Follow\nRelease early to cancel	三連操作\n中央を 1.5 秒長押し\nいいね＋保存＋フォロー\n途中で離すとキャンセル	3종 동작\n중앙을 1.5초 길게 누르기\n좋아요＋저장＋팔로우\n미리 떼면 취소
+加载失败，可下拉刷新或继续滑动重试：%1$s	Load failed. Pull to refresh or keep scrolling: %1$s	読み込み失敗。下に引いて更新するかスクロールして再試行：%1$s	로딩 실패. 아래로 당겨 새로고침하거나 계속 스크롤하세요: %1$s
+打开 IwaraFlow GitHub 项目	Open IwaraFlow on GitHub	IwaraFlow の GitHub を開く	IwaraFlow GitHub 프로젝트 열기
+请输入有效的 Iwara 视频或作者主页链接	Enter a valid Iwara video or profile link	有効な Iwara 動画またはプロフィールのリンクを入力してください	유효한 Iwara 영상 또는 프로필 링크를 입력하세요
+  ·  %1$s 播放  ·  %2$s 赞	  ·  %1$s views  ·  %2$s likes	  ·  %1$s 回再生  ·  %2$s いいね	  ·  조회 %1$s회  ·  좋아요 %2$s개
+%1$s 播放  ·  %2$s 赞\n上传于 	%1$s views  ·  %2$s likes\nUploaded 	%1$s 回再生  ·  %2$s いいね\n投稿日 	조회 %1$s회  ·  좋아요 %2$s개\n업로드\u0020
+≫\n长按%1$s\n2× 加速\n松开恢复正常速度	≫\nHold %1$s\n2× speed\nRelease to restore speed	≫\n%1$sを長押し\n2 倍速\n離すと元の速度に戻る	≫\n%1$s 길게 누르기\n2배속\n손을 떼면 원래 속도로
+≫\n长按下方空白画面\n2× 加速 · 松开恢复	≫\nHold the empty bottom area\n2× speed · Release to restore	≫\n下部の空白部分を長押し\n2 倍速 · 離すと戻る	≫\n하단 빈 화면 길게 누르기\n2배속 · 떼면 복원
+⊘\n长按%1$s\n不感兴趣\n选择视频、作者或标签	⊘\nHold %1$s\nNot interested\nChoose video, creator or tag	⊘\n%1$sを長押し\n興味なし\n動画・投稿者・タグを選択	⊘\n%1$s 길게 누르기\n관심 없음\n영상, 제작자 또는 태그 선택
+会清除系统学习和推荐统计，手动兴趣与屏蔽保留。	Clears learned interests and recommendation statistics. Manual interests and blocks are kept.	学習した興味とおすすめ統計を消去します。手動の興味設定と非表示は保持されます。	학습된 관심사와 추천 통계를 삭제합니다. 수동 관심사와 차단은 유지됩니다.
+已同步 %1$s 条点赞记录，刷新推荐即可生效	Synced %1$s likes. Refresh recommendations to apply.	いいね %1$s 件を同期しました。おすすめを更新すると反映されます。	좋아요 %1$s개 동기화됨. 추천을 새로고침하면 적용됩니다.
+打开应用时自动识别剪贴板中的 Iwara 链接	Detect copied Iwara links when opening the app	起動時にクリップボードの Iwara リンクを認識	앱을 열 때 클립보드의 Iwara 링크 감지
+暂无收藏夹 · 点击新建 · 旧版收藏自动同步	No collections · Tap New · Legacy favorites sync automatically	コレクションなし · 新規作成 · 旧お気に入りは自動同期	보관함 없음 · 새로 만들기 · 이전 즐겨찾기 자동 동기화
+标题：%1$s\n作者：%2$s\n链接：%3$s	Title: %1$s\nCreator: %2$s\nLink: %3$s	タイトル：%1$s\n投稿者：%2$s\nリンク：%3$s	제목: %1$s\n제작자: %2$s\n링크: %3$s
+已识别 Iwara 链接 · 点击打开，长按关闭	Iwara link detected · Tap to open, hold to dismiss	Iwara リンクを検出 · タップで開く、長押しで閉じる	Iwara 링크 감지됨 · 탭하여 열기, 길게 눌러 닫기
+把在网页端点过的赞补进“已看”，刷新推荐后生效。	Add website likes to watched history. Applies after refreshing recommendations.	Web でいいねした動画を視聴済みに追加します。おすすめの更新後に反映されます。	웹에서 좋아요한 영상을 시청 기록에 추가합니다. 추천 새로고침 후 적용됩니다.
+  ·  %1$s 条 · 后续加载失败：%2$s	  ·  %1$s results · More failed: %2$s	  ·  %1$s 件 · 続きの読み込み失敗：%2$s	  ·  %1$s개 · 추가 로딩 실패: %2$s
+会清除本机浏览记录与本机已看标记，收藏和兴趣保留。	Clears local history and watched markers. Collections and interests are kept.	端末の視聴履歴と視聴済みマークを消去します。コレクションと興味は保持されます。	기기의 시청 기록과 시청 표시를 삭제합니다. 보관함과 관심사는 유지됩니다.
+区域（Azure，例如 eastasia，可留空）	Region (Azure, e.g. eastasia; optional)	リージョン（Azure、例：eastasia、省略可）	지역 (Azure, 예: eastasia, 선택)
+管理缓存、旧版收藏和兴趣备份，清理历史及推荐画像。	Manage cache, legacy favorites and interest backups; clear history and learned interests.	キャッシュ・旧お気に入り・興味のバックアップを管理し、履歴と学習データを消去します。	캐시, 이전 즐겨찾기 및 관심사 백업을 관리하고 기록과 추천 프로필을 정리합니다.
+请先查看我的作品。只有确认没有该投稿后再重新提交。	Check My videos first. Resubmit only after confirming it was not published.	先に自分の作品を確認し、投稿されていない場合のみ再送信してください。	내 작품을 먼저 확인하세요. 게시되지 않았음을 확인한 후에만 다시 제출하세요.
+与 Iwara 官方播放列表同步 · 长按收藏夹管理	Synced with Iwara playlists · Hold a collection to manage	Iwara 公式プレイリストと同期 · 長押しで管理	Iwara 공식 재생목록과 동기화 · 길게 눌러 관리
+代理主机或端口不完整，请修正后保存；本次设置尚未保存	Invalid proxy host or port. Correct it before saving; no changes saved.	プロキシのホストまたはポートを修正してから保存してください。変更は未保存です。	프록시 호스트 또는 포트를 수정하세요. 변경 사항이 저장되지 않았습니다.
+查看横屏 / 竖屏的三段长按、三连、加速和播放手势。	View portrait and landscape hold zones, triple actions, speed and playback gestures.	縦・横画面の長押しエリア、三連操作、倍速、再生ジェスチャーを確認します。	세로 및 가로 화면의 길게 누르기 영역, 3종 동작, 배속 및 재생 제스처를 확인합니다.
+%1$s 个收藏夹 · 已与 Iwara 同步 · 公开	%1$s collections · Synced with Iwara · Public	コレクション %1$s 件 · Iwara と同期済み · 公開	보관함 %1$s개 · Iwara 동기화됨 · 공개
+标签（逗号分隔，例如 animation, music）	Tags (comma-separated, e.g. animation, music)	タグ（コンマ区切り、例：animation, music）	태그 (쉼표로 구분, 예: animation, music)
+请允许 IwaraFlow 安装未知应用，然后返回继续安装	Allow IwaraFlow to install apps, then return to continue	IwaraFlow に不明なアプリのインストールを許可し、戻って続行してください	IwaraFlow의 알 수 없는 앱 설치를 허용한 후 돌아오세요
+默认中文。保存后切换界面语言；不改变简介、评论的翻译设置。	Chinese by default. Saving changes the UI language; description and comment translation settings stay the same.	既定は中国語です。保存すると表示言語が変わります。概要・コメントの翻訳設定は変更されません。	기본 언어는 중국어입니다. 저장하면 UI 언어가 바뀌며 소개 및 댓글 번역 설정은 유지됩니다.
+使用当前 Iwara 账号投稿，文件与信息将直接提交至官网。	Uploads use your current Iwara account and go directly to the official site.	現在の Iwara アカウントでファイルと情報を公式サイトへ直接送信します。	현재 Iwara 계정으로 파일과 정보를 공식 사이트에 직접 제출합니다.
+输入关键词搜索，或粘贴 Iwara 视频 / 作者链接后打开	Search keywords or paste an Iwara video / creator link	キーワードを検索、または Iwara 動画・投稿者のリンクを貼り付けて開く	검색어를 입력하거나 Iwara 영상 / 제작자 링크를 붙여넣으세요
+旧版收藏与兴趣已导出（不包含官方播放列表、登录密钥和浏览历史）	Legacy favorites and interests exported (no official playlists, credentials or history)	旧お気に入りと興味をエクスポートしました（公式リスト・認証情報・視聴履歴は含みません）	이전 즐겨찾기와 관심사 내보내기 완료 (공식 재생목록, 인증 정보, 시청 기록 제외)
+连不上 GitHub，请检查代理 / VPN 是否对本应用生效	Cannot reach GitHub. Check that your proxy / VPN covers this app.	GitHub に接続できません。このアプリでプロキシ・VPN が有効か確認してください。	GitHub에 연결할 수 없습니다. 프록시 / VPN이 이 앱에 적용되는지 확인하세요.
+搜索视频名、标签、作者名，或粘贴 Iwara 视频 / 作者链接	Search titles, tags, creators, or paste an Iwara link	動画名・タグ・投稿者名を検索、または Iwara リンクを貼り付ける	영상 제목, 태그, 제작자를 검색하거나 Iwara 링크를 붙여넣으세요
+请求地址模板，{text} 是原文、{target} 是目标语言	URL template: {text} is source text, {target} is target language	URL テンプレート：{text} は原文、{target} は翻訳先言語	URL 템플릿: {text}는 원문, {target}은 대상 언어
+最近的异常、退出原因和加载线索、推荐质量指标，只存在本机，不会上传。	Recent errors, exit reasons, loading clues and recommendation metrics stay on this device.	最近のエラー、終了理由、読み込み情報、おすすめ指標は端末内にのみ保存されます。	최근 오류, 종료 원인, 로딩 정보 및 추천 지표는 기기에만 저장되며 업로드되지 않습니다.
+请求头，一行一个：Authorization: Bearer xxx	Headers, one per line: Authorization: Bearer xxx	ヘッダー（1 行に 1 件）：Authorization: Bearer xxx	요청 헤더 (한 줄에 하나): Authorization: Bearer xxx
+只需填 %1$s 的 API Key。接口 %2$s，模型 %3$s。	Enter your %1$s API key. Endpoint: %2$s; model: %3$s.	%1$s の API キーを入力してください。接続先：%2$s、モデル：%3$s。	%1$s API 키를 입력하세요. 엔드포인트: %2$s, 모델: %3$s.
+在官网页面填写邮箱完成注册，到邮箱确认并设好密码后，回到登录窗口登录。	Register on the official page, verify your email and set a password, then return to log in.	公式ページで登録し、メール認証とパスワード設定を済ませてからログイン画面に戻ってください。	공식 페이지에서 가입하고 이메일 인증 및 비밀번호 설정을 마친 후 로그인 화면으로 돌아오세요.
+备份由你选择保存位置；应用不会自动上传。清除历史与重置画像是独立操作。	Choose where to save backups; they are never uploaded automatically. Clearing history and resetting interests are separate.	バックアップ先は自分で選択し、自動アップロードは行いません。履歴の消去と興味のリセットは別の操作です。	백업 위치는 직접 선택하며 자동 업로드되지 않습니다. 기록 삭제와 관심사 초기화는 별도 작업입니다.
+服务器地址，例如 https://libretranslate.com	Server URL, e.g. https://libretranslate.com	サーバー URL（例：https://libretranslate.com）	서버 주소 (예: https://libretranslate.com)
+走 translate.googleapis.com，在国内需要代理。	Uses translate.googleapis.com; a proxy may be needed in your region.	translate.googleapis.com を使用します。地域によってプロキシが必要です。	translate.googleapis.com을 사용합니다. 지역에 따라 프록시가 필요할 수 있습니다.
+开启后只在生成新的推荐列表时过滤历史记录，不会在滑动过程中连续自动跳过。	Filters history when generating a new feed, without automatically skipping while you swipe.	新しいおすすめ一覧を作成する時だけ履歴を除外し、スワイプ中の連続自動スキップは行いません。	새 추천 목록 생성 시에만 시청 기록을 제외하며 스크롤 중 자동으로 연속 건너뛰지 않습니다.
+译文字段路径，例如 data.translatedText（留空自动猜）	Translation field path, e.g. data.translatedText (blank for auto-detect)	訳文のフィールドパス（例：data.translatedText、空欄で自動判定）	번역 필드 경로 (예: data.translatedText, 비워두면 자동 감지)
+Iwara 数据加载失败\n%1$s\n\n请确认网络可以访问 iwara.tv	Iwara data failed to load\n%1$s\n\nCheck that your network can reach iwara.tv	Iwara のデータ読み込み失敗\n%1$s\n\niwara.tv に接続できるか確認してください	Iwara 데이터 로딩 실패\n%1$s\n\niwara.tv에 접속 가능한지 확인하세요
+以下为词库、翻译或 AI 建议；可取消错误词。手动补充的别名会保存在本机。	Terms below come from the dictionary, translation or AI. Uncheck incorrect terms. Added aliases are saved locally.	以下は辞書・翻訳・AI の候補です。誤った語のチェックを外せます。追加した別名は端末内に保存されます。	아래는 사전, 번역 또는 AI 제안입니다. 잘못된 단어를 해제하세요. 추가한 별칭은 기기에 저장됩니다.
+可以在后台继续上传，也可暂停后稍后恢复。发布结果未知时仍需先确认我的作品。	Continue uploading in the background or pause and resume later. Check My videos if publishing status is unknown.	バックグラウンドで続行するか、一時停止して後で再開できます。投稿結果が不明な場合は自分の作品を確認してください。	백그라운드에서 계속하거나 일시 정지 후 재개할 수 있습니다. 게시 결과가 불확실하면 내 작품을 확인하세요.
+没有找到可播放的推荐视频。可以稍后刷新，或关闭“刷新推荐时排除已看视频”。	No playable recommendations. Try refreshing later or turn off excluding watched videos.	再生可能なおすすめがありません。後で更新するか、視聴済みの除外を無効にしてください。	재생 가능한 추천 영상이 없습니다. 나중에 새로고침하거나 시청한 영상 제외를 끄세요.
+POST 到 <地址>/translate；公共服务器可能要 API Key。	POST to <server>/translate; public servers may require an API key.	<サーバー>/translate に POST します。公開サーバーでは API キーが必要な場合があります。	<서버>/translate로 POST합니다. 공용 서버는 API 키가 필요할 수 있습니다.
+Azure 门户里的 Translator 资源 Key；多区域资源可留空区域。	Use the Azure Translator resource key; region is optional for multi-region resources.	Azure の Translator リソースキーを使用します。複数リージョンの場合はリージョンを省略できます。	Azure Translator 리소스 키를 사용하세요. 다중 지역 리소스는 지역을 비워둘 수 있습니다.
+视频缓存：%1$s\n低于 256 MiB 可用空间时停止额外缓存，继续在线播放。	Video cache: %1$s\nExtra caching stops below 256 MiB free space; streaming continues.	動画キャッシュ：%1$s\n空き容量が 256 MiB 未満になると追加キャッシュを停止し、ストリーミングを続けます。	영상 캐시: %1$s\n여유 공간이 256 MiB 미만이면 추가 캐시를 중지하고 스트리밍을 계속합니다.
+主动添加感兴趣或不感兴趣的标签，调整推荐机会；也可恢复已屏蔽内容。不影响主动搜索。	Add preferred or unwanted tags and restore blocked content. This changes recommendations, not explicit searches.	興味のある・ないタグを追加し、非表示の内容を復元できます。おすすめに反映され、検索には影響しません。	관심 또는 비관심 태그를 추가하고 차단을 복원합니다. 추천에만 영향을 주며 직접 검색에는 영향이 없습니다.
+免费版 Key 以 :fx 结尾，会自动走 api-free.deepl.com。	Free API keys end in :fx and use api-free.deepl.com automatically.	無料版キーは :fx で終わり、api-free.deepl.com を自動使用します。	무료 키는 :fx로 끝나며 api-free.deepl.com을 자동 사용합니다.
+模型名，例如 gpt-4o-mini、deepseek-chat、qwen-plus	Model, e.g. gpt-4o-mini, deepseek-chat, qwen-plus	モデル名（例：gpt-4o-mini、deepseek-chat、qwen-plus）	모델명 (예: gpt-4o-mini, deepseek-chat, qwen-plus)
+返回 JSON 里译文在哪个字段用点分路径写，数字是数组下标；留空会按常见字段名猜。	Use a dot-separated JSON path; numbers are array indexes. Leave blank to detect common translation fields.	JSON の訳文をドット区切りのパスで指定します。数字は配列番号です。空欄で一般的なフィールドを自動判定します。	점으로 구분한 JSON 경로를 입력하세요. 숫자는 배열 인덱스입니다. 비워두면 일반적인 번역 필드를 감지합니다.
+允许后，可在其他应用上方使用视频小窗。首次启动只询问一次，拒绝后仍可从小窗按钮手动开启。	Allows video over other apps. Asked once on first launch; you can enable it later using the floating-window button.	他のアプリの上に動画を表示できます。初回起動時に一度だけ確認します。後で小窓ボタンから許可できます。	다른 앱 위에 영상 창을 표시합니다. 첫 실행 시 한 번만 묻고 나중에 작은 창 버튼에서 허용할 수 있습니다.
+复制视频或作者主页链接后打开应用即可跳转。同一次复制只打开一次；分享视频上划后继续推荐。	Copy a video or profile link and open the app. Each copied link opens once; swipe up from a shared video for recommendations.	動画・プロフィールのリンクをコピーして起動すると開きます。同じコピーは一度だけ開き、共有動画から上にスワイプするとおすすめへ進みます。	영상 또는 프로필 링크를 복사한 뒤 앱을 여세요. 복사한 링크는 한 번만 열리며 공유 영상에서 위로 밀면 추천이 이어집니다.
+接口地址，例如 https://api.openai.com/v1（中转站填它给的地址）	API base URL, e.g. https://api.openai.com/v1 (or your provider's URL)	API URL（例：https://api.openai.com/v1、またはプロバイダー指定の URL）	API 주소 (예: https://api.openai.com/v1 또는 제공업체 주소)
+默认移动预加载不限额。预算只限制提前缓存，不限制正常播放；缓存达到容量上限后仍可在线播放。	Mobile preloading is unlimited by default. The budget limits preloading, not playback. Streaming still works at the cache limit.	モバイル回線の先読みは既定で無制限です。上限は先読みにのみ適用され、通常再生は制限しません。キャッシュ上限後もストリーミングできます。	모바일 미리 불러오기는 기본적으로 무제한입니다. 한도는 미리 불러오기에만 적용되며 일반 재생은 제한하지 않습니다. 캐시가 가득 차도 스트리밍 가능합니다.
+POST 请求体模板，例如 {"q":"{text}","target":"{target}"}	POST body template, e.g. {"q":"{text}","target":"{target}"}	POST 本文のテンプレート（例：{"q":"{text}","target":"{target}"}）	POST 본문 템플릿 (예: {"q":"{text}","target":"{target}"})
+fanyi-api.baidu.com 的通用翻译，APP ID 和密钥在开放平台的开发者信息里。	Baidu general translation at fanyi-api.baidu.com. Find APP ID and key in your developer account.	fanyi-api.baidu.com の汎用翻訳です。APP ID とキーは開発者情報で確認できます。	fanyi-api.baidu.com 일반 번역입니다. 개발자 계정에서 APP ID와 키를 확인하세요.
+文件上传完毕后可继续官网处理；文件传输中断会重新上传。投稿结果不确定时，请先检查我的作品，避免重复发布。	After uploading, continue processing on Iwara. Interrupted transfers restart. Check My videos before resubmitting an uncertain result.	アップロード後は公式処理を続行できます。転送が中断されると再アップロードします。重複投稿を防ぐため、結果不明時は自分の作品を確認してください。	업로드 후 공식 처리를 계속할 수 있습니다. 전송 중단 시 다시 업로드합니다. 중복 게시를 피하려면 결과가 불확실할 때 내 작품을 확인하세요.
+Iwara 在部分地区无法直连。代理工具只开了本地端口、没开 VPN 模式时，可以让本应用自己走那个端口。	Iwara may be unreachable in some regions. If your proxy only exposes a local port, configure that port here.	一部地域では Iwara に直接接続できません。VPN モードではなくローカルポートを使うプロキシは、ここで設定できます。	일부 지역에서는 Iwara에 직접 연결할 수 없습니다. 프록시가 로컬 포트만 제공한다면 여기서 해당 포트를 설정하세요.
+将旧版本地收藏导入单独新建的默认公开收藏夹；已有官网分类与本地记录均保留，已处理或已移除的视频不会重复添加。	Imports legacy favorites into a separate new public default collection. Existing official collections and local records remain; handled or removed videos are not re-added.	旧お気に入りを新しい既定の公開コレクションにインポートします。既存の公式分類とローカル記録は保持し、処理済み・削除済み動画は再追加しません。	이전 즐겨찾기를 별도로 새로 만든 기본 공개 보관함으로 가져옵니다. 기존 공식 분류와 로컬 기록은 유지하며 처리되거나 제거된 영상은 다시 추가하지 않습니다.
+简介和评论自动翻成中文用哪家服务。默认的谷歌免费接口不用密钥；其它几家填上自己的密钥，也可以接 AI 中转站。	Service for translating descriptions and comments into Chinese. Google needs no key; other services use your own keys, including compatible AI providers.	概要とコメントを中国語に翻訳するサービスです。Google はキー不要です。他のサービスや対応 AI には自分のキーを設定します。	소개와 댓글을 중국어로 번역하는 서비스입니다. Google은 키가 필요 없으며 다른 서비스와 호환 AI 제공업체는 본인의 키를 사용합니다.
+已有条目保留，新增条目会合并到本机。导入后可在我的收藏中点击“重试同步”，将旧收藏添加至官网。仅导入你信任的备份。	Existing entries are kept and new ones merged locally. Use Retry sync in My collections to upload legacy favorites. Import trusted backups only.	既存項目を保持し、新規項目を端末に統合します。マイコレクションの「同期を再試行」で旧お気に入りを公式サイトへ追加できます。信頼できるバックアップのみ使用してください。	기존 항목은 유지하고 새 항목을 기기에 병합합니다. 내 보관함에서 동기화 재시도로 이전 즐겨찾기를 공식 사이트에 추가하세요. 신뢰하는 백업만 가져오세요.
+密码只用于登录请求；登录 Token 使用 Android 加密存储。没有账号可点“注册”，在应用内打开官网注册页。	Your password is used only to log in; tokens use Android encrypted storage. Tap Sign up to open official registration.	パスワードはログインにのみ使用し、トークンは Android の暗号化ストレージに保存します。「登録」で公式登録ページを開きます。	비밀번호는 로그인 요청에만 사용하며 토큰은 Android 암호화 저장소에 보관합니다. 가입을 누르면 공식 가입 페이지가 열립니다.
+仅在空白画面长按；导航、按钮和底部信息区除外\n单击暂停 / 显示控件 · 双击点赞\n长按评论 0.5 秒：快捷发送弹幕评论	Hold only empty video areas, outside buttons and info\nTap: pause / controls · Double tap: like\nHold Comments 0.5s to send danmaku	ボタン・情報欄以外の空白部分を長押し\nタップ：一時停止 / 操作表示 · ダブルタップ：いいね\nコメントを 0.5 秒長押しで弾幕送信	버튼과 정보 영역을 제외한 빈 화면만 길게 누르세요\n탭: 일시 정지 / 컨트롤 · 두 번 탭: 좋아요\n댓글 0.5초 길게 누르기: 탄막 보내기
+MP4（H.264 / AAC），至少 20 秒；普通账号上限 300 MiB，Premium 600 MiB。最终以官网校验为准。	MP4 (H.264 / AAC), at least 20 seconds. Limits: 300 MiB standard, 600 MiB Premium. Official validation takes precedence.	MP4（H.264 / AAC）、20 秒以上。通常 300 MiB、Premium 600 MiB まで。最終的には公式の検証に従います。	MP4 (H.264 / AAC), 최소 20초. 일반 300 MiB, Premium 600 MiB 제한. 최종 기준은 공식 검증에 따릅니다.
+三个榜单页默认照着官方顺序看，刷过的还会出现。打开后它们和推荐流一个口径：看过的不再重复露面（整页都看过时仍然照常显示，不给空页）。	Charts follow the official order by default. Enable to hide watched videos, except when the entire page has been watched so the page stays usable.	ランキングは既定で公式順です。有効にすると視聴済みを除外しますが、ページ全体が視聴済みの場合は空にせず表示します。	차트는 기본적으로 공식 순서를 따릅니다. 켜면 시청한 영상을 제외하지만 페이지 전체를 봤다면 빈 화면 대신 그대로 표시합니다.
+老片指点赞很高、发布超过一年的作品，随机插在每一组里的任意位置。避免短时间刷太多把新片刷没、后面越刷越旧，也避免一直碰不到历史上的高质量作品。	Classics are highly liked videos over a year old, inserted randomly within each group to balance recent and older quality videos.	過去の作品は公開から 1 年以上経った高評価動画です。各グループ内にランダムに挿入し、新旧の良作をバランスよく表示します。	이전 작품은 1년 이상 된 좋아요가 많은 영상입니다. 그룹마다 무작위로 배치하여 최근 영상과 이전 우수 작품의 균형을 맞춥니다.
+任何兼容 OpenAI 聊天接口的中转站都能用：地址写到 /v1 为止即可（会自动补成 /chat/completions），模型名留空用 %1$s。	Use any OpenAI-compatible chat endpoint ending in /v1; /chat/completions is added automatically. Blank model uses %1$s.	OpenAI 互換のチャット API を使用できます。URL は /v1 まで入力し、/chat/completions は自動追加されます。モデル名が空なら %1$s を使用します。	OpenAI 호환 채팅 API를 사용할 수 있습니다. 주소는 /v1까지 입력하면 /chat/completions가 자동 추가됩니다. 모델명을 비우면 %1$s를 사용합니다.
+关闭时共享设备记录；开启时账号与未登录状态各自独立，原共享记录仍保留。备份仅包含当前范围的旧版本地收藏与兴趣；官方播放列表始终按账号分别同步，不受此开关影响。	Off: share device records. On: separate each account and guest records, keeping shared data. Backups cover the current local scope; official playlists always sync per account.	無効時は端末の記録を共有します。有効時は各アカウントと未ログイン状態を分離し、元の共有データは保持します。バックアップは現在の範囲のみで、公式リストは常にアカウント別に同期します。	끄면 기기 기록을 공유합니다. 켜면 계정 및 비로그인 기록을 분리하고 기존 공유 데이터는 유지합니다. 백업은 현재 범위만 포함하며 공식 재생목록은 항상 계정별로 동기화됩니다.
+默认共用本机兴趣。开启后，每个账号及未登录状态分别保存系统兴趣、手动兴趣和屏蔽；原共享兴趣保留。历史和旧版收藏可通过下面的独立开关调整；导入导出作用于各自当前范围。	Interests are shared on this device by default. Enable to separate learned/manual interests and blocks for each account and guests. Shared data is kept. History and legacy favorites have a separate switch; backups use the current scope.	既定では端末の興味を共有します。有効にすると学習・手動設定・非表示をアカウントと未ログイン状態ごとに分離し、共有データは保持します。履歴と旧お気に入りは別設定で、バックアップは現在の範囲に適用されます。	기본적으로 기기의 관심사를 공유합니다. 켜면 학습/수동 관심사 및 차단을 계정과 비로그인 상태별로 분리하고 공유 데이터는 유지합니다. 기록과 이전 즐겨찾기는 별도 설정이며 백업은 현재 범위에 적용됩니다.
+IwaraFlow %1$s\n\nAndroid 原生 Iwara 视频浏览客户端\n作者：Ling-LA\n\n支持连续播放、搜索、兴趣推荐和弹幕评论。\n本应用为第三方客户端。	IwaraFlow %1$s\n\nNative Android client for Iwara videos\nBy Ling-LA\n\nContinuous playback, search, personalized recommendations and danmaku comments.\nThis is a third-party client.	IwaraFlow %1$s\n\nAndroid ネイティブ Iwara 動画クライアント\n作者：Ling-LA\n\n連続再生・検索・おすすめ・弾幕コメントに対応。\n非公式クライアントです。	IwaraFlow %1$s\n\nAndroid 네이티브 Iwara 영상 클라이언트\n개발자: Ling-LA\n\n연속 재생, 검색, 맞춤 추천 및 탄막 댓글을 지원합니다.\n서드파티 클라이언트입니다.
+开启且已配置 AI 翻译时，使用同一个模型核对搜索词的含义和通行译名。不确定的词保留原文，仍要求全部关键词命中；作者名保持原文搜索。可能额外消耗 token，付费模型可能产生费用。	When enabled with AI translation configured, the same model checks term meanings and established names. Uncertain terms remain unchanged; all keywords must match. Creator names stay literal. Extra tokens and paid-model charges may apply.	AI 翻訳設定時に同じモデルで検索語と通用名を確認します。不確かな語は原文のままにし、すべてのキーワードの一致を求めます。投稿者名は翻訳しません。追加トークンと有料モデルの料金が発生する場合があります。	AI 번역이 설정되어 있으면 같은 모델로 검색어 의미와 통용 명칭을 확인합니다. 불확실한 단어는 원문을 유지하며 모든 검색어가 일치해야 합니다. 제작자 이름은 번역하지 않습니다. 추가 토큰과 유료 모델 요금이 발생할 수 있습니다.
+打开后简介面板里会在「推荐理由」下面写清这条视频的分是怎么来的：来源 / 质量 / 新鲜度 / 画像 / 扰动各占多少、命中了哪些标签、来自哪一路召回。只用于调推荐算法，平时可以关着。	Shows recommendation scores below the reason in Info: source, quality, freshness, interests, randomness and matched tags. For troubleshooting; normally leave off.	概要のおすすめ理由の下に、ソース・品質・新しさ・興味・ランダム性・一致タグの内訳を表示します。診断用なので通常は無効で構いません。	소개 패널의 추천 이유 아래에 소스, 품질, 최신성, 관심사, 무작위성 및 일치 태그 점수를 표시합니다. 진단용이므로 평소에는 꺼두어도 됩니다.
+关掉后点一下画面不再暂停：只在「标题 / 标签 / 操作栏」和「进度条 / 快进后退 / 剩余时长」之间切换，播放和暂停状态均保持不变；暂停后也能单击切换界面，播放 / 暂停请点控件里的按钮。	When off, tapping switches between video details and playback controls without changing playback state, including when paused. Use the play/pause button to control playback.	無効時はタップで動画情報と再生コントロールを切り替え、再生・一時停止の状態を保持します。一時停止中も切り替え可能です。再生操作にはボタンを使ってください。	끄면 화면 탭은 영상 정보와 재생 컨트롤만 전환하며 재생 및 일시 정지 상태를 유지합니다. 일시 정지 중에도 전환할 수 있습니다. 재생 조작은 버튼을 사용하세요.
+上方	at the top	上部	상단
+下方	at the bottom	下部	하단
+创建	Create	作成	만들기
+删除	Delete	削除	삭제
+右侧	on the right	右側	오른쪽
+完成	Done	完了	완료
+左侧	on the left	左側	왼쪽
+上半屏	Top half	画面上半分	화면 상단 절반
+下半屏	Bottom half	画面下半分	화면 하단 절반
+已屏蔽	Blocked	非表示中	차단됨
+已移除	Removed	削除しました	제거됨
+感兴趣	Interested	興味あり	관심 있음
+重命名	Rename	名前を変更	이름 변경
+字体大小	Font size	文字サイズ	글꼴 크기
+手动兴趣	Manual interests	手動の興味	수동 관심사
+显示位置	Position	表示位置	표시 위치
+暂无屏蔽	Nothing blocked	非表示項目なし	차단 항목 없음
+暂无标签	No tags	タグなし	태그 없음
+系统兴趣	Learned interests	学習した興味	학습된 관심사
+输入标签	Enter tag	タグを入力	태그 입력
+关闭收藏夹	Close collections	コレクションを閉じる	보관함 닫기
+删除收藏夹	Delete collection	コレクションを削除	보관함 삭제
+收藏夹名称	Collection name	コレクション名	보관함 이름
+改为感兴趣	Mark as interested	興味ありに変更	관심 있음으로 변경
+新建收藏夹	New collection	新しいコレクション	새 보관함
+正在保存…	Saving…	保存中…	저장 중…
+正在移动…	Moving…	移動中…	이동 중…
+正在移除…	Removing…	削除中…	제거 중…
+添加感兴趣	Add interest	興味ありを追加	관심 항목 추가
+选择收藏夹	Choose collections	コレクションを選択	보관함 선택
+不透明度 %	Opacity %	不透明度 %	불투명도 %
+删除收藏夹？	Delete this collection?	コレクションを削除しますか？	보관함을 삭제할까요?
+同时显示行数	Visible rows	同時に表示する行数	동시에 표시할 줄 수
+搜索系统标签	Search learned tags	学習したタグを検索	학습된 태그 검색
+收藏夹已删除	Collection deleted	コレクションを削除しました	보관함 삭제됨
+改为不感兴趣	Mark as not interested	興味なしに変更	관심 없음으로 변경
+显示评论弹幕	Show comments as danmaku	コメントを弾幕で表示	댓글 탄막 표시
+暂无分析结果	No analysis yet	分析結果はまだありません	아직 분석 결과 없음
+添加不感兴趣	Add unwanted tag	興味なしを追加	비관심 항목 추가
+移动到收藏夹	Move to collection	コレクションへ移動	보관함으로 이동
+移除主动偏好	Remove manual preference	手動設定を削除	수동 선호도 제거
+系统兴趣管理	Manage learned interests	学習した興味を管理	학습된 관심사 관리
+重命名收藏夹	Rename collection	コレクション名を変更	보관함 이름 변경
+下拉关闭收藏夹	Drag down to close	下にドラッグして閉じる	아래로 끌어 보관함 닫기
+修改收藏夹名称	Edit collection name	コレクション名を編集	보관함 이름 수정
+收藏夹已重命名	Collection renamed	名前を変更しました	보관함 이름 변경됨
+没有匹配的标签	No matching tags	一致するタグがありません	일치하는 태그 없음
+＋ 新建收藏夹	＋ New collection	＋ 新しいコレクション	＋ 새 보관함
+100%（恢复）	100% (reset)	100%（復元）	100% (복원)
+从当前收藏夹移除	Remove from this collection	このコレクションから削除	현재 보관함에서 제거
+将弹幕翻译为中文	Translate danmaku to Chinese	弾幕を中国語に翻訳	탄막을 중국어로 번역
+已关注 %1$s	Following %1$s	%1$s をフォローしました	%1$s 팔로우함
+恢复失败，请重试	Restore failed. Try again.	復元に失敗しました。再試行してください	복원 실패. 다시 시도하세요
+收藏夹 %1$s	Collection %1$s	コレクション %1$s	보관함 %1$s
+正在读取收藏夹…	Loading collections…	コレクションを読み込み中…	보관함 로딩 중…
+移动到其他收藏夹	Move to another collection	他のコレクションへ移動	다른 보관함으로 이동
+请输入收藏夹名称	Enter a collection name	コレクション名を入力してください	보관함 이름을 입력하세요
+已从当前收藏夹移除	Removed from this collection	このコレクションから削除しました	현재 보관함에서 제거됨
+已屏蔽的作者和标签	Blocked creators and tags	非表示の投稿者とタグ	차단한 제작자 및 태그
+已取消关注 %1$s	Unfollowed %1$s	%1$s のフォローを解除しました	%1$s 팔로우 취소됨
+已移动到「%1$s」	Moved to “%1$s”	「%1$s」に移動しました	“%1$s”로 이동됨
+感兴趣 · 更多推荐	Interested · Show more	興味あり · おすすめを増やす	관심 있음 · 추천 늘리기
+不感兴趣 · 减少推荐	Not interested · Show less	興味なし · おすすめを減らす	관심 없음 · 추천 줄이기
+恢复 %1$s%2$s	Restore %1$s%2$s	%1$s%2$s を復元	%1$s%2$s 복원
+收藏变更未完成，请重试	Collection changes incomplete. Retry.	コレクションの変更が未完了です。再試行してください	보관함 변경이 완료되지 않았습니다. 재시도하세요
+150%（受总上限约束）	150% (overall cap applies)	150%（合計の上限あり）	150% (전체 상한 적용)
+删除此项（忽略系统判断）	Remove this item (ignore learned judgment)	この項目を削除（学習結果を無視）	이 항목 삭제 (학습 판단 무시)
+该视频没有可用的作者资料	No usable creator profile for this video	この動画には利用可能な投稿者情報がありません	이 영상의 사용 가능한 제작자 정보 없음
+展开更多（剩余 %1$s）	Show more (%1$s remaining)	さらに表示（残り %1$s 件）	더 보기 (%1$s개 남음)
+穿过画面的秒数（越小越快）	Seconds across the screen (lower is faster)	画面を通過する秒数（短いほど速い）	화면 통과 시간 (짧을수록 빠름)
+还没有收藏夹，点击上方新建	No collections yet. Tap New above.	まだコレクションがありません。上の新規作成をタップしてください	아직 보관함이 없습니다. 위의 새로 만들기를 누르세요
+保存失败，请输入一个有效标签	Could not save. Enter a valid tag.	保存できません。有効なタグを入力してください	저장 실패. 유효한 태그를 입력하세요
+读取失败：%1$s\n点此重试	Failed to load: %1$s\nTap to retry	読み込み失敗：%1$s\nタップして再試行	로딩 실패: %1$s\n탭하여 재시도
+手动兴趣管理 · 主动调整兴趣	Manual interests · Adjust preferences	手動の興味管理 · 好みを調整	수동 관심사 관리 · 선호도 조정
+共 %1$s 项 · 点击标签调整	%1$s items · Tap a tag to adjust	全 %1$s 件 · タグをタップして調整	총 %1$s개 · 태그를 탭하여 조정
+请先登录 Iwara 后再关注作者	Log in to Iwara before following creators	投稿者をフォローするには Iwara にログインしてください	제작자를 팔로우하려면 먼저 Iwara에 로그인하세요
+%1$s\n%2$s 个视频 · 公开	%1$s\n%2$s videos · Public	%1$s\n動画 %2$s 件 · 公開	%1$s\n영상 %2$s개 · 공개
+保存未完成，将重新读取官网已保存的选择	Save incomplete; reloading the choices saved on Iwara	保存が未完了です。公式サイトに保存された選択を再読み込みします	저장이 완료되지 않아 Iwara에 저장된 선택을 다시 불러옵니다
+与 Iwara 官方播放列表同步 · 公开	Synced with Iwara playlists · Public	Iwara 公式プレイリストと同期 · 公開	Iwara 공식 재생목록과 동기화 · 공개
+调整 #%1$s · 近期证据 %2$s%	Adjust #%1$s · Recent evidence %2$s%	#%1$s を調整 · 最近の根拠 %2$s%	#%1$s 조정 · 최근 근거 %2$s%
+创建 Iwara 官方公开播放列表，可在官网查看。	Creates a public Iwara playlist visible on the official site.	公式サイトで閲覧できる Iwara の公開プレイリストを作成します。	공식 사이트에서 볼 수 있는 Iwara 공개 재생목록을 만듭니다.
+这些内容不会进入推荐。点击可恢复；主动设置标签偏好也会解除该标签的旧屏蔽。	These are excluded from recommendations. Tap to restore; setting a manual preference also clears an older block for that tag.	これらはおすすめに表示されません。タップで復元でき、タグの手動設定でも以前の非表示を解除できます。	이 콘텐츠는 추천에서 제외됩니다. 탭하여 복원하거나 태그 선호도를 수동 설정하면 이전 차단도 해제됩니다.
+评论从右向左滚动，每条只显示一次；重新打开视频或从头播放时重新显示。设置即时保存。	Comments scroll right to left once per play. Reopen or restart the video to show them again. Settings save immediately.	コメントは右から左へ各 1 回流れます。動画を開き直すか最初から再生すると再表示します。設定は即時保存されます。	댓글은 재생당 한 번 오른쪽에서 왼쪽으로 흐릅니다. 영상을 다시 열거나 처음부터 재생하면 다시 표시됩니다. 설정은 즉시 저장됩니다.
+将从 Iwara 删除「%1$s」及其收藏记录。视频本身和其他收藏夹中的副本不会删除，此操作无法撤销。	Delete “%1$s” and its saved entries from Iwara? Videos and copies in other collections remain. This cannot be undone.	Iwara から「%1$s」と保存記録を削除します。動画本体や他のコレクション内のコピーは削除されません。取り消せません。	Iwara에서 “%1$s” 및 저장 기록을 삭제합니다. 영상 자체와 다른 보관함의 사본은 유지됩니다. 되돌릴 수 없습니다.
+仅调整推荐机会，不影响主动搜索。手动偏好有加减分上限，并保留其他题材。一个标签内可含空格，多个标签请分次添加。	Only affects recommendations, not searches. Manual boosts and penalties are capped to retain variety. Spaces are allowed; add tags one at a time.	おすすめにのみ影響し、検索には影響しません。手動の加減点には上限を設け、多様性を保持します。タグに空白は使えますが、1 件ずつ追加してください。	추천에만 영향을 주며 검색에는 영향이 없습니다. 수동 가감점에는 상한이 있어 다양성을 유지합니다. 공백은 허용되며 태그는 하나씩 추가하세요.
+系统根据观看、点赞、收藏和关注分析兴趣。分数有上限并随时间降低；调整比例不影响手动偏好。点击标签可调整，移除后可随时恢复。	Interests are learned from viewing, likes, saves and follows. Scores are capped and decay. Adjusting them does not affect manual choices. Tap a tag to adjust or restore.	視聴・いいね・保存・フォローから興味を学習します。点数には上限があり時間とともに減衰します。調整は手動設定に影響しません。タグをタップして調整・復元できます。	시청, 좋아요, 저장 및 팔로우로 관심사를 학습합니다. 점수에는 상한이 있으며 시간이 지나면 줄어듭니다. 조정은 수동 설정에 영향을 주지 않습니다. 태그를 탭하여 조정하거나 복원하세요.
+复用设置中的翻译服务，按需翻译正在显示的弹幕。使用付费 AI 模型可能额外消耗 token 并产生费用；翻译失败时保留原文。	Uses your configured translation service for visible danmaku on demand. Paid AI models may use extra tokens and incur charges. Failed translations keep the original text.	設定済みの翻訳サービスで表示中の弾幕を必要に応じて翻訳します。有料 AI モデルでは追加トークンと料金が発生する場合があります。翻訳失敗時は原文を表示します。	설정한 번역 서비스를 사용하여 표시 중인 탄막을 필요할 때 번역합니다. 유료 AI 모델은 추가 토큰 및 요금이 발생할 수 있습니다. 번역 실패 시 원문을 유지합니다.
+粉丝	Followers	フォロワー	팔로워
+请稍后重试	Please try again later	しばらくしてから再試行してください	잠시 후 다시 시도하세요
+AI 匹配未完成，暂用原词及已核实别名；可重新搜索重试	AI matching failed. Using the original term and verified aliases; search again to retry.	AI 照合に失敗しました。原語と確認済み別名を使用します。再検索で再試行できます。	AI 일치 확인에 실패했습니다. 원문과 확인된 별칭을 사용합니다. 다시 검색하여 재시도하세요.
+AI 匹配格式无效	Invalid AI matching response	AI 照合の応答形式が無効です	AI 일치 확인 응답 형식이 잘못되었습니다
+你关注的作者更新了	New from a creator you follow	フォロー中の作者の新作	팔로우한 제작자의 새 영상
+为你探索的新内容	Something new to explore	新しいジャンルのおすすめ	새롭게 탐색할 콘텐츠
+应季节日内容 #%1$s	Seasonal pick #%1$s	季節のおすすめ #%1$s	시즌 추천 #%1$s
+你最近常看 #%1$s	You often watch #%1$s	最近よく見る #%1$s	최근 자주 본 #%1$s
+你喜欢这位作者的作品	From a creator you enjoy	お気に入りの作者の作品	좋아하는 제작자의 영상
+历史上的高赞作品	Highly liked classics	過去の人気作品	역대 좋아요가 많은 영상
+猜你喜欢 · 根据点赞、收藏、关注和完整观看分析	For you · based on likes, saves, follows and completed watches	おすすめ · いいね、保存、フォロー、完視聴から選出	맞춤 추천 · 좋아요, 저장, 팔로우, 끝까지 시청한 기록 기반
+近期的高赞作品	Recent highly liked videos	最近の高評価作品	최근 좋아요가 많은 영상
+热门榜上的作品	From the popular chart	人気ランキングの作品	인기 순위 영상
+流行榜上的作品	From the trending chart	トレンドの作品	트렌드 순위 영상
+最近的新投稿	Recently uploaded	最近の投稿	최근 업로드
+综合推荐	Recommended for you	総合おすすめ	종합 추천
+标题或简介与你近期偏好相符	Title or description matches your recent interests	タイトルや説明が最近の好みに一致	제목이나 설명이 최근 관심사와 일치
+谷歌翻译（免费网页接口，不用密钥）	Google Translate (free web service, no key)	Google 翻訳（無料 Web 接続、キー不要）	Google 번역 (무료 웹 서비스, 키 불필요)
+微软翻译（Azure Key + 区域）	Microsoft Translator (Azure key + region)	Microsoft 翻訳（Azure キー＋リージョン）	Microsoft 번역 (Azure 키 + 지역)
+百度翻译开放平台（APP ID + 密钥）	Baidu Translate (App ID + key)	Baidu 翻訳（APP ID＋キー）	Baidu 번역 (앱 ID + 키)
+LibreTranslate（自建 / 公共服务器）	LibreTranslate (self-hosted / public)	LibreTranslate（自前／公開サーバー）	LibreTranslate (자체 / 공용 서버)
+AI 翻译（OpenAI 兼容接口：中转站 / DeepSeek / 通义 / Kimi 等）	AI translation (OpenAI-compatible: proxy / DeepSeek / Qwen / Kimi)	AI 翻訳（OpenAI 互換：中継／DeepSeek／Qwen／Kimi など）	AI 번역 (OpenAI 호환: 프록시 / DeepSeek / Qwen / Kimi 등)
+自定义接口	Custom API	カスタム API	사용자 지정 API
+通义千问（阿里云百炼）	Qwen (Alibaba Cloud)	Qwen（Alibaba Cloud）	Qwen (Alibaba Cloud)
+智谱 GLM	Zhipu GLM	Zhipu GLM	Zhipu GLM
+硅基流动 SiliconFlow	SiliconFlow	SiliconFlow	SiliconFlow
+自定义（OpenAI 兼容接口）	Custom (OpenAI-compatible)	カスタム（OpenAI 互換）	사용자 지정 (OpenAI 호환)
+翻译配置已变更，请重试	Translation settings changed. Please retry.	翻訳設定が変更されました。再試行してください。	번역 설정이 변경되었습니다. 다시 시도하세요.
+服务未返回有效中文译文，请重试或更换翻译服务	No valid Chinese translation returned. Retry or change the translation service.	有効な中国語訳が返されませんでした。再試行するか翻訳サービスを変更してください。	유효한 중국어 번역이 반환되지 않았습니다. 재시도하거나 번역 서비스를 변경하세요.
+密钥无效或没有权限（%1$s）	Invalid key or access denied (%1$s)	キーが無効か権限がありません（%1$s）	키가 유효하지 않거나 권한이 없습니다 (%1$s)
+请求太频繁（429），稍后再试	Too many requests (429). Try again later.	リクエストが多すぎます（429）。後で再試行してください。	요청이 너무 많습니다 (429). 나중에 다시 시도하세요.
+DeepL 额度已用完（456）	DeepL quota exceeded (456)	DeepL の利用枠を使い切りました（456）	DeepL 할당량을 초과했습니다 (456)
+没填 %1$s，请到 设置 → 翻译 里配置	Missing %1$s. Configure it in Settings → Translation.	%1$s が未設定です。設定 → 翻訳で入力してください。	%1$s이(가) 없습니다. 설정 → 번역에서 입력하세요.
+返回格式不对	Unexpected response format	応答形式が正しくありません	응답 형식이 올바르지 않습니다
+没有翻出内容	No translation returned	翻訳結果がありません	번역 결과가 없습니다
+Azure 翻译 Key	Azure translation key	Azure 翻訳キー	Azure 번역 키
+百度 APP ID	Baidu App ID	Baidu APP ID	Baidu 앱 ID
+百度密钥	Baidu key	Baidu キー	Baidu 키
+百度返回错误 %1$s：%2$s	Baidu error %1$s: %2$s	Baidu エラー %1$s：%2$s	Baidu 오류 %1$s: %2$s
+LibreTranslate 服务器地址	LibreTranslate server URL	LibreTranslate サーバー URL	LibreTranslate 서버 URL
+AI 接口的 API Key	AI API key	AI API キー	AI API 키
+AI 接口返回错误：%1$s	AI API error: %1$s	AI API エラー：%1$s	AI API 오류: %1$s
+已翻译	Translated	翻訳済み	번역됨
+翻译自%1$s	Translated from %1$s	%1$sから翻訳	%1$s에서 번역됨
+自定义接口地址	Custom API URL	カスタム API URL	사용자 지정 API URL
+返回里没找到译文（字段路径：%1$s）	Translation not found in response (field: %1$s)	応答に翻訳がありません（フィールド：%1$s）	응답에서 번역을 찾지 못했습니다 (필드: %1$s)
+连不上翻译服务	Cannot reach translation service	翻訳サービスに接続できません	번역 서비스에 연결할 수 없습니다
+翻译失败	Translation failed	翻訳に失敗しました	번역 실패
+日语	Japanese	日本語	일본어
+英语	English	英語	영어
+韩语	Korean	韓国語	한국어
+俄语	Russian	ロシア語	러시아어
+西班牙语	Spanish	スペイン語	스페인어
+法语	French	フランス語	프랑스어
+德语	German	ドイツ語	독일어
+葡萄牙语	Portuguese	ポルトガル語	포르투갈어
+意大利语	Italian	イタリア語	이탈리아어
+泰语	Thai	タイ語	태국어
+越南语	Vietnamese	ベトナム語	베트남어
+印尼语	Indonesian	インドネシア語	인도네시아어
+中文	Chinese	中国語	중국어
+阿拉伯语	Arabic	アラビア語	아랍어
+土耳其语	Turkish	トルコ語	터키어
+波兰语	Polish	ポーランド語	폴란드어
+乌克兰语	Ukrainian	ウクライナ語	우크라이나어
+荷兰语	Dutch	オランダ語	네덜란드어
+菲律宾语	Filipino	フィリピン語	필리핀어
+马来语	Malay	マレー語	말레이어
+更新包下载失败（原因码 %1$s），请重新检查更新	Update download failed (code %1$s). Check for updates again.	更新のダウンロードに失敗しました（コード %1$s）。再確認してください。	업데이트 다운로드 실패 (코드 %1$s). 업데이트를 다시 확인하세요.
+文件要求\n• 格式：MP4，建议 H.264 视频 + AAC 音频\n• 大小：普通账号 300 MiB，Premium 600 MiB\n• 最短时长：20 秒\n• 最低分辨率：官网标注 960 × 720（总像素不少于 691200）\n其他编码或过高码率可能由官网重新编码。	File requirements\n• Format: MP4, H.264 video + AAC audio recommended\n• Size: 300 MiB standard, 600 MiB Premium\n• Minimum length: 20 seconds\n• Minimum resolution: 960 × 720 stated by Iwara (at least 691200 pixels)\nOther codecs or high bitrates may be re-encoded by Iwara.	ファイル要件\n• 形式：MP4、H.264 映像＋AAC 音声を推奨\n• サイズ：通常 300 MiB、Premium 600 MiB\n• 最短時間：20 秒\n• 最低解像度：公式表記 960 × 720（総画素数 691200 以上）\n他のコーデックや高いビットレートは公式側で再エンコードされる場合があります。	파일 요구 사항\n• 형식: MP4, H.264 영상 + AAC 오디오 권장\n• 크기: 일반 300 MiB, Premium 600 MiB\n• 최소 길이: 20초\n• 최소 해상도: 공식 안내 960 × 720 (총 691200픽셀 이상)\n다른 코덱이나 높은 비트레이트는 Iwara에서 다시 인코딩할 수 있습니다.
+参考码率（kb/s，30 fps / 60 fps）\n720p：4500 / 6300\n1080p：7500 / 10500\n1440p：11500 / 16100\n2160p：17000 / 23800	Suggested bitrate (kb/s, 30 fps / 60 fps)\n720p: 4500 / 6300\n1080p: 7500 / 10500\n1440p: 11500 / 16100\n2160p: 17000 / 23800	目安のビットレート（kb/s、30 fps／60 fps）\n720p：4500／6300\n1080p：7500／10500\n1440p：11500／16100\n2160p：17000／23800	권장 비트레이트 (kb/s, 30 fps / 60 fps)\n720p: 4500 / 6300\n1080p: 7500 / 10500\n1440p: 11500 / 16100\n2160p: 17000 / 23800
+\n\n上次创建结果未确认。请先到官网核对：若没有新收藏夹，点击导入会重试创建；若有多个同名新夹，请先在官网处理重名。	\n\nThe previous creation result is unknown. Check Iwara first: importing retries creation if no new folder exists. Resolve duplicate names on Iwara before retrying.	\n\n前回の作成結果を確認できません。先に公式サイトを確認してください。新しいフォルダーがなければインポートで再作成します。同名が複数ある場合は公式サイトで整理してください。	\n\n이전 생성 결과를 확인하지 못했습니다. 먼저 Iwara에서 확인하세요. 새 폴더가 없으면 가져오기로 다시 생성합니다. 같은 이름의 폴더가 여러 개라면 Iwara에서 정리하세요.
+网络服务推广链接 %1$s（可选）	Network service referral %1$s (optional)	ネットワークサービス紹介 %1$s（任意）	네트워크 서비스 추천 링크 %1$s (선택 사항)
+没有可打开链接的浏览器	No browser can open this link	このリンクを開くブラウザーがありません	링크를 열 수 있는 브라우저가 없습니다
+无法打开链接，请检查浏览器设置	Cannot open link. Check browser settings.	リンクを開けません。ブラウザーの設定を確認してください。	링크를 열 수 없습니다. 브라우저 설정을 확인하세요.
+点击切换	Tap to switch	タップして変更	눌러서 변경
+网络不佳 · %1$s %2$s	Weak network · %1$s to %2$s	接続が不安定 · %2$s に%1$s	네트워크 불안정 · %2$s(으)로 %1$s
+没有更多视频了	No more videos	これ以上動画はありません	더 이상 동영상이 없습니다

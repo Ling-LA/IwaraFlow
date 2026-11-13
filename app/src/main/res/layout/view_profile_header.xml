@@ -20,7 +20,7 @@
                     android:layout_width="wrap_content"
                     android:layout_height="40dp"
                     android:gravity="center_vertical"
-                    android:text="‹  返回"
+                    android:text="@string/ui_29ebafb31c58"
                     android:textColor="@color/page_accent"
                     android:textSize="16sp"
                     android:textStyle="bold" />
@@ -40,7 +40,7 @@
                     android:gravity="center_vertical"
                     android:paddingStart="10dp"
                     android:paddingEnd="2dp"
-                    android:text="分享作者"
+                    android:text="@string/ui_6a75e41efc10"
                     android:textColor="@color/page_accent"
                     android:textSize="14sp"
                     android:textStyle="bold" />
@@ -57,7 +57,7 @@
                     android:id="@+id/authorAvatar"
                     android:layout_width="60dp"
                     android:layout_height="60dp"
-                    android:contentDescription="头像"
+                    android:contentDescription="@string/ui_3ea2d23c902c"
                     android:scaleType="centerCrop"
                     android:src="@drawable/bg_avatar_placeholder" />
 
@@ -107,7 +107,7 @@
                     android:layout_width="0dp"
                     android:layout_height="48dp"
                     android:layout_weight="1"
-                    android:text="关注"
+                    android:text="@string/ui_eb137dee4c0a"
                     android:textAllCaps="false"
                     android:textSize="14sp"
                     android:textColor="@color/page_accent"
@@ -125,7 +125,7 @@
                     android:layout_width="0dp"
                     android:layout_height="48dp"
                     android:layout_weight="1"
-                    android:text="添加好友"
+                    android:text="@string/ui_fac9062e9065"
                     android:textAllCaps="false"
                     android:textSize="14sp"
                     android:textColor="@color/page_accent"
@@ -140,7 +140,7 @@
                     android:layout_weight="1"
                     android:layout_marginStart="10dp"
                     android:visibility="gone"
-                    android:text="我的收藏"
+                    android:text="@string/ui_9385bfefca58"
                     android:textAllCaps="false"
                     android:textSize="14sp"
                     android:textColor="@color/page_accent"

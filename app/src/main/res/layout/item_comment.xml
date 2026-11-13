@@ -12,7 +12,7 @@
         android:id="@+id/commentAvatar"
         android:layout_width="36dp"
         android:layout_height="36dp"
-        android:contentDescription="头像"
+        android:contentDescription="@string/ui_3ea2d23c902c"
         android:scaleType="centerCrop" />
 
     <LinearLayout
@@ -73,7 +73,7 @@
                 android:layout_marginStart="16dp"
                 android:paddingTop="4dp"
                 android:paddingBottom="4dp"
-                android:text="回复"
+                android:text="@string/ui_cf945e21ddef"
                 android:textColor="#FF607D93"
                 android:textSize="12sp" />
         </LinearLayout>

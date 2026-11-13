@@ -25,7 +25,7 @@
                 android:layout_width="wrap_content"
                 android:layout_height="40dp"
                 android:gravity="center_vertical"
-                android:text="‹  返回"
+                android:text="@string/ui_29ebafb31c58"
                 android:textColor="@color/page_accent"
                 android:textSize="16sp"
                 android:textStyle="bold" />
@@ -34,7 +34,7 @@
                 android:layout_width="match_parent"
                 android:layout_height="wrap_content"
                 android:layout_marginTop="6dp"
-                android:text="搜索"
+                android:text="@string/ui_44ce7ae909bb"
                 android:textColor="@color/page_text"
                 android:textSize="25sp"
                 android:textStyle="bold" />
@@ -51,8 +51,8 @@
                     android:layout_height="46dp"
                     android:layout_weight="1"
                     android:background="@drawable/bg_input"
-                    android:hint="关键词 / Iwara 链接"
-                    android:contentDescription="搜索视频名、标签、作者名，或粘贴 Iwara 视频 / 作者链接"
+                    android:hint="@string/ui_e80ec77de098"
+                    android:contentDescription="@string/ui_3f0bdd710851"
                     android:imeOptions="actionSearch"
                     android:inputType="text"
                     android:paddingStart="14dp"
@@ -70,7 +70,7 @@
                     android:id="@+id/searchSubmit"
                     android:layout_width="wrap_content"
                     android:layout_height="46dp"
-                    android:text="搜索"
+                    android:text="@string/ui_44ce7ae909bb"
                     android:textAllCaps="false" />
             </LinearLayout>
 
@@ -86,7 +86,7 @@
                     android:layout_height="38dp"
                     android:layout_weight="1"
                     android:gravity="center"
-                    android:text="视频名"
+                    android:text="@string/ui_a48323d55d7a"
                     android:textColor="@color/page_text"
                     android:textSize="15sp"
                     android:textStyle="bold" />
@@ -97,7 +97,7 @@
                     android:layout_height="38dp"
                     android:layout_weight="1"
                     android:gravity="center"
-                    android:text="标签"
+                    android:text="@string/ui_1d0fd5f9336d"
                     android:textColor="@color/page_secondary"
                     android:textSize="15sp" />
 
@@ -107,7 +107,7 @@
                     android:layout_height="38dp"
                     android:layout_weight="1"
                     android:gravity="center"
-                    android:text="作者名"
+                    android:text="@string/ui_8dec2a269991"
                     android:textColor="@color/page_secondary"
                     android:textSize="15sp" />
             </LinearLayout>
@@ -136,7 +136,7 @@
                         android:paddingStart="8dp"
                         android:paddingEnd="8dp"
                         android:singleLine="true"
-                        android:text="上传时间"
+                        android:text="@string/ui_de89171538fd"
                         android:textColor="@color/page_accent"
                         android:textSize="12sp" />
                     <TextView
@@ -150,7 +150,7 @@
                         android:paddingStart="8dp"
                         android:paddingEnd="8dp"
                         android:singleLine="true"
-                        android:text="播放量"
+                        android:text="@string/ui_c33f56e5d7b8"
                         android:textColor="@color/page_accent"
                         android:textSize="12sp" />
                     <TextView
@@ -164,7 +164,7 @@
                         android:paddingStart="8dp"
                         android:paddingEnd="8dp"
                         android:singleLine="true"
-                        android:text="点赞数"
+                        android:text="@string/ui_594e6397000f"
                         android:textColor="@color/page_accent"
                         android:textSize="12sp" />
                     <TextView
@@ -178,7 +178,7 @@
                         android:paddingStart="8dp"
                         android:paddingEnd="8dp"
                         android:singleLine="true"
-                        android:text="调整匹配词"
+                        android:text="@string/ui_9bf2c342f4f5"
                         android:textColor="@color/page_accent"
                         android:textSize="12sp" />
                     <TextView
@@ -192,7 +192,7 @@
                         android:paddingStart="8dp"
                         android:paddingEnd="8dp"
                         android:singleLine="true"
-                        android:text="倒序 ↓"
+                        android:text="@string/ui_a3ccfd5be651"
                         android:textColor="@color/page_accent"
                         android:textSize="12sp" />
                 </LinearLayout>
@@ -201,7 +201,7 @@
                 android:id="@+id/searchExcludeSeen"
                 android:layout_width="wrap_content"
                 android:layout_height="48dp"
-                android:text="排除已看"
+                android:text="@string/ui_a1ba68ef6834"
                 android:textSize="14sp"
                 android:textColor="@color/page_accent" />
         </LinearLayout>
@@ -255,7 +255,7 @@
             android:gravity="center"
             android:paddingStart="14dp"
             android:paddingEnd="14dp"
-            android:text="‹ 搜索结果"
+            android:text="@string/ui_70d50e02d541"
             android:textColor="#FFFFFFFF"
             android:textSize="14sp"
             android:textStyle="bold" />

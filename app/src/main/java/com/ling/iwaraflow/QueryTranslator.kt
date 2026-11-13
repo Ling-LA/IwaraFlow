@@ -40,7 +40,7 @@ object QueryTranslator {
     }
 
     private fun cacheKey(query: String, aiPrecision: Boolean, context: String) =
-        "${aiPrecision && Translator.aiReady()}|${context.trim()}|${query.trim()}"
+        "${aiPrecision && Translator.aiReady()}|${SearchQuery.normalize(context)}|${SearchQuery.normalize(query)}"
     fun cached(query: String, aiPrecision: Boolean = false, context: String = query): List<String>? =
         synchronized(cache) { cache[cacheKey(query, aiPrecision, context)] }
 
@@ -59,7 +59,7 @@ object QueryTranslator {
         val snapshot = Translator.config
         val useAi = aiPrecision && Translator.aiReady(snapshot)
         val known = SearchQuery.knownAliases(original)
-        if (!useAi && known != null) { callback(known); return cancellation }
+        if (known != null && !useAi) { callback(known); return cancellation }
         if (!worthTranslating(original)) { callback(listOf(original).filter { it.isNotBlank() }); return cancellation }
         val key = cacheKey(original, aiPrecision, context)
         cached(original, aiPrecision, context)?.let { callback(it); return cancellation }
@@ -69,11 +69,13 @@ object QueryTranslator {
                 lookup(original, context, known.orEmpty(), useAi, snapshot) { stillWanted() && !cancellation.cancelled }
             } }
             if (!stillWanted() || cancellation.cancelled || version != configuration.get() || snapshot != Translator.config) return@execute
-            val merged = (known.orEmpty() + merge(original, result.getOrDefault(emptyList()))).distinctBy(SearchQuery::normalize)
+            // Curated entity names are authoritative. AI may validate them, but must not
+            // replace them with literal name translations or add unrelated spellings.
+            val merged = known ?: merge(original, result.getOrDefault(emptyList()))
             if (result.isSuccess) synchronized(cache) { cache[key] = merged }
             main.post {
                 if (stillWanted() && !cancellation.cancelled && version == configuration.get()) {
-                    if (result.isFailure && useAi) onWarning("AI 匹配未完成，暂用原词及已核实别名；可重新搜索重试")
+                    if (result.isFailure && useAi) onWarning(UiText.text(R.string.ui_a8e0dd74a656, "AI 匹配未完成，暂用原词及已核实别名；可重新搜索重试"))
                     callback(merged)
                 }
             }
@@ -101,16 +103,20 @@ object QueryTranslator {
         if (useAi) {
             val input = JSONObject().put("term", query).put("context", context.take(240))
                 .put("trusted", JSONArray(trusted)).toString()
+            val otherTerms = SearchQuery.terms(context).filter { SearchQuery.normalize(it) != SearchQuery.normalize(query) }
+                .flatMap { SearchQuery.knownAliases(it) ?: listOf(it) }.map(SearchQuery::tagKey).toSet()
             return parsePreciseVariants(Translator.askAiBlocking(input, AI_PROMPT, config), query)
+                .filterNot { SearchQuery.tagKey(it) in otherTerms }
         }
         // Free translation must survive a reverse translation before it can broaden recall.
         // Do not fall back from an AI error to unverified literal translations of names.
         val source = sourceLanguage(query)
+        if (requiresNameValidation(query)) return emptyList()
         return LANGUAGES.filter { it != source }.mapNotNull { target ->
             if (!wanted()) return@mapNotNull null
             runCatching {
                 val candidate = Translator.translateToBlocking(query, target).trim()
-                if (!safeVariant(candidate) || SearchQuery.normalize(candidate) == SearchQuery.normalize(query)) return@runCatching null
+                if (!safeVariant(candidate) || !validScript(candidate, target) || SearchQuery.normalize(candidate) == SearchQuery.normalize(query)) return@runCatching null
                 if (!wanted()) return@runCatching null
                 val reverse = Translator.translateToBlocking(candidate, source)
                 candidate.takeIf { roundTripMatches(query, reverse) }
@@ -122,13 +128,24 @@ object QueryTranslator {
         SearchQuery.tagKey(original) == SearchQuery.tagKey(reverse) ||
             SearchQuery.knownAliases(original)?.any { SearchQuery.tagKey(it) == SearchQuery.tagKey(reverse) } == true
 
+    /** Round-tripping a literal name (e.g. a person's name into ordinary nouns) proves
+     * spelling reversibility, not entity equivalence. Leave ambiguous names for AI/manual aliases. */
+    internal fun requiresNameValidation(query: String): Boolean {
+        if (SearchQuery.knownAliases(query) != null) return false
+        val text = query.trim().removePrefix("#")
+        return text.any { it.isDigit() || it == '_' } ||
+            (text.length in 2..4 && text.all { Character.UnicodeScript.of(it.code) == Character.UnicodeScript.HAN }) ||
+            text.any { it in 'ァ'..'ヿ' || it in '가'..'힣' } ||
+            text.split(' ').any { word -> word.firstOrNull()?.let { it in 'A'..'Z' } == true }
+    }
+
     private fun safeVariant(value: String): Boolean = value.isNotBlank() && value.length <= MAX_QUERY_LENGTH &&
         value.any(Char::isLetter) && !value.contains(Regex("[\\n\\r,，;；|/<>]")) &&
-        value.lowercase() !in setOf("null", "unknown", "n/a", "无", "未知", "不确定")
+        value.lowercase() !in setOf("null", "unknown", "n/a", "无", "未知", "不确定") // ui-literal: response validation
 
     internal fun parsePreciseVariants(content: String, original: String): List<String> {
         val body = content.trim().removePrefix("```json").removePrefix("```").removeSuffix("```").trim()
-        val entries = JSONObject(body).optJSONArray("aliases") ?: throw IOException("AI 匹配格式无效")
+        val entries = JSONObject(body).optJSONArray("aliases") ?: throw IOException(UiText.text(R.string.ui_5568681ef9bb, "AI 匹配格式无效"))
         val seenLanguages = mutableSetOf<String>()
         val source = sourceLanguage(original)
         val out = mutableListOf<String>()
@@ -185,7 +202,7 @@ object QueryTranslator {
         for (candidate in listOf(original) + variants) {
             val value = candidate.trim()
             if (value.isBlank() || value.length > MAX_QUERY_LENGTH) continue
-            if (!seen.add(value.lowercase())) continue
+            if (!seen.add(SearchQuery.normalize(value))) continue
             out += value
             if (out.size >= MAX_VARIANTS) break
         }

@@ -115,7 +115,7 @@ class AuthorActivity : AppCompatActivity(), PlaybackGuideHost {
             onEnterPip = { FloatingVideoService.request(this, feedAdapter, ::enterPip) },
             onShare = ::shareVideo,
             onEnded = ::nextWork,
-            onNeedLogin = { Toast.makeText(this, "请先在主页登录 Iwara", Toast.LENGTH_SHORT).show() },
+            onNeedLogin = { Toast.makeText(this, UiText.text(R.string.ui_1ff82bfd157a, "请先在主页登录 Iwara"), Toast.LENGTH_SHORT).show() },
             onComments = { comments.open(it) },
             onInfo = { comments.open(it, CommentsPanel.Tab.INFO) },
             onFullscreen = { _, enabled -> setFullscreen(enabled) }
@@ -132,7 +132,7 @@ class AuthorActivity : AppCompatActivity(), PlaybackGuideHost {
             // 左上角的“‹ 作者作品”按钮：16dp 边距 + 44dp 高。
             topBarHeight = { (60 * density).toInt() },
             gapPx = (20 * density).toInt(),
-            onNeedLogin = { Toast.makeText(this, "请先在主页登录 Iwara", Toast.LENGTH_SHORT).show() },
+            onNeedLogin = { Toast.makeText(this, UiText.text(R.string.ui_1ff82bfd157a, "请先在主页登录 Iwara"), Toast.LENGTH_SHORT).show() },
             onOpenAuthor = ::openAnotherAuthor,
             onCommentPosted = { history.recordInteractionAsync(it, "comment", 1.5) },
             onOpenTag = ::openTagSearch
@@ -177,13 +177,13 @@ class AuthorActivity : AppCompatActivity(), PlaybackGuideHost {
             author = IwaraAuthor(id, display, "")
             loadNextPage()
         } else {
-            Toast.makeText(this, "缺少作者信息", Toast.LENGTH_SHORT).show()
+            Toast.makeText(this, UiText.text(R.string.ui_bffa83e7e0c2, "缺少作者信息"), Toast.LENGTH_SHORT).show()
             finishSafely()
         }
     }
 
     private fun loadProfile(username: String) {
-        statusView.text = "正在读取作者资料…"
+        statusView.text = UiText.text(R.string.ui_f8b0611758b4, "正在读取作者资料…")
         api.getAuthorProfile(username) { result ->
             if (isFinishing || isDestroyed || exiting) return@getAuthorProfile
             runOnUiThread {
@@ -209,7 +209,7 @@ class AuthorActivity : AppCompatActivity(), PlaybackGuideHost {
                         }
                     }
                     loadNextPage()
-                }.onFailure { statusView.text = "作者资料加载失败：${IwaraApi.explainError(it)}" }
+                }.onFailure { statusView.text = UiText.text(R.string.ui_8b9cbf0ae8d2, "作者资料加载失败：%1\$s", IwaraApi.explainError(it)) }
             }
         }
     }
@@ -218,7 +218,7 @@ class AuthorActivity : AppCompatActivity(), PlaybackGuideHost {
         val a = author ?: return
         if (loadingPage || noMore || a.id.isBlank() || exiting) return
         loadingPage = true
-        statusView.text = if (works.isEmpty()) "正在加载作者作品…" else "正在加载更多作品…"
+        statusView.text = if (works.isEmpty()) UiText.text(R.string.ui_cd3659d6617b, "正在加载作者作品…") else UiText.text(R.string.ui_1ec13d220714, "正在加载更多作品…")
         api.getAuthorVideoPage(a.id, page, pageSize) { result ->
             if (isFinishing || isDestroyed || exiting) return@getAuthorVideoPage
             result.onSuccess { batch ->
@@ -283,7 +283,7 @@ class AuthorActivity : AppCompatActivity(), PlaybackGuideHost {
                 runOnUiThread {
                     if (isFinishing || isDestroyed || exiting) return@runOnUiThread
                     loadingPage = false
-                    statusView.text = "作品加载失败：${IwaraApi.explainError(it)}"
+                    statusView.text = UiText.text(R.string.ui_0ec1e618fb3b, "作品加载失败：%1\$s", IwaraApi.explainError(it))
                 }
             }
         }
@@ -291,13 +291,13 @@ class AuthorActivity : AppCompatActivity(), PlaybackGuideHost {
 
     private fun updateStatus() {
         // 从评论区点进来的用户不一定发过视频：资料照常显示，作品列表就明说没有。
-        if (works.isEmpty() && noMore) { statusView.text = "该用户没有作品"; return }
+        if (works.isEmpty() && noMore) { statusView.text = UiText.text(R.string.ui_3503f69d93f0, "该用户没有作品"); return }
         val unavailable = works.count { it.playbackIssue != null }
         statusView.text = buildString {
-            append("作品 ${works.size} 条")
-            if (unavailable > 0) append("  ·  $unavailable 条当前不可播放")
-            if (verifying > 0) append("  ·  正在后台检查可播放性")
-            if (!noMore) append("  ·  下滑继续加载")
+            append(UiText.text(R.string.ui_c61bfd9412a0, "作品 %1\$s 条", works.size))
+            if (unavailable > 0) append(UiText.text(R.string.ui_ab9ec3fc0de0, "  ·  %1\$s 条当前不可播放", unavailable))
+            if (verifying > 0) append(UiText.text(R.string.ui_3ea84c4a6732, "  ·  正在后台检查可播放性"))
+            if (!noMore) append(UiText.text(R.string.ui_da9eeeb7312d, "  ·  下滑继续加载"))
         }
     }
 
@@ -430,7 +430,7 @@ class AuthorActivity : AppCompatActivity(), PlaybackGuideHost {
 
     private fun toggleFollow() {
         val a = author ?: return
-        if (!api.isLoggedIn()) { Toast.makeText(this, "请先登录 Iwara", Toast.LENGTH_SHORT).show(); return }
+        if (!api.isLoggedIn()) { Toast.makeText(this, UiText.text(R.string.ui_b8f65691f992, "请先登录 Iwara"), Toast.LENGTH_SHORT).show(); return }
         followButton.isEnabled = false
         val desired = !a.following
         api.followUser(a.id, desired) { result ->
@@ -447,14 +447,14 @@ class AuthorActivity : AppCompatActivity(), PlaybackGuideHost {
                     val card = VideoItem("author:${a.id}", a.name, a.name, emptyList(), 0, authorId = a.id)
                     history.recordInteractionAsync(card, if (desired) "follow" else "unfollow", if (desired) 1.5 else -1.0)
                 }
-                    .onFailure { Toast.makeText(this, it.message ?: "关注操作失败", Toast.LENGTH_SHORT).show() }
+                    .onFailure { Toast.makeText(this, it.message ?: UiText.text(R.string.ui_81c13adcedb3, "关注操作失败"), Toast.LENGTH_SHORT).show() }
             }
         }
     }
 
     private fun toggleFriend() {
         val a = author ?: return
-        if (!api.isLoggedIn()) { Toast.makeText(this, "请先登录 Iwara", Toast.LENGTH_SHORT).show(); return }
+        if (!api.isLoggedIn()) { Toast.makeText(this, UiText.text(R.string.ui_b8f65691f992, "请先登录 Iwara"), Toast.LENGTH_SHORT).show(); return }
         friendButton.isEnabled = false
         val remove = a.friendStatus == "pending" || a.friendStatus == "friends"
         api.setFriend(a.id, !remove) { result ->
@@ -473,7 +473,7 @@ class AuthorActivity : AppCompatActivity(), PlaybackGuideHost {
                             if (a.friend) refreshWorksAfterRelationshipChange()
                         }
                     }
-                }.onFailure { Toast.makeText(this, it.message ?: "好友操作失败", Toast.LENGTH_SHORT).show() }
+                }.onFailure { Toast.makeText(this, it.message ?: UiText.text(R.string.ui_e69812378f35, "好友操作失败"), Toast.LENGTH_SHORT).show() }
             }
         }
     }
@@ -485,11 +485,11 @@ class AuthorActivity : AppCompatActivity(), PlaybackGuideHost {
 
     private fun refreshRelationUi() {
         val a = author ?: return
-        followButton.text = if (a.following) "✓ 已关注" else "+ 关注"
+        followButton.text = if (a.following) UiText.text(R.string.ui_a3c7f74cf331, "✓ 已关注") else UiText.text(R.string.ui_68b61ae1eb6a, "+ 关注")
         friendButton.text = when (a.friendStatus) {
-            "friends" -> "✓ 已是好友"
-            "pending" -> "⏳ 取消好友申请"
-            else -> "+ 添加好友"
+            "friends" -> UiText.text(R.string.ui_9b50be63de55, "✓ 已是好友")
+            "pending" -> UiText.text(R.string.ui_4a1ec4bef7e3, "⏳ 取消好友申请")
+            else -> UiText.text(R.string.ui_2509a9f1586c, "+ 添加好友")
         }
     }
 
@@ -507,9 +507,9 @@ class AuthorActivity : AppCompatActivity(), PlaybackGuideHost {
                 .setDestinationInExternalPublicDir(Environment.DIRECTORY_DOWNLOADS, "IwaraFlow/$fileName")
             val downloadId = (getSystemService(Context.DOWNLOAD_SERVICE) as DownloadManager).enqueue(request)
             history.recordDownloadAsync(item, source.name, downloadId)
-            Toast.makeText(this, "已加入下载", Toast.LENGTH_SHORT).show()
+            Toast.makeText(this, UiText.text(R.string.ui_146e9302fed6, "已加入下载"), Toast.LENGTH_SHORT).show()
         } catch (e: Exception) {
-            Toast.makeText(this, "下载失败：${e.message}", Toast.LENGTH_SHORT).show()
+            Toast.makeText(this, UiText.text(R.string.ui_42fb22bc6277, "下载失败：%1\$s", e.message), Toast.LENGTH_SHORT).show()
         }
     }
 
@@ -540,12 +540,12 @@ class AuthorActivity : AppCompatActivity(), PlaybackGuideHost {
     private var leavingForShare = false
 
     private fun shareVideo(item: VideoItem) {
-        if (item.id.isBlank()) { Toast.makeText(this, "这个视频没有可分享的链接", Toast.LENGTH_SHORT).show(); return }
-        SharePanel.show(this, VideoShare.shareText(item), item.title, "分享视频链接") { intent ->
+        if (item.id.isBlank()) { Toast.makeText(this, UiText.text(R.string.ui_0099c344771f, "这个视频没有可分享的链接"), Toast.LENGTH_SHORT).show(); return }
+        SharePanel.show(this, VideoShare.shareText(item), item.title, UiText.text(R.string.ui_64a47947b19a, "分享视频链接"), item.thumbnailUrl) { intent ->
             leavingForShare = true
             runCatching { startActivity(intent) }.onFailure {
                 leavingForShare = false
-                Toast.makeText(this, "没有可用的分享应用", Toast.LENGTH_SHORT).show()
+                Toast.makeText(this, UiText.text(R.string.ui_14c08712a70e, "没有可用的分享应用"), Toast.LENGTH_SHORT).show()
             }
         }
     }
@@ -562,7 +562,7 @@ class AuthorActivity : AppCompatActivity(), PlaybackGuideHost {
         val entered = runCatching { enterPictureInPictureMode(pipParams()) }.getOrDefault(false)
         if (!entered) {
             PipRegistry.leave(this)
-            Toast.makeText(this, "画中画启动失败", Toast.LENGTH_SHORT).show()
+            Toast.makeText(this, UiText.text(R.string.ui_e8412d85bb3e, "画中画启动失败"), Toast.LENGTH_SHORT).show()
         }
     }
 

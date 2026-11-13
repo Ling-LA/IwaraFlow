@@ -34,9 +34,9 @@ class FollowingActivity : AppCompatActivity() {
 
         api = IwaraApi(this)
         status = findViewById(R.id.followingStatus)
-        findViewById<TextView>(R.id.followingTitle).text = if (followers) "我的粉丝" else "我的关注"
+        findViewById<TextView>(R.id.followingTitle).text = if (followers) UiText.text(R.string.ui_71ad32522ddf, "我的粉丝") else UiText.text(R.string.ui_9dccba0eafbb, "我的关注")
         listView = findViewById(R.id.followingList)
-        adapter = FollowingAuthorAdapter(items, ::openAuthor, emptyDescription = if (followers) "关注了你" else "已关注")
+        adapter = FollowingAuthorAdapter(items, ::openAuthor, emptyDescription = if (followers) UiText.text(R.string.ui_c8712b803f03, "关注了你") else UiText.text(R.string.ui_9fe1d0c9cca3, "已关注"))
         listView.layoutManager = LinearLayoutManager(this)
         listView.adapter = adapter
         findViewById<View>(R.id.followingBack).setOnClickListener { finish() }
@@ -45,7 +45,7 @@ class FollowingActivity : AppCompatActivity() {
         })
 
         if (!api.isLoggedIn()) {
-            Toast.makeText(this, "请先在主页登录 Iwara", Toast.LENGTH_LONG).show()
+            Toast.makeText(this, UiText.text(R.string.ui_1ff82bfd157a, "请先在主页登录 Iwara"), Toast.LENGTH_LONG).show()
             finish()
             return
         }
@@ -53,12 +53,12 @@ class FollowingActivity : AppCompatActivity() {
     }
 
     private fun loadFollowing() {
-        status.text = if (followers) "正在读取 Iwara 粉丝列表…" else "正在读取 Iwara 关注列表…"
+        status.text = if (followers) UiText.text(R.string.ui_5c45da632df4, "正在读取 Iwara 粉丝列表…") else UiText.text(R.string.ui_632d22a6a563, "正在读取 Iwara 关注列表…")
         api.getCurrentUser { result ->
             result.onSuccess { me -> loadFollowingPage(me.id, 0) }
                 .onFailure { e -> runOnUiThread {
                     if (closed) return@runOnUiThread
-                    status.text = "${if (followers) "粉丝" else "关注"}列表加载失败：${IwaraApi.explainError(e)}"
+                    status.text = UiText.text(R.string.ui_4241615cc1a2, "%1\$s列表加载失败：%2\$s", if (followers) UiText.text(R.string.ui_261c51c9f1cd, "粉丝") else UiText.text(R.string.ui_eb137dee4c0a, "关注"), IwaraApi.explainError(e))
                 } }
         }
     }
@@ -82,15 +82,15 @@ class FollowingActivity : AppCompatActivity() {
                 if (more) loadFollowingPage(userId, page + 1)
             }.onFailure { e -> runOnUiThread {
                 if (closed) return@runOnUiThread
-                status.text = if (items.isEmpty()) "${if (followers) "粉丝" else "关注"}列表加载失败：${IwaraApi.explainError(e)}"
-                else "${statusText(followingTotal, false)} · 后续加载失败：${IwaraApi.explainError(e)}"
+                status.text = if (items.isEmpty()) UiText.text(R.string.ui_4241615cc1a2, "%1\$s列表加载失败：%2\$s", if (followers) UiText.text(R.string.ui_261c51c9f1cd, "粉丝") else UiText.text(R.string.ui_eb137dee4c0a, "关注"), IwaraApi.explainError(e))
+                else UiText.text(R.string.ui_87bbf880f124, "%1\$s · 后续加载失败：%2\$s", statusText(followingTotal, false), IwaraApi.explainError(e))
             } }
         }
     }
 
     private fun statusText(total: Int, loadingMore: Boolean): String {
         val progress = if (total > items.size) "${items.size} / $total" else "${items.size}"
-        return (if (followers) "粉丝 $progress 位" else "已关注 $progress 位作者") + if (loadingMore) " · 正在加载更多…" else ""
+        return (if (followers) UiText.text(R.string.ui_09f360f3582a, "粉丝 %1\$s 位", progress) else UiText.text(R.string.ui_4d73fdd626d3, "已关注 %1\$s 位作者", progress)) + if (loadingMore) UiText.text(R.string.ui_95229c92b00d, " · 正在加载更多…") else ""
     }
 
     private fun enrichProfile(index: Int, author: IwaraAuthor) {

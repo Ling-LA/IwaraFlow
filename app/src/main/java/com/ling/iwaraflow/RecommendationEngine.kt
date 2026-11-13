@@ -329,9 +329,10 @@ class RecommendationEngine(
         val requests = ArrayList<PageRequest>()
         val loggedIn = api.isLoggedIn()
         if (round == 0) { sampledPages = emptyList(); recallNote = "" }
-        val tags = profile.topTags(RECALL_TAGS, RECALL_TAG_MIN_WEIGHT, random)
-        val authors = profile.topAuthorIds(RECALL_AUTHORS, RECALL_AUTHOR_MIN_WEIGHT, random)
-        val seasonal = SeasonalInterest.active(nowMs()).firstOrNull { SeasonalInterest.eligible(profile, it) }
+        val currentTaste = SeasonalInterest.withoutExpiredLearning(profile, nowMs())
+        val tags = currentTaste.topTags(RECALL_TAGS, RECALL_TAG_MIN_WEIGHT, random)
+        val authors = currentTaste.topAuthorIds(RECALL_AUTHORS, RECALL_AUTHOR_MIN_WEIGHT, random)
+        val seasonal = SeasonalInterest.active(nowMs()).firstOrNull { SeasonalInterest.eligible(currentTaste, it) }
         tags.forEach { tag ->
             // Both recent uploads and well-liked work within the actual interest.
             // Later rounds leave the two latest pages instead of falling back only

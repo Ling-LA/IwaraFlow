@@ -59,7 +59,7 @@ class TapToPauseTest {
         } finally { adapter.releaseAll() }
     }
 
-    private fun withPlayer(paused: Boolean, block: (VideoAdapter.Holder, androidx.media3.exoplayer.ExoPlayer) -> Unit) {
+    private fun withPlayer(paused: Boolean, ended: Boolean = false, block: (VideoAdapter.Holder, androidx.media3.exoplayer.ExoPlayer) -> Unit) {
         val adapter = adapter()
         try {
             adapter.replace(listOf(VideoItem("tap-fixture", "Fixture", "Fixture", emptyList(), 60, liked = true)))
@@ -67,10 +67,10 @@ class TapToPauseTest {
             adapter.onBindViewHolder(holder, 0)
             val player = mock(androidx.media3.exoplayer.ExoPlayer::class.java)
             `when`(player.applicationLooper).thenReturn(android.os.Looper.getMainLooper())
-            `when`(player.playbackState).thenReturn(androidx.media3.common.Player.STATE_READY)
+            `when`(player.playbackState).thenReturn(if (ended) androidx.media3.common.Player.STATE_ENDED else androidx.media3.common.Player.STATE_READY)
             `when`(player.duration).thenReturn(60000L)
             `when`(player.playWhenReady).thenReturn(!paused)
-            `when`(player.isPlaying).thenReturn(!paused)
+            `when`(player.isPlaying).thenReturn(!paused && !ended)
             holder.javaClass.getDeclaredField("player").apply { isAccessible = true }.set(holder, player)
             holder.javaClass.getDeclaredField("active").apply { isAccessible = true }.set(holder, true)
             holder.itemView.findViewById<androidx.media3.ui.PlayerView>(R.id.playerView).player = player
@@ -111,6 +111,26 @@ class TapToPauseTest {
     @Test fun enabledTapToPauseKeepsSingleTapResumeBehavior() {
         AppPrefs(RuntimeEnvironment.getApplication()).tapToPause = true
         withPlayer(true) { holder, player -> tap(holder); verify(player).play() }
+    }
+
+    @Test fun endedVideoCanTogglePanelsEvenWhenPlayWhenReadyIsStillTrue() {
+        val prefs = AppPrefs(RuntimeEnvironment.getApplication()); prefs.tapToPause = false
+        try { withPlayer(false, ended = true) { holder, player ->
+            val bar = holder.itemView.findViewById<PauseSeekBar>(R.id.pauseSeekBar)
+            assertEquals(View.VISIBLE, bar.visibility)
+            tap(holder); assertEquals(View.GONE, bar.visibility)
+            tap(holder); assertEquals(View.VISIBLE, bar.visibility)
+            verify(player, never()).play(); verify(player, never()).seekTo(anyLong())
+            holder.itemView.findViewById<PauseIndicatorView>(R.id.pauseIndicator).performClick()
+            verify(player).seekTo(0L); verify(player).play()
+        } } finally { prefs.tapToPause = true }
+    }
+
+    @Test fun enabledTapToPauseReplaysEndedVideoFromBeginning() {
+        AppPrefs(RuntimeEnvironment.getApplication()).tapToPause = true
+        withPlayer(false, ended = true) { holder, player ->
+            tap(holder); verify(player).seekTo(0L); verify(player).play()
+        }
     }
 
     /** 没有播放器（卡片还没开始播）时点出来的控件不能冒出来，也不能崩。 */

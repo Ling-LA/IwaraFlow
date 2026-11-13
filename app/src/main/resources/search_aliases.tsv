@@ -5,3 +5,14 @@ genshin_impact	genshin impact	原神	원신
 honkai_star_rail	honkai star rail	崩坏星穹铁道	崩壞星穹鐵道	崩壊スターレイル	붕괴 스타레일
 clara	克拉拉	クラーラ	클라라
 changfeng	长风	長風
+
+# Unambiguous general terms and seasonal spellings. Never add related concepts as aliases.
+dance	舞蹈	ダンス	댄스
+music	音乐	音樂	音楽	음악
+animation	动画	動畫	アニメーション	애니메이션
+robot	机器人	機器人	ロボット	로봇
+swimsuit	泳装	泳裝	水着	수영복
+halloween	万圣节	萬聖節	ハロウィン	할로윈
+christmas	xmas	圣诞节	聖誕節	クリスマス	크리스마스
+new_year	new year	新年	正月	새해
+valentine	valentines day	情人节	情人節	バレンタイン	발렌타인

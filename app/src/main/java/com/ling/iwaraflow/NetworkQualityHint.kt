@@ -21,10 +21,11 @@ internal class NetworkQualityHint(context: Context) : AppCompatTextView(context)
         visibility = View.GONE; tag = "network_quality_hint"
     }
     fun offer(quality: String, action: () -> Unit) {
-        val label = "网络不佳 · 点击切换至 $quality"
+        val actionLabel = UiText.text(R.string.ui_f4dfe64726ba, "点击切换")
+        val label = UiText.text(R.string.ui_f7b83ee3989d, "网络不佳 · %1\$s %2\$s", actionLabel, quality)
         text = SpannableString(label).apply {
-            val start = label.indexOf("点击切换")
-            setSpan(UnderlineSpan(), start, start+4, Spanned.SPAN_EXCLUSIVE_EXCLUSIVE)
+            val start = label.indexOf(actionLabel)
+            if (start >= 0) setSpan(UnderlineSpan(), start, start + actionLabel.length, Spanned.SPAN_EXCLUSIVE_EXCLUSIVE)
         }
         val wasHidden = visibility != View.VISIBLE
         visibility = View.VISIBLE; setOnClickListener { action() }

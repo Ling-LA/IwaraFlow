@@ -156,8 +156,8 @@ class PauseSeekBar @JvmOverloads constructor(
         observedPlayer = p
         val duration = p?.duration ?: 0L
         secondaryProgress = (max * maxOf(cachedFraction, if (duration > 0) (p?.bufferedPosition ?: 0L).toDouble() / duration else 0.0)).toInt().coerceIn(0, max)
-        val alive = p != null && p.playbackState != Player.STATE_IDLE && p.playbackState != Player.STATE_ENDED
-        val paused = alive && p != null && !p.isPlaying && !p.playWhenReady
+        val alive = p != null && p.playbackState != Player.STATE_IDLE
+        val paused = alive && p != null && (p.playbackState == Player.STATE_ENDED || !p.playWhenReady)
         // 关掉「点一下画面暂停播放」时点出来的控件：没暂停也要显示。
         if (root == null || !((paused || controlsPinned) && alive && !(paused && hidePausedControls)) || duration <= 0L) {
             visibility = View.GONE

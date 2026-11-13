@@ -94,7 +94,7 @@ object PlaybackGuide {
             pathEffect = DashPathEffect(floatArrayOf(8*density, 7*density), 0f)
         }
         private val heading = TextView(activity).apply {
-            text = "播放操作引导"; textSize = 20f; setTextColor(-1); typeface = Typeface.DEFAULT_BOLD; gravity = Gravity.CENTER
+            text = UiText.text(R.string.ui_9cedb7fa2768, "播放操作引导"); textSize = 20f; setTextColor(-1); typeface = Typeface.DEFAULT_BOLD; gravity = Gravity.CENTER
         }
         private val zones = List(3) { TextView(activity).apply {
             textSize = 15f; setTextColor(-1); gravity = Gravity.CENTER; setLineSpacing(5*density, 1f)
@@ -106,7 +106,7 @@ object PlaybackGuide {
             setPadding(dp(8), dp(8), dp(8), dp(8)); setBackgroundColor(0xF2182532.toInt())
         }
         private val controlCaption = TextView(activity).apply {
-            text = "按钮区\n独立操作"; textSize = 11f; setTextColor(0xFFBDCCD7.toInt()); gravity = Gravity.CENTER
+            text = UiText.text(R.string.ui_30eb650b6338, "按钮区\n独立操作"); textSize = 11f; setTextColor(0xFFBDCCD7.toInt()); gravity = Gravity.CENTER
         }
         private data class Chrome(val surface: RectF?, val navigation: RectF?, val actions: RectF?, val info: RectF?, val controls: List<RectF>, val normal: Boolean)
         private var chrome = Chrome(null, null, null, null, emptyList(), true)
@@ -161,17 +161,17 @@ object PlaybackGuide {
             setWillNotDraw(false); setBackgroundColor(0xD0182532.toInt()); isClickable = true; isFocusable = true
             addView(heading); zones.forEach { addView(it) }; addView(controlCaption)
             footer.addView(TextView(activity).apply {
-                text = "← 左滑快退     右滑快进 →"; textSize = 14f; setTextColor(-1)
+                text = UiText.text(R.string.ui_47e2f98f89b4, "← 左滑快退     右滑快进 →"); textSize = 14f; setTextColor(-1)
                 typeface = Typeface.DEFAULT_BOLD; gravity = Gravity.CENTER
                 setPadding(0, 0, 0, dp(4))
             })
             footer.addView(TextView(activity).apply {
-                text = "仅在空白画面长按；导航、按钮和底部信息区除外\n单击暂停 / 显示控件 · 双击点赞\n长按评论 0.5 秒：快捷发送弹幕评论"; textSize = 11f; setTextColor(-1); gravity = Gravity.CENTER
+                text = UiText.text(R.string.ui_6685ee9a5e62, "仅在空白画面长按；导航、按钮和底部信息区除外\n单击暂停 / 显示控件 · 双击点赞\n长按评论 0.5 秒：快捷发送弹幕评论"); textSize = 11f; setTextColor(-1); gravity = Gravity.CENTER
             })
             val actions = LinearLayout(activity).apply { gravity = Gravity.CENTER }
             actions.addView(switch, LinearLayout.LayoutParams(dp(148), dp(44)))
             actions.addView(TextView(activity).apply {
-                text = "知道了"; contentDescription = "关闭操作引导"; textSize = 15f; setTextColor(0xFF17324A.toInt()); gravity = Gravity.CENTER
+                text = UiText.text(R.string.ui_de32e20193ad, "知道了"); contentDescription = UiText.text(R.string.ui_bbfb08ea1c53, "关闭操作引导"); textSize = 15f; setTextColor(0xFF17324A.toInt()); gravity = Gravity.CENTER
                 background = GradientDrawable().apply { setColor(-1); cornerRadius = 24*density }
                 setOnClickListener { close() }
             }, LinearLayout.LayoutParams(dp(100), dp(44)))
@@ -180,11 +180,11 @@ object PlaybackGuide {
             updateLabels()
         }
         private fun updateLabels() {
-            heading.text = if (horizontal) "横屏全屏操作引导" else "播放画面操作指引"
-            zones[0].text = "⊘\n长按${if (horizontal) "左侧" else "上方"}\n不感兴趣\n选择视频、作者或标签"
-            zones[1].text = "三连\n按住中间 1.5 秒\n点赞＋收藏＋关注\n提前松开即可取消"
-            zones[2].text = "≫\n长按${if (horizontal) "右侧" else "下方"}\n2× 加速\n松开恢复正常速度"
-            switch.text = if (horizontal) "查看竖屏操作" else "查看横屏操作"
+            heading.text = if (horizontal) UiText.text(R.string.ui_9616cf6a7b16, "横屏全屏操作引导") else UiText.text(R.string.ui_a187915f6c9f, "播放画面操作指引")
+            zones[0].text = UiText.text(R.string.ui_cf8e3f5a662f, "⊘\n长按%1\$s\n不感兴趣\n选择视频、作者或标签", if (horizontal) UiText.text(R.string.ui_6a24b14f33c7, "左侧") else UiText.text(R.string.ui_3e9f8413bca1, "上方"))
+            zones[1].text = UiText.text(R.string.ui_17a26cf96be3, "三连\n按住中间 1.5 秒\n点赞＋收藏＋关注\n提前松开即可取消")
+            zones[2].text = UiText.text(R.string.ui_ee32a5d9d91a, "≫\n长按%1\$s\n2× 加速\n松开恢复正常速度", if (horizontal) UiText.text(R.string.ui_1cf1d4d0b24b, "右侧") else UiText.text(R.string.ui_b399f3748fa2, "下方"))
+            switch.text = if (horizontal) UiText.text(R.string.ui_db515e500dff, "查看竖屏操作") else UiText.text(R.string.ui_b2ae77a39cf5, "查看横屏操作")
         }
         override fun onMeasure(widthMeasureSpec: Int, heightMeasureSpec: Int) {
             val w = MeasureSpec.getSize(widthMeasureSpec); val h = MeasureSpec.getSize(heightMeasureSpec)
@@ -228,8 +228,8 @@ object PlaybackGuide {
                 val r = labelAreas[i]
                 val compact = r.height() < dp(86) || r.width() < dp(220)
                 zone.textSize = if (compact) 12f else 15f; zone.setLineSpacing(2*density, 1f)
-                zone.text = if (r.height() < dp(60)) listOf("长按上方：不感兴趣", "中间 1.5 秒：点赞＋收藏＋关注", "长按下方：2× 加速")[i]
-                    else listOf("⊘\n长按上方空白画面\n不感兴趣选项", "三连\n按住中间 1.5 秒\n点赞＋收藏＋关注", "≫\n长按下方空白画面\n2× 加速 · 松开恢复")[i]
+                zone.text = if (r.height() < dp(60)) listOf(UiText.text(R.string.ui_fa94dd94c403, "长按上方：不感兴趣"), UiText.text(R.string.ui_d0691b69fa0f, "中间 1.5 秒：点赞＋收藏＋关注"), UiText.text(R.string.ui_afe21c0ac2c6, "长按下方：2× 加速"))[i]
+                    else listOf(UiText.text(R.string.ui_d9c58bb9a20d, "⊘\n长按上方空白画面\n不感兴趣选项"), UiText.text(R.string.ui_e0c8de16cd05, "三连\n按住中间 1.5 秒\n点赞＋收藏＋关注"), UiText.text(R.string.ui_57cedd176893, "≫\n长按下方空白画面\n2× 加速 · 松开恢复"))[i]
                 zone.measure(MeasureSpec.makeMeasureSpec(r.width().toInt().coerceAtLeast(0), MeasureSpec.EXACTLY),
                     MeasureSpec.makeMeasureSpec(r.height().toInt().coerceAtLeast(0), MeasureSpec.EXACTLY))
             }

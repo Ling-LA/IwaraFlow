@@ -80,6 +80,6 @@ class ExtraLikeSignalTest {
         history.close(); history = HistoryStore(context)
         assertEquals("one", history.recentHistory().single().id)
         assertTrue(history.recordExtraLike(item))
-        assertEquals(12, history.writableDatabase.version)
+        assertEquals(13, history.writableDatabase.version)
     }
 }

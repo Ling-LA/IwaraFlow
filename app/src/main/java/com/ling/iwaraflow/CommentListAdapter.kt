@@ -168,7 +168,7 @@ class CommentListAdapter(
             val indent = (if (row.depth > 0) 48 else 16) * density
             itemView.setPadding(indent.toInt(), itemView.paddingTop, itemView.paddingRight, itemView.paddingBottom)
             AvatarImages.bind(avatar, c.author.avatarUrl)
-            author.text = c.author.name.ifBlank { c.author.username }.ifBlank { "匿名" }
+            author.text = c.author.name.ifBlank { c.author.username }.ifBlank { UiText.text(R.string.ui_34a917cd44b0, "匿名") }
             val openAuthor = onOpenAuthor?.takeIf { c.author.id.isNotBlank() || c.author.username.isNotBlank() }
             val authorClick: ((View) -> Unit)? = openAuthor?.let { open -> { open(c.author) } }
             avatar.setOnClickListener(authorClick)
@@ -185,9 +185,9 @@ class CommentListAdapter(
                 else -> {
                     replies.visibility = View.VISIBLE
                     replies.text = when {
-                        id in loading -> "加载中…"
-                        expanded[id] != null -> "收起回复"
-                        else -> "共 ${c.replyCount} 条回复 ›"
+                        id in loading -> UiText.text(R.string.ui_4927a53bcc88, "加载中…")
+                        expanded[id] != null -> UiText.text(R.string.ui_c6edf9663490, "收起回复")
+                        else -> UiText.text(R.string.ui_233dc371323c, "共 %1\$s 条回复 ›", c.replyCount)
                     }
                     replies.setOnClickListener { toggleReplies(c) }
                 }
@@ -217,7 +217,7 @@ class CommentListAdapter(
                 null -> translate.visibility = View.GONE
                 Translator.State.Loading -> {
                     translate.visibility = View.VISIBLE
-                    translate.text = "翻译中…"
+                    translate.text = UiText.text(R.string.ui_07f81963cdeb, "翻译中…")
                 }
                 is Translator.State.Done -> {
                     if (Translator.isChineseSource(s.translation)) {
@@ -227,16 +227,16 @@ class CommentListAdapter(
                     }
                     translate.visibility = View.VISIBLE
                     if (s.showOriginal) {
-                        translate.text = "原文 · 查看中文翻译"
+                        translate.text = UiText.text(R.string.ui_42137c4409f9, "原文 · 查看中文翻译")
                     } else {
                         body.text = s.translation.text
-                        translate.text = "${Translator.sourceLabel(s.translation)} · 显示原文"
+                        translate.text = UiText.text(R.string.ui_4b7ebfd54dbe, "%1\$s · 显示原文", Translator.sourceLabel(s.translation))
                     }
                     translate.setOnClickListener { toggleOriginal(c) }
                 }
                 is Translator.State.Failed -> {
                     translate.visibility = View.VISIBLE
-                    translate.text = "翻译失败：${s.message} · 重试"
+                    translate.text = UiText.text(R.string.ui_0370932b3629, "翻译失败：%1\$s · 重试", s.message)
                     translate.setOnClickListener { requestTranslation(c); bindTranslation(c) }
                 }
             }
@@ -250,10 +250,10 @@ class CommentListAdapter(
             val diff = now - epochMs
             val minute = 60_000L; val hour = 60 * minute; val day = 24 * hour
             return when {
-                diff < minute -> "刚刚"
-                diff < hour -> "${diff / minute} 分钟前"
-                diff < day -> "${diff / hour} 小时前"
-                diff < 30 * day -> "${diff / day} 天前"
+                diff < minute -> UiText.text(R.string.ui_de6785d99e02, "刚刚")
+                diff < hour -> UiText.text(R.string.ui_ccb2cfeb4e30, "%1\$s 分钟前", diff / minute)
+                diff < day -> UiText.text(R.string.ui_b2c8b4c28a55, "%1\$s 小时前", diff / hour)
+                diff < 30 * day -> UiText.text(R.string.ui_09b13d406f80, "%1\$s 天前", diff / day)
                 else -> java.text.SimpleDateFormat("yyyy-MM-dd", java.util.Locale.ROOT).format(java.util.Date(epochMs))
             }
         }

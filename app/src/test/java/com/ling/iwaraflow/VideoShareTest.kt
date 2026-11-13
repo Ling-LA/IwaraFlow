@@ -6,18 +6,17 @@ import org.junit.Test
 /** 分享出去的必须是能在浏览器里打开的 Iwara 视频链接。 */
 class VideoShareTest {
     private fun item(id: String, title: String) = VideoItem(id, title, "作者", emptyList(), 0)
-    private val downloadSuffix = "\n\nIwaraFlow 官方下载：https://github.com/Ling-LA/IwaraFlow/releases/latest"
 
     @Test fun shareLinkPointsAtTheIwaraVideoPage() {
         assertEquals("https://www.iwara.tv/video/abc123", VideoShare.linkFor(item("abc123", "标题")))
     }
 
     @Test fun shareTextKeepsTheTitleAboveTheLink() {
-        assertEquals("标题：标题\n作者：作者\n链接：https://www.iwara.tv/video/abc123" + downloadSuffix, VideoShare.shareText(item("abc123", "标题")))
+        assertEquals("标题：标题\n作者：作者\n链接：https://www.iwara.tv/video/abc123", VideoShare.shareText(item("abc123", "标题")))
     }
 
     @Test fun missingMetadataHasExplicitFallbacks() {
-        assertEquals("标题：未命名视频\n作者：未知作者\n链接：https://www.iwara.tv/video/abc123" + downloadSuffix,
+        assertEquals("标题：未命名视频\n作者：未知作者\n链接：https://www.iwara.tv/video/abc123",
             VideoShare.shareText(item("abc123", "   ").copy(author = "")))
     }
 
@@ -39,14 +38,14 @@ class VideoShareTest {
 
     @Test fun authorCardCarriesNameProfileAndLink() {
         assertEquals(
-            "作者：Fixture 作者\n链接：https://www.iwara.tv/profile/fixture" + downloadSuffix,
+            "作者：Fixture 作者\n链接：https://www.iwara.tv/profile/fixture",
             VideoShare.authorShareText(author("每周更新 MMD"))
         )
     }
 
     @Test fun anAuthorWithoutAProfileTextStillSharesTheLink() {
         assertEquals(
-            "作者：Fixture 作者\n链接：https://www.iwara.tv/profile/fixture" + downloadSuffix,
+            "作者：Fixture 作者\n链接：https://www.iwara.tv/profile/fixture",
             VideoShare.authorShareText(author("   "))
         )
     }
@@ -55,7 +54,7 @@ class VideoShareTest {
         assertEquals("https://www.iwara.tv/profile/fixture", VideoShare.authorLinkFor(author("")))
     }
 
-    @Test fun downloadFooterKeepsTheIwaraLinkFirstAndPasteableForBothShareKinds() {
+    @Test fun shareContainsOnlyTheIwaraLinkForBothShareKinds() {
         val video = item("abc123", "中性示例")
         val creator = author("")
         val cases = listOf(
@@ -63,9 +62,9 @@ class VideoShareTest {
             VideoShare.authorShareText(creator) to IwaraSharedLink(IwaraSharedLink.Kind.AUTHOR, "fixture")
         )
         for ((text, expected) in cases) {
-            assertEquals(listOf(expected.url, AppLinks.DOWNLOAD), Regex("https://\\S+").findAll(text).map { it.value }.toList())
+            assertEquals(listOf(expected.url), Regex("https://\\S+").findAll(text).map { it.value }.toList())
             assertEquals("Pasting a share into search must still select its video or author", expected, IwaraSharedLink.parse(text))
-            assertTrue(text.endsWith(downloadSuffix))
+            assertFalse(text.contains(AppLinks.DOWNLOAD))
         }
     }
 }

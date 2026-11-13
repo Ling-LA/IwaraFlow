@@ -13,10 +13,13 @@ package com.ling.iwaraflow
  * 作者名一栏没有排序入口，固定按关注数多的优先。
  */
 object SearchSort {
-    enum class Key(val label: String, val api: String) {
-        DATE("上传时间", "date"),
-        VIEWS("播放量", "views"),
-        LIKES("点赞数", "likes")
+    enum class Key(val api: String) {
+        DATE("date"), VIEWS("views"), LIKES("likes");
+        val label: String get() = when (this) {
+            DATE -> UiText.text(R.string.ui_de89171538fd, "上传时间")
+            VIEWS -> UiText.text(R.string.ui_c33f56e5d7b8, "播放量")
+            LIKES -> UiText.text(R.string.ui_594e6397000f, "点赞数")
+        }
     }
 
     val DEFAULT_KEY = Key.DATE

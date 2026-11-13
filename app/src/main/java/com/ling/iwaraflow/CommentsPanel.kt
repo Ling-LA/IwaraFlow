@@ -136,7 +136,7 @@ class CommentsPanel(
         adapter.replaceAll(emptyList())
         commentsLoadedFor = null
         nextPage = 0; hasMore = false; loadingPage = false; total = -1
-        title.text = "评论"
+        title.text = UiText.text(R.string.ui_6849b8254d20, "评论")
         hideStatus()
         infoTranslation = null
         detailRequested = false
@@ -245,7 +245,7 @@ class CommentsPanel(
             val item = video
             if (item != null && commentsLoadedFor != item.id) {
                 commentsLoadedFor = item.id
-                showStatus("加载中…")
+                showStatus(UiText.text(R.string.ui_4927a53bcc88, "加载中…"))
                 loadPage()
             }
         }
@@ -258,11 +258,11 @@ class CommentsPanel(
         val parts = ArrayList<String>()
         parts += "@${item.author}"
         if (item.createdAt > 0L) parts += SimpleDateFormat("yyyy-MM-dd", Locale.ROOT).format(Date(item.createdAt))
-        if (item.views > 0) parts += "${formatCount(item.views)} 次播放"
-        if (item.likes > 0) parts += "${formatCount(item.likes)} 赞"
+        if (item.views > 0) parts += UiText.text(R.string.ui_39257f493b73, "%1\$s 次播放", formatCount(item.views))
+        if (item.likes > 0) parts += UiText.text(R.string.ui_4c8d5207c220, "%1\$s 赞", formatCount(item.likes))
         // 「为什么推荐给我」：这条是怎么被选出来的。推荐流之外（作者页、搜索页）没有理由，就不写。
         val reason = reasonFor?.invoke(item.id)?.takeIf { it.isNotBlank() }
-        infoMeta.text = parts.joinToString("  ·  ") + (reason?.let { "\n推荐理由：$it" }.orEmpty())
+        infoMeta.text = parts.joinToString("  ·  ") + (reason?.let { UiText.text(R.string.ui_2e26a491185a, "\n推荐理由：%1\$s", it) }.orEmpty())
         renderTags(item)
         renderDescription(item)
     }
@@ -296,7 +296,7 @@ class CommentsPanel(
         val text = item.description.trim()
         infoTranslate.setOnClickListener(null)
         if (text.isBlank()) {
-            infoBody.text = if (detailRequested) "读取中…" else "暂无简介"
+            infoBody.text = if (detailRequested) UiText.text(R.string.ui_346ff60e6c7c, "读取中…") else UiText.text(R.string.ui_5ad78db20614, "暂无简介")
             infoTranslate.visibility = View.GONE
             return
         }
@@ -320,7 +320,7 @@ class CommentsPanel(
             null -> infoTranslate.visibility = View.GONE
             Translator.State.Loading -> {
                 infoTranslate.visibility = View.VISIBLE
-                infoTranslate.text = "翻译中…"
+                infoTranslate.text = UiText.text(R.string.ui_07f81963cdeb, "翻译中…")
             }
             is Translator.State.Done -> {
                 if (Translator.isChineseSource(s.translation)) {
@@ -329,10 +329,10 @@ class CommentsPanel(
                 }
                 infoTranslate.visibility = View.VISIBLE
                 if (s.showOriginal) {
-                    infoTranslate.text = "原文 · 查看中文翻译"
+                    infoTranslate.text = UiText.text(R.string.ui_42137c4409f9, "原文 · 查看中文翻译")
                 } else {
                     infoBody.text = s.translation.text
-                    infoTranslate.text = "${Translator.sourceLabel(s.translation)} · 显示原文"
+                    infoTranslate.text = UiText.text(R.string.ui_4b7ebfd54dbe, "%1\$s · 显示原文", Translator.sourceLabel(s.translation))
                 }
                 infoTranslate.setOnClickListener {
                     infoTranslation = s.copy(showOriginal = !s.showOriginal)
@@ -341,7 +341,7 @@ class CommentsPanel(
             }
             is Translator.State.Failed -> {
                 infoTranslate.visibility = View.VISIBLE
-                infoTranslate.text = "翻译失败：${s.message} · 重试"
+                infoTranslate.text = UiText.text(R.string.ui_0370932b3629, "翻译失败：%1\$s · 重试", s.message)
                 infoTranslate.setOnClickListener { requestInfoTranslation(item, text); renderDescription(item) }
             }
         }
@@ -376,14 +376,14 @@ class CommentsPanel(
                     renderDescription(item)
                 }.onFailure {
                     detailRequested = false
-                    infoBody.text = "简介读取失败：${IwaraApi.explainError(it)}"
+                    infoBody.text = UiText.text(R.string.ui_3f115391dc24, "简介读取失败：%1\$s", IwaraApi.explainError(it))
                 }
             }
         }
     }
 
     private fun formatCount(value: Int): String = when {
-        value >= 10_000 -> "%.1f 万".format(value / 10_000.0)
+        value >= 10_000 -> UiText.text(R.string.ui_2e9d50202040, "%.1f 万").format(value / 10_000.0)
         else -> value.toString()
     }
 
@@ -405,12 +405,12 @@ class CommentsPanel(
                     if (data.total >= 0) total = data.total
                     if (page == 0) adapter.replaceAll(data.comments) else adapter.append(data.comments)
                     refreshTitle()
-                    if (adapter.itemCount == 0) showStatus("还没有评论，来说第一句") else hideStatus()
+                    if (adapter.itemCount == 0) showStatus(UiText.text(R.string.ui_923ba1cfef8f, "还没有评论，来说第一句")) else hideStatus()
                 }.onFailure {
                     if (adapter.itemCount == 0) {
-                        showStatus(NetworkProxy.explain(it.message) ?: "评论加载失败：${IwaraApi.explainError(it)}")
+                        showStatus(NetworkProxy.explain(it.message) ?: UiText.text(R.string.ui_e6b7ea3efd18, "评论加载失败：%1\$s", IwaraApi.explainError(it)))
                     } else {
-                        Toast.makeText(root.context, "评论加载失败：${IwaraApi.explainError(it)}", Toast.LENGTH_SHORT).show()
+                        Toast.makeText(root.context, UiText.text(R.string.ui_e6b7ea3efd18, "评论加载失败：%1\$s", IwaraApi.explainError(it)), Toast.LENGTH_SHORT).show()
                     }
                 }
             }
@@ -418,7 +418,7 @@ class CommentsPanel(
     }
 
     private fun loadReplies(parent: IwaraComment, done: (Result<List<IwaraComment>>) -> Unit) {
-        val item = video ?: return done(Result.failure(IllegalStateException("面板已关闭")))
+        val item = video ?: return done(Result.failure(IllegalStateException(UiText.text(R.string.ui_c515c9c399a4, "面板已关闭"))))
         val gen = generation
         api.getComments(item.id, 0, parentId = parent.id) { result ->
             root.post {
@@ -430,16 +430,16 @@ class CommentsPanel(
 
     private fun refreshTitle() {
         val count = if (total >= 0) total else adapter.topLevelCount()
-        title.text = if (count > 0) "评论 $count" else "评论"
+        title.text = if (count > 0) UiText.text(R.string.ui_cea38c59a2c2, "评论 %1\$s", count) else UiText.text(R.string.ui_6849b8254d20, "评论")
     }
 
     private fun replyName(target: IwaraComment): String =
-        target.author.name.ifBlank { target.author.username }.ifBlank { "匿名" }
+        target.author.name.ifBlank { target.author.username }.ifBlank { UiText.text(R.string.ui_34a917cd44b0, "匿名") }
 
     private fun startReply(target: IwaraComment) {
         replyTo = target
         replyBar.visibility = View.VISIBLE
-        replyTarget.text = "回复 @${replyName(target)}：${target.body.take(40)}"
+        replyTarget.text = UiText.text(R.string.ui_3f698904a891, "回复 @%1\$s：%2\$s", replyName(target), target.body.take(40))
         renderInput()
         openInput()
     }
@@ -457,7 +457,7 @@ class CommentsPanel(
             input.text = draft
             input.setTextColor(0xFF17324A.toInt())
         } else {
-            input.text = if (target == null) "说点什么…" else "回复 @${replyName(target)}"
+            input.text = if (target == null) UiText.text(R.string.ui_72a70e767e8c, "说点什么…") else UiText.text(R.string.ui_bfa4a6ad0272, "回复 @%1\$s", replyName(target))
             input.setTextColor(0xFF8A9BAA.toInt())
         }
     }
@@ -473,7 +473,7 @@ class CommentsPanel(
     }
 
     private fun openInput(quick: Boolean = false) {
-        if (sending) { Toast.makeText(root.context, "正在发送，请稍候", Toast.LENGTH_SHORT).show(); return }
+        if (sending) { Toast.makeText(root.context, UiText.text(R.string.ui_13b240284c01, "正在发送，请稍候"), Toast.LENGTH_SHORT).show(); return }
         val activity = hostActivity() ?: return
         if (activity.isFinishing || activity.isDestroyed) return
         if (!api.isLoggedIn()) { onNeedLogin(); return }
@@ -483,7 +483,7 @@ class CommentsPanel(
             draft = draft,
             onSend = ::submit,
             onDraft = { draft = it; renderInput() },
-            hint = if (quick) "发送弹幕评论（同步到 Iwara）" else null
+            hint = if (quick) UiText.text(R.string.ui_cb9e61d8f46c, "发送弹幕评论（同步到 Iwara）") else null
         ).show()
     }
 
@@ -515,14 +515,14 @@ class CommentsPanel(
                     hideStatus()
                     cancelReply()
                     onCommentPosted?.invoke(item)
-                    Toast.makeText(root.context, "已发送到 Iwara", Toast.LENGTH_SHORT).show()
+                    Toast.makeText(root.context, UiText.text(R.string.ui_7fec629f1145, "已发送到 Iwara"), Toast.LENGTH_SHORT).show()
                 }.onFailure {
                     // 没发出去的内容留作草稿，再点输入框还能接着改。
                     draft = text
                     renderInput()
-                    val message = it.message ?: "评论发送失败"
+                    val message = it.message ?: UiText.text(R.string.ui_d4756a5c8fc6, "评论发送失败")
                     Toast.makeText(root.context, message, Toast.LENGTH_LONG).show()
-                    if (message.contains("登录")) onNeedLogin()
+                    if (message.contains("登录")) onNeedLogin() // ui-literal: API error detection
                 }
             }
         }

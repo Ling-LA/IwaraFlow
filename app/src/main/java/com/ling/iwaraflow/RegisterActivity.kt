@@ -57,7 +57,7 @@ class RegisterActivity : AppCompatActivity() {
             }
 
             override fun onPageFinished(view: WebView?, url: String?) {
-                status.text = "在官网页面填写邮箱完成注册，到邮箱确认并设好密码后，回到登录窗口登录。"
+                status.text = UiText.text(R.string.ui_7e3770588c90, "在官网页面填写邮箱完成注册，到邮箱确认并设好密码后，回到登录窗口登录。")
             }
         }
         onBackPressedDispatcher.addCallback(this, object : OnBackPressedCallback(true) {

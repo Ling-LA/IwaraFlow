@@ -20,7 +20,7 @@
         android:layout_width="58dp"
         android:layout_height="58dp"
         android:background="#E5F3FC"
-        android:contentDescription="作者头像"
+        android:contentDescription="@string/ui_9fe956ddc889"
         android:scaleType="centerCrop" />
 
     <LinearLayout
@@ -57,7 +57,7 @@
             android:layout_marginTop="3dp"
             android:ellipsize="end"
             android:maxLines="1"
-            android:text="已关注"
+            android:text="@string/ui_9fe1d0c9cca3"
             android:textColor="#8299AA"
             android:textSize="11sp" />
     </LinearLayout>

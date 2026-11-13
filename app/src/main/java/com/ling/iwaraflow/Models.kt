@@ -166,12 +166,13 @@ data class PreferenceProfile(
     /** 用户明确点过「不感兴趣：标签」的标签。 */
     val mutedTags: Set<String> = emptySet(),
     val manualTagPreferences: Map<String, Int> = emptyMap(),
-    val positiveTagWeights: Map<String, Double> = emptyMap()
+    val positiveTagWeights: Map<String, Double> = emptyMap(),
+    val textWeights: Map<String, Double> = emptyMap()
 ) {
     fun score(item: VideoItem): Double {
         val byId = item.authorId.takeIf { it.isNotBlank() }?.let { authorIdWeights[it] }
         val author = byId ?: authorWeights[item.author.lowercase()] ?: 0.0
-        return author + matchedTagScore(item) + (videoWeights[item.id] ?: 0.0)
+        return author + matchedTagScore(item) + ContentInterest.score(item, this) + (videoWeights[item.id] ?: 0.0)
     }
 
     private fun manualChoices(item: VideoItem): List<Int> = item.tags.map(SearchQuery::canonicalTag).distinct()
@@ -197,11 +198,12 @@ data class PreferenceProfile(
         val author = item.authorId.takeIf { it.isNotBlank() }?.let { authorIdWeights[it] }
             ?: authorWeights[item.author.lowercase()] ?: 0.0
         val (positive, negative) = learnedTagComponents(item)
+        val text = ContentInterest.score(item, this)
         // A saturated author/tag preference must not swallow explicit feedback about
         // this particular video. Apply it after the learned category budget is capped.
         // Cap positive and negative category evidence separately for the same reason.
-        return (positive + author.coerceAtLeast(0.0)).coerceAtMost(8.0) +
-            (negative + author.coerceAtMost(0.0)).coerceAtLeast(-6.0) + manual + video
+        return (positive + author.coerceAtLeast(0.0) + text.coerceAtLeast(0.0)).coerceAtMost(8.0) +
+            (negative + author.coerceAtMost(0.0) + text.coerceAtMost(0.0)).coerceAtLeast(-6.0) + manual + video
     }
 
     /**

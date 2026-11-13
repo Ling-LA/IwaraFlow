@@ -25,7 +25,7 @@ class PageLayout(val activity: Activity, title: String) {
             orientation = LinearLayout.VERTICAL
             setPadding(dp(18), dp(10), dp(18), dp(16))
             setBackgroundColor(UiPalette.resolve(context, 0xFFDDF1FC.toInt()))
-            addView(text("‹  返回", 16f).apply {
+            addView(text(UiText.text(R.string.ui_29ebafb31c58, "‹  返回"), 16f).apply {
                 minHeight = dp(48); gravity = Gravity.CENTER_VERTICAL
                 setOnClickListener { activity.finish() }
             })

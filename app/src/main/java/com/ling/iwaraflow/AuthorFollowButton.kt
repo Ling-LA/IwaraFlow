@@ -22,7 +22,7 @@ class AuthorFollowButton @JvmOverloads constructor(
 
     init {
         gravity = android.view.Gravity.CENTER
-        text = "关注"
+        text = UiText.text(R.string.ui_eb137dee4c0a, "关注")
         textSize = 12f
         setTextColor(Color.WHITE)
         isClickable = true
@@ -83,11 +83,11 @@ class AuthorFollowButton @JvmOverloads constructor(
         val (item, adapter) = currentItemAndAdapter() ?: return
         val api = api()
         if (!api.isLoggedIn()) {
-            Toast.makeText(context, "请先登录 Iwara 后再关注作者", Toast.LENGTH_SHORT).show()
+            Toast.makeText(context, UiText.text(R.string.ui_79f8f482032b, "请先登录 Iwara 后再关注作者"), Toast.LENGTH_SHORT).show()
             return
         }
         if (item.authorId.isBlank() && item.authorUsername.isBlank()) {
-            Toast.makeText(context, "该视频没有可用的作者资料", Toast.LENGTH_SHORT).show()
+            Toast.makeText(context, UiText.text(R.string.ui_5a8d4a2ddb54, "该视频没有可用的作者资料"), Toast.LENGTH_SHORT).show()
             return
         }
         busy = true
@@ -104,10 +104,10 @@ class AuthorFollowButton @JvmOverloads constructor(
                     result.onSuccess {
                         updateAuthorState(adapter, item, desired)
                         showFollowing(desired)
-                        Toast.makeText(context, if (desired) "已关注 ${item.author}" else "已取消关注 ${item.author}", Toast.LENGTH_SHORT).show()
+                        Toast.makeText(context, if (desired) UiText.text(R.string.ui_415ceaf14d1d, "已关注 %1\$s", item.author) else UiText.text(R.string.ui_d0aaadd68b8d, "已取消关注 %1\$s", item.author), Toast.LENGTH_SHORT).show()
                     }.onFailure {
                         showFollowing(item.authorFollowing)
-                        Toast.makeText(context, it.message ?: "关注操作失败", Toast.LENGTH_SHORT).show()
+                        Toast.makeText(context, it.message ?: UiText.text(R.string.ui_81c13adcedb3, "关注操作失败"), Toast.LENGTH_SHORT).show()
                     }
                 }
             }
@@ -145,7 +145,7 @@ class AuthorFollowButton @JvmOverloads constructor(
     }
 
     private fun showFollowing(following: Boolean) {
-        text = if (following) "已关注" else "关注"
+        text = if (following) UiText.text(R.string.ui_9fe1d0c9cca3, "已关注") else UiText.text(R.string.ui_eb137dee4c0a, "关注")
         refreshStyle(following)
     }
 

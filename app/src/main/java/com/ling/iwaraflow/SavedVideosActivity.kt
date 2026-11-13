@@ -124,7 +124,7 @@ class SavedVideosActivity : AppCompatActivity(), PlaybackGuideHost {
             onEnterPip = { FloatingVideoService.request(this, feedAdapter, ::enterPip) },
             onShare = ::shareVideo,
             onEnded = ::nextVideo,
-            onNeedLogin = { Toast.makeText(this, "请先在主页登录 Iwara", Toast.LENGTH_SHORT).show() },
+            onNeedLogin = { Toast.makeText(this, UiText.text(R.string.ui_1ff82bfd157a, "请先在主页登录 Iwara"), Toast.LENGTH_SHORT).show() },
             onComments = { comments.open(it) },
             onInfo = { comments.open(it, CommentsPanel.Tab.INFO) },
             onFullscreen = { _, enabled -> setFullscreen(enabled) }
@@ -140,7 +140,7 @@ class SavedVideosActivity : AppCompatActivity(), PlaybackGuideHost {
             api = api,
             topBarHeight = { (60 * density).toInt() },
             gapPx = (20 * density).toInt(),
-            onNeedLogin = { Toast.makeText(this, "请先在主页登录 Iwara", Toast.LENGTH_SHORT).show() },
+            onNeedLogin = { Toast.makeText(this, UiText.text(R.string.ui_1ff82bfd157a, "请先在主页登录 Iwara"), Toast.LENGTH_SHORT).show() },
             onOpenAuthor = ::openAuthor,
             onCommentPosted = { history.recordInteractionAsync(it, "comment", 1.5) },
             onOpenTag = ::openTagSearch
@@ -191,19 +191,19 @@ class SavedVideosActivity : AppCompatActivity(), PlaybackGuideHost {
         }
         val controls = android.widget.LinearLayout(this).apply { gravity = android.view.Gravity.CENTER_VERTICAL }
         val input = android.widget.EditText(this).apply {
-            hint = "搜索标题、作者或标签"; textSize = 14f; setSingleLine()
-            contentDescription = "搜索本地列表"; setText(listQuery)
+            hint = UiText.text(R.string.ui_0114777cbaaf, "搜索标题、作者或标签"); textSize = 14f; setSingleLine()
+            contentDescription = UiText.text(R.string.ui_c76755097242, "搜索本地列表"); setText(listQuery)
         }
         val sort = android.widget.Button(this).apply {
-            text = if (ascending) "最早在前" else "最新在前"; setOnClickListener {
-                ascending = !ascending; text = if (ascending) "最早在前" else "最新在前"
+            text = if (ascending) UiText.text(R.string.ui_c7a4163933cf, "最早在前") else UiText.text(R.string.ui_c2fb4c34d471, "最新在前"); setOnClickListener {
+                ascending = !ascending; text = if (ascending) UiText.text(R.string.ui_c7a4163933cf, "最早在前") else UiText.text(R.string.ui_c2fb4c34d471, "最新在前")
                 loadLibraryPage(reset = true)
             }
         }
         controls.addView(input, android.widget.LinearLayout.LayoutParams(0, -2, 1f))
         controls.addView(sort); header.addView(controls)
         if (kind == KIND_HISTORY) header.addView(android.widget.CheckBox(this).apply {
-            text = "仅显示已点赞视频"; tag = "history_liked_only"; isChecked = likedOnly
+            text = UiText.text(R.string.ui_c6b2e225a045, "仅显示已点赞视频"); tag = "history_liked_only"; isChecked = likedOnly
             setTextColor(UiPalette.resolve(this@SavedVideosActivity, 0xFF17324A.toInt()))
             setOnCheckedChangeListener { _, enabled ->
                 likedOnly = enabled; likedFilterIds = prefs.likeStates.likedIds()
@@ -241,7 +241,7 @@ class SavedVideosActivity : AppCompatActivity(), PlaybackGuideHost {
             if (::comments.isInitialized) comments.close()
             if (::feedAdapter.isInitialized) feedAdapter.suspendPlayback()
             playlistFavorites.close()
-            Toast.makeText(this, "账号已切换，请重新打开收藏夹", Toast.LENGTH_SHORT).show()
+            Toast.makeText(this, UiText.text(R.string.ui_e213f78627c3, "账号已切换，请重新打开收藏夹"), Toast.LENGTH_SHORT).show()
             finish()
         }
         return false
@@ -273,8 +273,8 @@ class SavedVideosActivity : AppCompatActivity(), PlaybackGuideHost {
                     if (reset) adapter.notifyDataSetChanged() else adapter.notifyItemRangeInserted(from, added.size)
                     if (inFeed && !reset) feedAdapter.append(added.map { it.copy() })
                     findViewById<TextView>(R.id.savedSubtitle).text = if (downloaded) downloadsSubtitle()
-                        else "共 ${page.total} 条 · 已加载 ${items.size} 条" + if (items.size < page.total) " · 下滑继续" else ""
-                    if (kind == KIND_PLAYLIST && playlistOffline) findViewById<TextView>(R.id.savedSubtitle).append(" · 离线缓存")
+                        else UiText.text(R.string.ui_b15546463b1f, "共 %1\$s 条 · 已加载 %2\$s 条", page.total, items.size) + if (items.size < page.total) UiText.text(R.string.ui_b42c236a7065, " · 下滑继续") else ""
+                    if (kind == KIND_PLAYLIST && playlistOffline) findViewById<TextView>(R.id.savedSubtitle).append(UiText.text(R.string.ui_6577ea6a94c6, " · 离线缓存"))
                     val current = if (inFeed) pager.currentItem else
                         (listView.layoutManager as LinearLayoutManager).findFirstVisibleItemPosition()
                     val remove = minOf((items.size - 2000).coerceAtLeast(0), (current - 80).coerceAtLeast(0))
@@ -311,7 +311,7 @@ class SavedVideosActivity : AppCompatActivity(), PlaybackGuideHost {
                         items.clear(); adapter.notifyDataSetChanged(); listTotal = 0
                     }
                     findViewById<TextView>(R.id.savedSubtitle).apply {
-                        text = "读取失败，点击重试"; setOnClickListener { loadLibraryPage(reset) }
+                        text = UiText.text(R.string.ui_db092fa9115c, "读取失败，点击重试"); setOnClickListener { loadLibraryPage(reset) }
                     }
                 }
             }
@@ -346,20 +346,20 @@ class SavedVideosActivity : AppCompatActivity(), PlaybackGuideHost {
     }
 
     private fun pageTitle(): String = when (kind) {
-        KIND_FAVORITES -> "旧版本地收藏"
-        KIND_PLAYLIST -> playlistTitle.ifBlank { "收藏夹" }
-        KIND_DOWNLOADS -> "已下载"
-        else -> "浏览历史"
+        KIND_FAVORITES -> UiText.text(R.string.ui_c670e07b45a1, "旧版本地收藏")
+        KIND_PLAYLIST -> playlistTitle.ifBlank { UiText.text(R.string.ui_796d20e91588, "收藏夹") }
+        KIND_DOWNLOADS -> UiText.text(R.string.ui_e2f12da7faa6, "已下载")
+        else -> UiText.text(R.string.ui_648de25583ea, "浏览历史")
     }
 
     private fun downloadsSubtitle(): String {
-        if (items.isEmpty()) return "还没有下载过视频"
+        if (items.isEmpty()) return UiText.text(R.string.ui_655e10b86d49, "还没有下载过视频")
         val ready = downloads.values.filter { it.state == DownloadLibrary.State.READY }
         val size = DownloadLibrary.formatSize(ready.sumOf { it.sizeBytes })
         return buildString {
-            append("共 $listTotal 个 · 已加载 ${items.size} 个")
-            if (ready.size < items.size) append(" · ${ready.size} 个可播放")
-            if (size.isNotEmpty()) append(" · 本页 $size")
+            append(UiText.text(R.string.ui_5f4815e8c371, "共 %1\$s 个 · 已加载 %2\$s 个", listTotal, items.size))
+            if (ready.size < items.size) append(UiText.text(R.string.ui_e91358d1a1e5, " · %1\$s 个可播放", ready.size))
+            if (size.isNotEmpty()) append(UiText.text(R.string.ui_df49756dd8f5, " · 本页 %1\$s", size))
         }
     }
 
@@ -463,7 +463,7 @@ class SavedVideosActivity : AppCompatActivity(), PlaybackGuideHost {
         if (!inFeed) return
         val item = feedAdapter.items.getOrNull(pager.currentItem) ?: return
         if (item.authorId.isBlank() && item.authorUsername.isBlank()) {
-            Toast.makeText(this, "正在读取作者资料…", Toast.LENGTH_SHORT).show()
+            Toast.makeText(this, UiText.text(R.string.ui_f8b0611758b4, "正在读取作者资料…"), Toast.LENGTH_SHORT).show()
             api.getVideo(item.id) { result ->
                 runOnUiThread {
                     if (closed) return@runOnUiThread
@@ -473,7 +473,7 @@ class SavedVideosActivity : AppCompatActivity(), PlaybackGuideHost {
                         history.updateDownloadDetail(item.id, detail.authorId, detail.authorUsername, detail.description)
                         openAuthor(IwaraAuthor(detail.authorId, item.author, detail.authorUsername))
                     }.onFailure {
-                        Toast.makeText(this, "读取作者资料失败：${IwaraApi.explainError(it)}", Toast.LENGTH_LONG).show()
+                        Toast.makeText(this, UiText.text(R.string.ui_02bf2c213dd2, "读取作者资料失败：%1\$s", IwaraApi.explainError(it)), Toast.LENGTH_LONG).show()
                     }
                 }
             }
@@ -496,7 +496,7 @@ class SavedVideosActivity : AppCompatActivity(), PlaybackGuideHost {
     private fun openAuthor(target: IwaraAuthor) {
         if (closed) return
         if (target.id.isBlank() && target.username.isBlank()) {
-            Toast.makeText(this, "该视频没有作者资料", Toast.LENGTH_SHORT).show(); return
+            Toast.makeText(this, UiText.text(R.string.ui_65930809a367, "该视频没有作者资料"), Toast.LENGTH_SHORT).show(); return
         }
         feedAdapter.pauseAll()
         startActivity(Intent(this, AuthorActivity::class.java).apply {
@@ -521,9 +521,9 @@ class SavedVideosActivity : AppCompatActivity(), PlaybackGuideHost {
                 .setDestinationInExternalPublicDir(Environment.DIRECTORY_DOWNLOADS, "IwaraFlow/$fileName")
             val downloadId = (getSystemService(Context.DOWNLOAD_SERVICE) as DownloadManager).enqueue(request)
             history.recordDownloadAsync(item, source.name, downloadId)
-            Toast.makeText(this, "已加入下载", Toast.LENGTH_SHORT).show()
+            Toast.makeText(this, UiText.text(R.string.ui_146e9302fed6, "已加入下载"), Toast.LENGTH_SHORT).show()
         } catch (e: Exception) {
-            Toast.makeText(this, "下载失败：${e.message}", Toast.LENGTH_SHORT).show()
+            Toast.makeText(this, UiText.text(R.string.ui_42fb22bc6277, "下载失败：%1\$s", e.message), Toast.LENGTH_SHORT).show()
         }
     }
 
@@ -551,12 +551,12 @@ class SavedVideosActivity : AppCompatActivity(), PlaybackGuideHost {
     }
 
     private fun shareVideo(item: VideoItem) {
-        if (item.id.isBlank()) { Toast.makeText(this, "这个视频没有可分享的链接", Toast.LENGTH_SHORT).show(); return }
-        SharePanel.show(this, VideoShare.shareText(item), item.title, "分享视频链接") { intent ->
+        if (item.id.isBlank()) { Toast.makeText(this, UiText.text(R.string.ui_0099c344771f, "这个视频没有可分享的链接"), Toast.LENGTH_SHORT).show(); return }
+        SharePanel.show(this, VideoShare.shareText(item), item.title, UiText.text(R.string.ui_64a47947b19a, "分享视频链接"), item.thumbnailUrl) { intent ->
             leavingForShare = true
             runCatching { startActivity(intent) }.onFailure {
                 leavingForShare = false
-                Toast.makeText(this, "没有可用的分享应用", Toast.LENGTH_SHORT).show()
+                Toast.makeText(this, UiText.text(R.string.ui_14c08712a70e, "没有可用的分享应用"), Toast.LENGTH_SHORT).show()
             }
         }
     }
@@ -572,7 +572,7 @@ class SavedVideosActivity : AppCompatActivity(), PlaybackGuideHost {
         val entered = runCatching { enterPictureInPictureMode(pipParams()) }.getOrDefault(false)
         if (!entered) {
             PipRegistry.leave(this)
-            Toast.makeText(this, "画中画启动失败", Toast.LENGTH_SHORT).show()
+            Toast.makeText(this, UiText.text(R.string.ui_e8412d85bb3e, "画中画启动失败"), Toast.LENGTH_SHORT).show()
         }
     }
 

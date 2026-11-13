@@ -66,14 +66,14 @@ object Translator {
     const val PROVIDER_CUSTOM = "custom"
 
     /** 设置页里的顺序和名字。 */
-    val PROVIDERS = listOf(
-        PROVIDER_GOOGLE to "谷歌翻译（免费网页接口，不用密钥）",
+    val PROVIDERS get() = listOf(
+        PROVIDER_GOOGLE to UiText.text(R.string.ui_30ebcdcffb32, "谷歌翻译（免费网页接口，不用密钥）"),
         PROVIDER_DEEPL to "DeepL（API Key）",
-        PROVIDER_MICROSOFT to "微软翻译（Azure Key + 区域）",
-        PROVIDER_BAIDU to "百度翻译开放平台（APP ID + 密钥）",
-        PROVIDER_LIBRE to "LibreTranslate（自建 / 公共服务器）",
-        PROVIDER_OPENAI to "AI 翻译（OpenAI 兼容接口：中转站 / DeepSeek / 通义 / Kimi 等）",
-        PROVIDER_CUSTOM to "自定义接口"
+        PROVIDER_MICROSOFT to UiText.text(R.string.ui_147f472498cf, "微软翻译（Azure Key + 区域）"),
+        PROVIDER_BAIDU to UiText.text(R.string.ui_ec178d5e637d, "百度翻译开放平台（APP ID + 密钥）"),
+        PROVIDER_LIBRE to UiText.text(R.string.ui_fa862695c460, "LibreTranslate（自建 / 公共服务器）"),
+        PROVIDER_OPENAI to UiText.text(R.string.ui_c406ef5e321c, "AI 翻译（OpenAI 兼容接口：中转站 / DeepSeek / 通义 / Kimi 等）"),
+        PROVIDER_CUSTOM to UiText.text(R.string.ui_3f4877ca9e3c, "自定义接口")
     )
 
     const val TARGET = "zh-CN"
@@ -89,17 +89,17 @@ object Translator {
     const val AI_VENDOR_CUSTOM = "custom"
 
     /** 内置的主流服务商（都是 OpenAI 兼容的聊天接口），最后一项是自定义。 */
-    val AI_VENDORS = listOf(
+    val AI_VENDORS get() = listOf(
         AiVendor(AI_VENDOR_OPENAI, "OpenAI", DEFAULT_AI_ENDPOINT, DEFAULT_AI_MODEL),
         AiVendor("deepseek", "DeepSeek", "https://api.deepseek.com/v1", "deepseek-chat"),
-        AiVendor("qwen", "通义千问（阿里云百炼）", "https://dashscope.aliyuncs.com/compatible-mode/v1", "qwen-plus"),
+        AiVendor("qwen", UiText.text(R.string.ui_68c156025f17, "通义千问（阿里云百炼）"), "https://dashscope.aliyuncs.com/compatible-mode/v1", "qwen-plus"),
         AiVendor("moonshot", "Kimi（Moonshot）", "https://api.moonshot.cn/v1", "moonshot-v1-8k"),
-        AiVendor("zhipu", "智谱 GLM", "https://open.bigmodel.cn/api/paas/v4", "glm-4-flash"),
-        AiVendor("siliconflow", "硅基流动 SiliconFlow", "https://api.siliconflow.cn/v1", "Qwen/Qwen2.5-7B-Instruct"),
+        AiVendor("zhipu", UiText.text(R.string.ui_3777d3667de2, "智谱 GLM"), "https://open.bigmodel.cn/api/paas/v4", "glm-4-flash"),
+        AiVendor("siliconflow", UiText.text(R.string.ui_caab5d8f58af, "硅基流动 SiliconFlow"), "https://api.siliconflow.cn/v1", "Qwen/Qwen2.5-7B-Instruct"),
         AiVendor("gemini", "Google Gemini", "https://generativelanguage.googleapis.com/v1beta/openai", "gemini-2.0-flash"),
         AiVendor("xai", "xAI Grok", "https://api.x.ai/v1", "grok-3-mini"),
         AiVendor("openrouter", "OpenRouter", "https://openrouter.ai/api/v1", "openai/gpt-4o-mini"),
-        AiVendor(AI_VENDOR_CUSTOM, "自定义（OpenAI 兼容接口）", "", "")
+        AiVendor(AI_VENDOR_CUSTOM, UiText.text(R.string.ui_ce8f1cfc244d, "自定义（OpenAI 兼容接口）"), "", "")
     )
 
     fun vendor(id: String): AiVendor = AI_VENDORS.firstOrNull { it.id == id } ?: AI_VENDORS.first()
@@ -216,7 +216,7 @@ object Translator {
         val snapshot = config
         io.execute {
             if (cancellation.cancelled) return@execute
-            val result = if (snapshot != config) Result.failure(IOException("翻译配置已变更，请重试"))
+            val result = if (snapshot != config) Result.failure(IOException(UiText.text(R.string.ui_0cf3c2b735ab, "翻译配置已变更，请重试")))
                 else runCatching { cached(text) ?: cancellation.run { fetchValidated(text, snapshot) } }
             if (cancellation.cancelled) return@execute
             result.onSuccess { synchronized(cache) { if (snapshot == config) cache[text] = it } }
@@ -226,13 +226,13 @@ object Translator {
             }
             main.post {
                 if (!cancellation.cancelled) callback(if (snapshot == config) result
-                    else Result.failure(IOException("翻译配置已变更，请重试")))
+                    else Result.failure(IOException(UiText.text(R.string.ui_0cf3c2b735ab, "翻译配置已变更，请重试"))))
             }
         }
         return cancellation
     }
 
-    private class Untranslated : IOException("服务未返回有效中文译文，请重试或更换翻译服务")
+    private class Untranslated : IOException(UiText.text(R.string.ui_6d0cb63bad07, "服务未返回有效中文译文，请重试或更换翻译服务"))
 
     /** A source-language label alone is not proof that the body was translated. */
     internal fun validateTranslation(original: String, translated: Translation): Translation {
@@ -289,9 +289,9 @@ object Translator {
             val raw = response.body?.string().orEmpty()
             if (!response.isSuccessful) {
                 throw IOException(when (response.code) {
-                    401, 403 -> "密钥无效或没有权限（${response.code}）"
-                    429 -> "请求太频繁（429），稍后再试"
-                    456 -> "DeepL 额度已用完（456）"
+                    401, 403 -> UiText.text(R.string.ui_2478376e61be, "密钥无效或没有权限（%1\$s）", response.code)
+                    429 -> UiText.text(R.string.ui_e7efac614d7d, "请求太频繁（429），稍后再试")
+                    456 -> UiText.text(R.string.ui_683bea01a4b2, "DeepL 额度已用完（456）")
                     else -> "HTTP ${response.code}" + (errorDetail(raw)?.let { "：$it" } ?: "")
                 })
             }
@@ -309,7 +309,7 @@ object Translator {
     }
 
     private fun requireKey(value: String, what: String) {
-        if (value.isBlank()) throw IOException("没填 $what，请到 设置 → 翻译 里配置")
+        if (value.isBlank()) throw IOException(UiText.text(R.string.ui_c30f077874c4, "没填 %1\$s，请到 设置 → 翻译 里配置", what))
     }
 
     // ---- 谷歌免费网页接口
@@ -336,14 +336,14 @@ object Translator {
      */
     internal fun parseResponse(raw: String): Translation {
         val root = JSONArray(raw)
-        val segments = root.optJSONArray(0) ?: throw IOException("返回格式不对")
+        val segments = root.optJSONArray(0) ?: throw IOException(UiText.text(R.string.ui_259551a7da46, "返回格式不对"))
         val text = buildString {
             for (i in 0 until segments.length()) {
                 val segment = segments.optJSONArray(i) ?: continue
                 append(segment.optString(0))
             }
         }
-        if (text.isBlank()) throw IOException("没有翻出内容")
+        if (text.isBlank()) throw IOException(UiText.text(R.string.ui_4fa3a8e80da6, "没有翻出内容"))
         val lang = root.optString(2).takeIf { it.isNotBlank() && it != "null" } ?: "auto"
         return Translation(text, lang)
     }
@@ -362,16 +362,16 @@ object Translator {
 
     internal fun parseDeepL(raw: String): Translation {
         val first = JSONObject(raw).optJSONArray("translations")?.optJSONObject(0)
-            ?: throw IOException("返回格式不对")
+            ?: throw IOException(UiText.text(R.string.ui_259551a7da46, "返回格式不对"))
         val text = first.optString("text")
-        if (text.isBlank()) throw IOException("没有翻出内容")
+        if (text.isBlank()) throw IOException(UiText.text(R.string.ui_4fa3a8e80da6, "没有翻出内容"))
         return Translation(text, first.optString("detected_source_language").lowercase().ifBlank { "auto" })
     }
 
     // ---- 微软 / Azure
 
     private fun fetchMicrosoft(text: String, c: TranslationConfig): Translation {
-        requireKey(c.key, "Azure 翻译 Key")
+        requireKey(c.key, UiText.text(R.string.ui_d3ca9800becb, "Azure 翻译 Key"))
         val url = "https://api.cognitive.microsofttranslator.com/translate?api-version=3.0&to=zh-Hans"
         val body = JSONArray().put(JSONObject().put("Text", text)).toString().toRequestBody(jsonType)
         val builder = Request.Builder().url(url)
@@ -382,9 +382,9 @@ object Translator {
     }
 
     internal fun parseMicrosoft(raw: String): Translation {
-        val first = JSONArray(raw).optJSONObject(0) ?: throw IOException("返回格式不对")
+        val first = JSONArray(raw).optJSONObject(0) ?: throw IOException(UiText.text(R.string.ui_259551a7da46, "返回格式不对"))
         val text = first.optJSONArray("translations")?.optJSONObject(0)?.optString("text").orEmpty()
-        if (text.isBlank()) throw IOException("没有翻出内容")
+        if (text.isBlank()) throw IOException(UiText.text(R.string.ui_4fa3a8e80da6, "没有翻出内容"))
         val lang = first.optJSONObject("detectedLanguage")?.optString("language").orEmpty().ifBlank { "auto" }
         return Translation(text, lang)
     }
@@ -397,8 +397,8 @@ object Translator {
     }
 
     private fun fetchBaidu(text: String, c: TranslationConfig): Translation {
-        requireKey(c.appId, "百度 APP ID")
-        requireKey(c.key, "百度密钥")
+        requireKey(c.appId, UiText.text(R.string.ui_3d7f673d0fb6, "百度 APP ID"))
+        requireKey(c.key, UiText.text(R.string.ui_476fa639919f, "百度密钥"))
         val salt = System.currentTimeMillis().toString()
         val url = "https://fanyi-api.baidu.com/api/trans/vip/translate".toHttpUrl().newBuilder()
             .addQueryParameter("q", text)
@@ -415,11 +415,11 @@ object Translator {
         val root = JSONObject(raw)
         val error = root.optString("error_code")
         if (error.isNotBlank() && error != "0" && error != "52000") {
-            throw IOException("百度返回错误 $error：${root.optString("error_msg")}")
+            throw IOException(UiText.text(R.string.ui_7a150fd84f5d, "百度返回错误 %1\$s：%2\$s", error, root.optString("error_msg")))
         }
-        val results = root.optJSONArray("trans_result") ?: throw IOException("返回格式不对")
+        val results = root.optJSONArray("trans_result") ?: throw IOException(UiText.text(R.string.ui_259551a7da46, "返回格式不对"))
         val text = (0 until results.length()).joinToString("\n") { results.optJSONObject(it)?.optString("dst").orEmpty() }
-        if (text.isBlank()) throw IOException("没有翻出内容")
+        if (text.isBlank()) throw IOException(UiText.text(R.string.ui_4fa3a8e80da6, "没有翻出内容"))
         // 百度的语言代码和别家不一样：jp = 日语，kor = 韩语。
         val lang = when (val from = root.optString("from")) { "jp" -> "ja"; "kor" -> "ko"; "" -> "auto"; else -> from }
         return Translation(text, lang)
@@ -428,7 +428,7 @@ object Translator {
     // ---- LibreTranslate
 
     private fun fetchLibre(text: String, c: TranslationConfig): Translation {
-        requireKey(c.endpoint, "LibreTranslate 服务器地址")
+        requireKey(c.endpoint, UiText.text(R.string.ui_f7fbad3234de, "LibreTranslate 服务器地址"))
         val base = c.endpoint.trim().trimEnd('/')
         val json = JSONObject().put("q", text).put("source", "auto").put("target", "zh").put("format", "text")
         if (c.key.isNotBlank()) json.put("api_key", c.key.trim())
@@ -439,7 +439,7 @@ object Translator {
     internal fun parseLibre(raw: String): Translation {
         val root = JSONObject(raw)
         val text = root.optString("translatedText")
-        if (text.isBlank()) throw IOException(root.optString("error").ifBlank { "没有翻出内容" })
+        if (text.isBlank()) throw IOException(root.optString("error").ifBlank { UiText.text(R.string.ui_4fa3a8e80da6, "没有翻出内容") })
         val lang = root.optJSONObject("detectedLanguage")?.optString("language").orEmpty().ifBlank { "auto" }
         return Translation(text, lang)
     }
@@ -474,7 +474,7 @@ object Translator {
 
     /** 按自己的提示词问一次 AI，拿回原始回答（搜索词互译要的是多行，不能走译文那套解析）。 */
     internal fun askAiBlocking(text: String, prompt: String, c: TranslationConfig = config): String {
-        requireKey(c.key, "AI 接口的 API Key")
+        requireKey(c.key, UiText.text(R.string.ui_ed744eb0ef53, "AI 接口的 API Key"))
         val (url, model) = aiTarget(c)
         val request = Request.Builder().url(url)
             .header("Authorization", "Bearer ${c.key.trim()}")
@@ -527,10 +527,10 @@ object Translator {
     internal fun openAiContent(raw: String): String {
         val root = JSONObject(raw)
         root.optJSONObject("error")?.let { error ->
-            throw IOException("AI 接口返回错误：${error.optString("message").ifBlank { error.toString() }.take(160)}")
+            throw IOException(UiText.text(R.string.ui_bdf8d86a3bfe, "AI 接口返回错误：%1\$s", error.optString("message").ifBlank { error.toString() }.take(160)))
         }
         val message = root.optJSONArray("choices")?.optJSONObject(0)?.optJSONObject("message")
-            ?: throw IOException("返回格式不对")
+            ?: throw IOException(UiText.text(R.string.ui_259551a7da46, "返回格式不对"))
         val content = when (val node = message.opt("content")) {
             is String -> node
             is JSONArray -> (0 until node.length()).joinToString("") { i ->
@@ -538,7 +538,7 @@ object Translator {
             }
             else -> ""
         }.trim()
-        if (content.isBlank()) throw IOException("没有翻出内容")
+        if (content.isBlank()) throw IOException(UiText.text(R.string.ui_4fa3a8e80da6, "没有翻出内容"))
         return content
     }
 
@@ -558,7 +558,7 @@ object Translator {
             if (t.length >= 2 && ((t.startsWith("\"") && t.endsWith("\"")) || (t.startsWith("“") && t.endsWith("”"))))
                 t.substring(1, t.length - 1).trim() else t
         }
-        if (text.isBlank()) throw IOException("没有翻出内容")
+        if (text.isBlank()) throw IOException(UiText.text(R.string.ui_4fa3a8e80da6, "没有翻出内容"))
         return Translation(text, lang)
     }
 
@@ -598,7 +598,7 @@ object Translator {
     /** 界面上那行小字：知道源语言就写“翻译自×语”，不知道就只说“已翻译”。 */
     fun sourceLabel(translation: Translation): String {
         val name = languageName(translation.sourceLang)
-        return if (name.isBlank()) "已翻译" else "翻译自$name"
+        return if (name.isBlank()) UiText.text(R.string.ui_fe87640f656c, "已翻译") else UiText.text(R.string.ui_279ad94967d7, "翻译自%1\$s", name)
     }
 
     // ---- 自定义接口
@@ -650,7 +650,7 @@ object Translator {
     }
 
     private fun fetchCustom(text: String, c: TranslationConfig): Translation {
-        requireKey(c.endpoint, "自定义接口地址")
+        requireKey(c.endpoint, UiText.text(R.string.ui_30e06920040b, "自定义接口地址"))
         val builder = Request.Builder().url(customUrl(c.endpoint, text))
         customHeaders(c.customHeaders).forEach { (name, value) -> builder.header(name, value) }
         if (c.customMethod.equals("POST", ignoreCase = true)) {
@@ -661,7 +661,7 @@ object Translator {
         }
         val raw = execute(builder.build())
         val translated = extractPath(raw, c.customResultPath)?.takeIf { it.isNotBlank() }
-            ?: throw IOException("返回里没找到译文（字段路径：${c.customResultPath.ifBlank { "自动" }}）")
+            ?: throw IOException(UiText.text(R.string.ui_250547fd4850, "返回里没找到译文（字段路径：%1\$s）", c.customResultPath.ifBlank { "自动" }))
         val lang = c.customLangPath.takeIf { it.isNotBlank() }?.let { extractPath(raw, it) }.orEmpty().ifBlank { "auto" }
         return Translation(translated, lang)
     }
@@ -669,14 +669,14 @@ object Translator {
     /** 把连接层的错误说成人话；其它照原样。 */
     fun explain(error: Throwable): String {
         val message = error.message.orEmpty()
-        return NetworkProxy.explain(message)?.let { "连不上翻译服务" } ?: message.ifBlank { "翻译失败" }
+        return NetworkProxy.explain(message)?.let { UiText.text(R.string.ui_289667fed028, "连不上翻译服务") } ?: message.ifBlank { UiText.text(R.string.ui_d5f50706fbd9, "翻译失败") }
     }
 
     fun languageName(code: String): String = when (code.lowercase().substringBefore('-').substringBefore('_')) {
-        "ja" -> "日语"; "en" -> "英语"; "ko" -> "韩语"; "ru" -> "俄语"; "es" -> "西班牙语"
-        "fr" -> "法语"; "de" -> "德语"; "pt" -> "葡萄牙语"; "it" -> "意大利语"; "th" -> "泰语"
-        "vi" -> "越南语"; "id" -> "印尼语"; "zh" -> "中文"; "ar" -> "阿拉伯语"; "tr" -> "土耳其语"
-        "pl" -> "波兰语"; "uk" -> "乌克兰语"; "nl" -> "荷兰语"; "tl" -> "菲律宾语"; "ms" -> "马来语"
+        "ja" -> UiText.text(R.string.ui_3a944ddb3868, "日语"); "en" -> UiText.text(R.string.ui_d1648bacbc16, "英语"); "ko" -> UiText.text(R.string.ui_259cdcf75199, "韩语"); "ru" -> UiText.text(R.string.ui_bdb6608a4dc8, "俄语"); "es" -> UiText.text(R.string.ui_6c872d27f835, "西班牙语")
+        "fr" -> UiText.text(R.string.ui_99cdf164a814, "法语"); "de" -> UiText.text(R.string.ui_7566092dce72, "德语"); "pt" -> UiText.text(R.string.ui_6ce072a79389, "葡萄牙语"); "it" -> UiText.text(R.string.ui_5bdde8257c53, "意大利语"); "th" -> UiText.text(R.string.ui_a15fb0d0595f, "泰语")
+        "vi" -> UiText.text(R.string.ui_8648ba069ee0, "越南语"); "id" -> UiText.text(R.string.ui_1f3ef878b068, "印尼语"); "zh" -> UiText.text(R.string.ui_72726d8818f6, "中文"); "ar" -> UiText.text(R.string.ui_fc9a0bdeb77f, "阿拉伯语"); "tr" -> UiText.text(R.string.ui_3c647ca8d8cc, "土耳其语")
+        "pl" -> UiText.text(R.string.ui_3e2b964a3433, "波兰语"); "uk" -> UiText.text(R.string.ui_5bbd97a49f8b, "乌克兰语"); "nl" -> UiText.text(R.string.ui_c48a14802d7b, "荷兰语"); "tl" -> UiText.text(R.string.ui_176429fd0512, "菲律宾语"); "ms" -> UiText.text(R.string.ui_6d34c98e353e, "马来语")
         "", "auto", "und" -> ""
         else -> code
     }

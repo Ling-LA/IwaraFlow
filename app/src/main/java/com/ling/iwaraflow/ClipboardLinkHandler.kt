@@ -73,11 +73,11 @@ class ClipboardLinkHandler : Application.ActivityLifecycleCallbacks {
             val host = activity.window.decorView as? android.view.ViewGroup ?: return
             host.findViewWithTag<android.view.View>("pending_clipboard_link")?.let(host::removeView)
             val banner = android.widget.TextView(activity).apply {
-                tag = "pending_clipboard_link"; text = "已识别 Iwara 链接 · 点击打开，长按关闭"
+                tag = "pending_clipboard_link"; text = UiText.text(R.string.ui_975554627afd, "已识别 Iwara 链接 · 点击打开，长按关闭")
                 textSize = 14f; setTextColor(-1); setBackgroundColor(0xFF285C7B.toInt()); setPadding(20, 20, 20, 20)
                 setOnClickListener { host.removeView(this); runCatching { open() } }
                 setOnLongClickListener { host.removeView(this); true }
-                contentDescription = "打开复制的 Iwara 链接，长按关闭提示"
+                contentDescription = UiText.text(R.string.ui_14eaceabccc9, "打开复制的 Iwara 链接，长按关闭提示")
             }
             host.addView(banner, android.view.ViewGroup.LayoutParams(-1, -2))
         } else runCatching { open() }

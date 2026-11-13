@@ -119,7 +119,7 @@ class MainActivityV3 : AppCompatActivity(), PlaybackGuideHost {
     private val warmVideoIds = hashSetOf<String>()
 
     /** 预检给出的确定性不可播放原因；这些视频直接播放同样放不了。 */
-    private val permanentIssues = setOf("仅限好友观看", "视频仍在处理中", "视频已删除或不存在", "没有观看权限")
+    private val permanentIssues = setOf("仅限好友观看", "视频仍在处理中", "视频已删除或不存在", "没有观看权限") // ui-literal: gate result keys
 
     /** 查本地库（排除已看之类）用的后台线程：不在主线程上碰数据库。 */
     private val dbExecutor = java.util.concurrent.Executors.newSingleThreadExecutor()
@@ -256,7 +256,7 @@ class MainActivityV3 : AppCompatActivity(), PlaybackGuideHost {
             // 简介里写清楚这条是怎么被推荐出来的；别的流（最新 / 流行 / 人气）没有理由可写。
             reasonFor = { videoId ->
                 if (mode != "recommend") null
-                else (recommender.reasonFor(videoId) ?: if (videoId in warmVideoIds) "上次预缓存的推荐" else null)?.let { reason ->
+                else (recommender.reasonFor(videoId) ?: if (videoId in warmVideoIds) UiText.text(R.string.ui_cfdaf246df2f, "上次预缓存的推荐") else null)?.let { reason ->
                     // 调试模式：理由下面再附上这条视频的分是怎么算出来的。
                     if (!prefs.recommendDebug) reason
                     else reason + (recommender.explain(videoId)?.let { "\n$it" }.orEmpty())
@@ -401,9 +401,9 @@ class MainActivityV3 : AppCompatActivity(), PlaybackGuideHost {
         root.addView(browseRefresh, 1, FrameLayout.LayoutParams(-1, -1).apply { topMargin = dp(58) })
         browseBack = TextView(this).apply {
             tag = "return_to_category_cards"
-            text = "‹ 列表"; textSize = 14f; setTextColor(-1)
+            text = UiText.text(R.string.ui_218ad937f0e8, "‹ 列表"); textSize = 14f; setTextColor(-1)
             gravity = android.view.Gravity.CENTER
-            contentDescription = "返回视频卡片列表"
+            contentDescription = UiText.text(R.string.ui_cfe98ea9b83e, "返回视频卡片列表")
             background = android.graphics.drawable.GradientDrawable().apply { setColor(0x88000000.toInt()); cornerRadius = dp(20).toFloat() }
             visibility = View.GONE
             setOnClickListener { showBrowseGrid() }
@@ -512,15 +512,15 @@ class MainActivityV3 : AppCompatActivity(), PlaybackGuideHost {
                             pager.setCurrentItem(before, true)
                         }
                     }
-                    if (state.items.isEmpty()) showError("暂无视频，下拉刷新后重试")
+                    if (state.items.isEmpty()) showError(UiText.text(R.string.ui_bd751d6d9a81, "暂无视频，下拉刷新后重试"))
                     window.decorView.postDelayed({ runLaunchUpdateCheck() }, 1500L)
                 }
             }, onFailure = { failure -> runOnUiThread {
                 if (isFinishing || isDestroyed || serial != requestSerial || requestedMode != mode) return@runOnUiThread
                 loadingMore = false; loading.visibility = View.GONE; browseRefresh.isRefreshing = false
                 val message = IwaraApi.explainError(failure)
-                if (state.items.isEmpty()) showError("视频列表加载失败\n$message\n下拉刷新重试", failure)
-                else Toast.makeText(this, "加载失败，可下拉刷新或继续滑动重试：$message", Toast.LENGTH_LONG).show()
+                if (state.items.isEmpty()) showError(UiText.text(R.string.ui_5ad7083c198a, "视频列表加载失败\n%1\$s\n下拉刷新重试", message), failure)
+                else Toast.makeText(this, UiText.text(R.string.ui_e63a883b4453, "加载失败，可下拉刷新或继续滑动重试：%1\$s", message), Toast.LENGTH_LONG).show()
             } })
         }
     }
@@ -661,7 +661,7 @@ class MainActivityV3 : AppCompatActivity(), PlaybackGuideHost {
         prefs.likedSyncAt = 0L
         history.accountId = ""
         RecommendationEngine.notifyAccountChanged("")
-        Toast.makeText(this, "已退出登录", Toast.LENGTH_SHORT).show()
+        Toast.makeText(this, UiText.text(R.string.ui_d0b8f27a7116, "已退出登录"), Toast.LENGTH_SHORT).show()
         loadFeed(reset = true)
     }
 
@@ -698,8 +698,8 @@ class MainActivityV3 : AppCompatActivity(), PlaybackGuideHost {
         }
         val requestId = requestSerial
         val emptyMessage = if (mode == "recommend") {
-            "没有找到可播放的推荐视频。可以稍后刷新，或关闭“刷新推荐时排除已看视频”。"
-        } else "这一页没有可播放视频"
+            UiText.text(R.string.ui_3ab0d301ecaf, "没有找到可播放的推荐视频。可以稍后刷新，或关闭“刷新推荐时排除已看视频”。")
+        } else UiText.text(R.string.ui_ea9cb31db22f, "这一页没有可播放视频")
         val head: ((List<VideoItem>) -> Unit)? = if (reset) {
             { batch: List<VideoItem> -> runOnUiThread { showFeedHead(requestId, batch) } }
         } else null
@@ -715,7 +715,7 @@ class MainActivityV3 : AppCompatActivity(), PlaybackGuideHost {
                     playableGate.filterPlayable(first, prefs.defaultQuality, maxItems = first.size, onFirstBatch = head) { playable ->
                         runOnUiThread {
                             if (requestId != requestSerial) return@runOnUiThread
-                            noteGateResult("推荐首屏", first, playable)
+                            noteGateResult(UiText.text(R.string.ui_e4cf9104cbcf, "推荐首屏"), first, playable)
                             recommendQueue.clear()
                             recommendQueue.addAll(rest)
                             raw.forEach { consumedCandidates += it.id }
@@ -727,8 +727,8 @@ class MainActivityV3 : AppCompatActivity(), PlaybackGuideHost {
                         if (requestId != requestSerial) return@runOnUiThread
                         awaitingFullFeed = false
                         loading.visibility = View.GONE
-                        note("推荐加载失败：${it.message?.take(120)}")
-                        showError(NetworkProxy.explain(it.message) ?: "推荐加载失败\n${it.message}", it)
+                        note(UiText.text(R.string.ui_564889cbb195, "推荐加载失败：%1\$s", it.message?.take(120)))
+                        showError(NetworkProxy.explain(it.message) ?: UiText.text(R.string.ui_befad4bc91a2, "推荐加载失败\n%1\$s", it.message), it)
                     }
                 }
             }
@@ -763,7 +763,7 @@ class MainActivityV3 : AppCompatActivity(), PlaybackGuideHost {
                     loadingMore = false
                     note("$mode 第 $currentPage 页加载失败：${it.message?.take(120)}")
                     if (reset) showError(NetworkProxy.explain(it.message)
-                        ?: "Iwara 数据加载失败\n${it.message}\n\n请确认网络可以访问 iwara.tv", it)
+                        ?: UiText.text(R.string.ui_2ef54f8a1fb0, "Iwara 数据加载失败\n%1\$s\n\n请确认网络可以访问 iwara.tv", it.message), it)
                 }
             }
         }
@@ -1090,7 +1090,7 @@ class MainActivityV3 : AppCompatActivity(), PlaybackGuideHost {
         history.recordInteractionAsync(item, "author_visit", 0.3)
         if (item.authorId.isBlank() && item.authorUsername.isBlank() && item.id.isNotBlank()) {
             // 本地下载记录里没有作者 id：现拉一次详情再进。
-            Toast.makeText(this, "正在读取作者资料…", Toast.LENGTH_SHORT).show()
+            Toast.makeText(this, UiText.text(R.string.ui_f8b0611758b4, "正在读取作者资料…"), Toast.LENGTH_SHORT).show()
             api.getVideo(item.id) { result ->
                 runOnUiThread {
                     if (isFinishing || isDestroyed) return@runOnUiThread
@@ -1103,7 +1103,7 @@ class MainActivityV3 : AppCompatActivity(), PlaybackGuideHost {
                         openAuthor(item.authorId, item.author, item.authorUsername)
                     }.onFailure {
                         note("补拉详情失败 ${item.id}：${it.message?.take(80)}")
-                        Toast.makeText(this, "读取作者资料失败：${IwaraApi.explainError(it)}", Toast.LENGTH_LONG).show()
+                        Toast.makeText(this, UiText.text(R.string.ui_02bf2c213dd2, "读取作者资料失败：%1\$s", IwaraApi.explainError(it)), Toast.LENGTH_LONG).show()
                     }
                 }
             }
@@ -1115,7 +1115,7 @@ class MainActivityV3 : AppCompatActivity(), PlaybackGuideHost {
     private fun openAuthor(id: String, name: String, username: String, avatarUrl: String = "") {
         if (openingInternalPage || isFinishing || isDestroyed) return
         if (id.isBlank() && username.isBlank()) {
-            Toast.makeText(this, "该视频没有作者资料", Toast.LENGTH_SHORT).show(); return
+            Toast.makeText(this, UiText.text(R.string.ui_65930809a367, "该视频没有作者资料"), Toast.LENGTH_SHORT).show(); return
         }
         openingInternalPage = true
         adapter.pauseAll()
@@ -1165,16 +1165,16 @@ class MainActivityV3 : AppCompatActivity(), PlaybackGuideHost {
     private fun showSearchDialog() {
         val panel = LinearLayout(this).apply { orientation = LinearLayout.VERTICAL; setPadding(dp(24), dp(8), dp(24), dp(2)) }
         panel.addView(TextView(this).apply {
-            text = "搜索标题、标签或作者"; setTextColor(0xFF607D93.toInt()); textSize = 13f; setPadding(0, 0, 0, dp(10))
+            text = UiText.text(R.string.ui_03c0cb8068f7, "搜索标题、标签或作者"); setTextColor(0xFF607D93.toInt()); textSize = 13f; setPadding(0, 0, 0, dp(10))
         })
         val input = EditText(this).apply {
-            hint = "例如 MMD、标签、作者名"; setSingleLine(true); setTextColor(0xFF17324A.toInt())
+            hint = UiText.text(R.string.ui_e5cb62786afe, "例如 MMD、标签、作者名"); setSingleLine(true); setTextColor(0xFF17324A.toInt())
             setHintTextColor(0x99607D93.toInt()); background = ContextCompat.getDrawable(this@MainActivityV3, R.drawable.bg_input)
             setPadding(dp(16), dp(12), dp(16), dp(12))
         }
         panel.addView(input)
-        val dialog = AlertDialog.Builder(this).setTitle("搜索 Iwara 视频").setView(panel)
-            .setNegativeButton("取消", null).setPositiveButton("搜索") { _, _ ->
+        val dialog = AlertDialog.Builder(this).setTitle(UiText.text(R.string.ui_0d70667de07d, "搜索 Iwara 视频")).setView(panel)
+            .setNegativeButton(UiText.text(R.string.ui_2cd0f3be8738, "取消"), null).setPositiveButton(UiText.text(R.string.ui_44ce7ae909bb, "搜索")) { _, _ ->
                 val q = input.text.toString().trim()
                 if (q.isNotBlank()) openSearchPage(q)
             }.create()
@@ -1182,9 +1182,9 @@ class MainActivityV3 : AppCompatActivity(), PlaybackGuideHost {
     }
 
     private fun showMainMenu() {
-        val account = if (api.isLoggedIn()) "退出 Iwara 登录" else "登录 Iwara"
+        val account = if (api.isLoggedIn()) UiText.text(R.string.ui_e132cc0eca82, "退出 Iwara 登录") else UiText.text(R.string.ui_3fc7937f766d, "登录 Iwara")
         // 同步点赞记录和诊断信息都挪进了设置页：主菜单留常用入口就够了。
-        val items = arrayOf(account, "浏览历史", "我的", "已下载", "设置", "重新加载当前流")
+        val items = arrayOf(account, UiText.text(R.string.ui_648de25583ea, "浏览历史"), UiText.text(R.string.ui_7f1d9dd04cd1, "我的"), UiText.text(R.string.ui_e2f12da7faa6, "已下载"), UiText.text(R.string.ui_df3d58c7d84b, "设置"), UiText.text(R.string.ui_020fe90ab9dc, "重新加载当前流"))
         val dialog = AlertDialog.Builder(this).setTitle("IwaraFlow").setItems(items) { _, which ->
             when (which) {
                 0 -> if (api.isLoggedIn()) { logOut() } else showLoginDialog()
@@ -1201,12 +1201,12 @@ class MainActivityV3 : AppCompatActivity(), PlaybackGuideHost {
     /** 手动把官方点赞补进“已看”，方便点赞很多的账号立刻生效。 */
     private fun syncLikedVideos() {
         if (!api.isLoggedIn()) { showLoginDialog(); return }
-        Toast.makeText(this, "正在同步 Iwara 点赞记录…", Toast.LENGTH_SHORT).show()
+        Toast.makeText(this, UiText.text(R.string.ui_c4fc21df1fde, "正在同步 Iwara 点赞记录…"), Toast.LENGTH_SHORT).show()
         likedSync.syncNow { marked ->
             runOnUiThread {
                 if (isFinishing || isDestroyed) return@runOnUiThread
                 note("手动同步点赞记录 $marked 条")
-                Toast.makeText(this, "已同步 $marked 条点赞记录，刷新推荐即可生效", Toast.LENGTH_LONG).show()
+                Toast.makeText(this, UiText.text(R.string.ui_6a8f75b1f58b, "已同步 %1\$s 条点赞记录，刷新推荐即可生效", marked), Toast.LENGTH_LONG).show()
             }
         }
     }
@@ -1214,21 +1214,21 @@ class MainActivityV3 : AppCompatActivity(), PlaybackGuideHost {
     private fun showLoginDialog() {
         val container = LinearLayout(this).apply { orientation = LinearLayout.VERTICAL; setPadding(dp(24), dp(8), dp(24), 0) }
         val email = EditText(this).apply {
-            hint = "Iwara 邮箱"; inputType = InputType.TYPE_CLASS_TEXT or InputType.TYPE_TEXT_VARIATION_EMAIL_ADDRESS; setSingleLine(true)
+            hint = UiText.text(R.string.ui_d6c176d5c424, "Iwara 邮箱"); inputType = InputType.TYPE_CLASS_TEXT or InputType.TYPE_TEXT_VARIATION_EMAIL_ADDRESS; setSingleLine(true)
             setTextColor(0xFF17324A.toInt()); setHintTextColor(0x99607D93.toInt()); background = ContextCompat.getDrawable(this@MainActivityV3, R.drawable.bg_input)
             setPadding(dp(16), dp(12), dp(16), dp(12))
         }
         val password = EditText(this).apply {
-            hint = "密码"; inputType = InputType.TYPE_CLASS_TEXT or InputType.TYPE_TEXT_VARIATION_PASSWORD; setSingleLine(true)
+            hint = UiText.text(R.string.ui_a621ab606db2, "密码"); inputType = InputType.TYPE_CLASS_TEXT or InputType.TYPE_TEXT_VARIATION_PASSWORD; setSingleLine(true)
             // setSingleLine 会把变换方法换成单行的，密码的圆点遮罩就没了，得再装回去。
             transformationMethod = android.text.method.PasswordTransformationMethod.getInstance()
             setTextColor(0xFF17324A.toInt()); setHintTextColor(0x99607D93.toInt()); background = ContextCompat.getDrawable(this@MainActivityV3, R.drawable.bg_input)
             setPadding(dp(16), dp(12), dp(16), dp(12))
         }
         container.addView(email); container.addView(View(this).apply { layoutParams = LinearLayout.LayoutParams(1, dp(10)) }); container.addView(password)
-        val dialog = AlertDialog.Builder(this).setTitle("登录 Iwara")
-            .setMessage("密码只用于登录请求；登录 Token 使用 Android 加密存储。没有账号可点“注册”，在应用内打开官网注册页。")
-            .setView(container).setNeutralButton("注册", null).setNegativeButton("取消", null).setPositiveButton("登录", null).create()
+        val dialog = AlertDialog.Builder(this).setTitle(UiText.text(R.string.ui_3fc7937f766d, "登录 Iwara"))
+            .setMessage(UiText.text(R.string.ui_da9ad30867ef, "密码只用于登录请求；登录 Token 使用 Android 加密存储。没有账号可点“注册”，在应用内打开官网注册页。"))
+            .setView(container).setNeutralButton(UiText.text(R.string.ui_c4fb62202bad, "注册"), null).setNegativeButton(UiText.text(R.string.ui_2cd0f3be8738, "取消"), null).setPositiveButton(UiText.text(R.string.ui_1e2df9c3075a, "登录"), null).create()
         dialog.setOnShowListener {
             styleDialogButtons(dialog)
             dialog.getButton(AlertDialog.BUTTON_NEUTRAL).setOnClickListener {
@@ -1238,10 +1238,10 @@ class MainActivityV3 : AppCompatActivity(), PlaybackGuideHost {
             val confirm = dialog.getButton(AlertDialog.BUTTON_POSITIVE)
             confirm.setOnClickListener {
                 val mail = email.text.toString().trim(); val pass = password.text.toString()
-                if (mail.isBlank() || pass.isBlank()) { Toast.makeText(this, "请输入邮箱和密码", Toast.LENGTH_SHORT).show(); return@setOnClickListener }
-                confirm.isEnabled = false; confirm.text = "登录中…"
+                if (mail.isBlank() || pass.isBlank()) { Toast.makeText(this, UiText.text(R.string.ui_6e457c5f7922, "请输入邮箱和密码"), Toast.LENGTH_SHORT).show(); return@setOnClickListener }
+                confirm.isEnabled = false; confirm.text = UiText.text(R.string.ui_3f06ed8f8c38, "登录中…")
                 api.login(mail, pass) { result -> runOnUiThread {
-                    confirm.isEnabled = true; confirm.text = "登录"; Toast.makeText(this, result.message, Toast.LENGTH_SHORT).show()
+                    confirm.isEnabled = true; confirm.text = UiText.text(R.string.ui_1e2df9c3075a, "登录"); Toast.makeText(this, result.message, Toast.LENGTH_SHORT).show()
                     if (result.success) {
                         dialog.dismiss()
                         // 换账号后点赞记录要重新同步一次。
@@ -1260,7 +1260,7 @@ class MainActivityV3 : AppCompatActivity(), PlaybackGuideHost {
      */
     private fun openLocalVideo(videoId: String, localUri: String, title: String) {
         val record = history.downloadRecords(limit = 5000).firstOrNull { it.item.id == videoId }
-        val item = record?.item ?: VideoItem(videoId, title.ifBlank { "已下载的视频" }, "", emptyList(), 0)
+        val item = record?.item ?: VideoItem(videoId, title.ifBlank { UiText.text(R.string.ui_c6db583695d9, "已下载的视频") }, "", emptyList(), 0)
         item.sources = listOf(VideoSource(LOCAL_SOURCE_NAME, localUri, 10_000))
         item.streamUrl = localUri
         item.selectedQuality = LOCAL_SOURCE_NAME
@@ -1358,7 +1358,7 @@ class MainActivityV3 : AppCompatActivity(), PlaybackGuideHost {
                 // Keep the requested video first; the normal recommendation pipeline appends the rest.
                 loadMore()
             }.onFailure {
-                Toast.makeText(this, "分享视频加载失败：${it.message ?: "请稍后重试"}", Toast.LENGTH_LONG).show()
+                Toast.makeText(this, UiText.text(R.string.ui_1a13256f2e33, "分享视频加载失败：%1\$s", it.message ?: UiText.text(R.string.ui_9ba4b48c2d18, "请稍后重试")), Toast.LENGTH_LONG).show()
                 if (adapter.items.isEmpty()) returnToRecommend()
             }
             if (!openingInternalPage && lifecycle.currentState.isAtLeast(Lifecycle.State.RESUMED)) resumeVisiblePlayback()
@@ -1376,7 +1376,7 @@ class MainActivityV3 : AppCompatActivity(), PlaybackGuideHost {
                 saveCurrentHomeSession()
                 item.localFavorite = history.isLocalFavorite(item.id); pagingEnabled = false; mode = "single"; setBrowseSurface(false); invalidateRequests()
                 adapter.replace(listOf(item)); pager.setCurrentItem(0, false); adapter.setActive(0)
-            }.onFailure { Toast.makeText(this, it.message ?: "视频加载失败", Toast.LENGTH_LONG).show() }
+            }.onFailure { Toast.makeText(this, it.message ?: UiText.text(R.string.ui_67f9aa8d4cbe, "视频加载失败"), Toast.LENGTH_LONG).show() }
             if (!openingInternalPage && lifecycle.currentState.isAtLeast(Lifecycle.State.RESUMED)) resumeVisiblePlayback()
         } }
     }
@@ -1412,7 +1412,7 @@ class MainActivityV3 : AppCompatActivity(), PlaybackGuideHost {
     private fun startDownload(item: VideoItem, source: VideoSource) {
         if (Build.VERSION.SDK_INT == Build.VERSION_CODES.P && ContextCompat.checkSelfPermission(this, Manifest.permission.WRITE_EXTERNAL_STORAGE) != PackageManager.PERMISSION_GRANTED) {
             ActivityCompat.requestPermissions(this, arrayOf(Manifest.permission.WRITE_EXTERNAL_STORAGE), 901)
-            Toast.makeText(this, "请授予存储权限后再次点击下载", Toast.LENGTH_LONG).show(); return
+            Toast.makeText(this, UiText.text(R.string.ui_b59245f2a956, "请授予存储权限后再次点击下载"), Toast.LENGTH_LONG).show(); return
         }
         try {
             val safeTitle = item.title.replace(Regex("[\\\\/:*?\"<>|]"), "_").take(90).ifBlank { item.id }
@@ -1426,8 +1426,8 @@ class MainActivityV3 : AppCompatActivity(), PlaybackGuideHost {
             history.recordInteractionAsync(item, "download", 1.1)
             // 记一笔，"已下载"那一页要靠它把视频和系统下载对上号。
             history.recordDownloadAsync(item, source.name, downloadId)
-            Toast.makeText(this, "已加入系统下载：${source.name}", Toast.LENGTH_SHORT).show()
-        } catch (e: Exception) { Toast.makeText(this, "下载创建失败：${e.message}", Toast.LENGTH_LONG).show() }
+            Toast.makeText(this, UiText.text(R.string.ui_ba97a4ac6462, "已加入系统下载：%1\$s", source.name), Toast.LENGTH_SHORT).show()
+        } catch (e: Exception) { Toast.makeText(this, UiText.text(R.string.ui_dbe14c240ea4, "下载创建失败：%1\$s", e.message), Toast.LENGTH_LONG).show() }
     }
 
     /**
@@ -1447,16 +1447,16 @@ class MainActivityV3 : AppCompatActivity(), PlaybackGuideHost {
     private fun shareVideo(item: VideoItem) {
         if (openingInternalPage || isFinishing || isDestroyed) return
         if (item.id.isBlank()) {
-            Toast.makeText(this, "这个视频没有可分享的链接", Toast.LENGTH_SHORT).show()
+            Toast.makeText(this, UiText.text(R.string.ui_0099c344771f, "这个视频没有可分享的链接"), Toast.LENGTH_SHORT).show()
             return
         }
-        SharePanel.show(this, VideoShare.shareText(item), item.title, "分享视频链接") { intent ->
+        SharePanel.show(this, VideoShare.shareText(item), item.title, UiText.text(R.string.ui_64a47947b19a, "分享视频链接"), item.thumbnailUrl) { intent ->
             openingInternalPage = true
             sharingToApp = true
             runCatching { shareLauncher.launch(intent) }.onFailure {
                 openingInternalPage = false
                 sharingToApp = false
-                Toast.makeText(this, "没有可用的分享应用", Toast.LENGTH_SHORT).show()
+                Toast.makeText(this, UiText.text(R.string.ui_14c08712a70e, "没有可用的分享应用"), Toast.LENGTH_SHORT).show()
             }
         }
     }
@@ -1481,7 +1481,7 @@ class MainActivityV3 : AppCompatActivity(), PlaybackGuideHost {
         if (FloatingVideoService.open(this, adapter)) return
         comments.close()
         try { enterPictureInPictureMode(pipParams()) }
-        catch (e: Exception) { Toast.makeText(this, "画中画启动失败：${e.message}", Toast.LENGTH_SHORT).show() }
+        catch (e: Exception) { Toast.makeText(this, UiText.text(R.string.ui_ee4539270861, "画中画启动失败：%1\$s", e.message), Toast.LENGTH_SHORT).show() }
     }
 
     override fun onUserLeaveHint() {

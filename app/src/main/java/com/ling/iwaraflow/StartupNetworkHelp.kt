@@ -35,7 +35,7 @@ class StartupNetworkHelp {
         AppLinks.NETWORK_PROMOTIONS.forEachIndexed { index, url ->
             text.append("\n\n")
             val start = text.length
-            text.append("网络服务推广链接 ${index + 1}（可选）")
+            text.append(UiText.text(R.string.ui_59a72b244dc7, "网络服务推广链接 %1\$s（可选）", index + 1))
             text.setSpan(object : ClickableSpan() {
                 override fun onClick(widget: View) {
                     val intent = Intent(Intent.ACTION_VIEW, Uri.parse(url))
@@ -44,9 +44,9 @@ class StartupNetworkHelp {
                     try {
                         widget.context.startActivity(intent)
                     } catch (_: ActivityNotFoundException) {
-                        Toast.makeText(widget.context, "没有可打开链接的浏览器", Toast.LENGTH_SHORT).show()
+                        Toast.makeText(widget.context, UiText.text(R.string.ui_89b1a5b2bb8e, "没有可打开链接的浏览器"), Toast.LENGTH_SHORT).show()
                     } catch (_: SecurityException) {
-                        Toast.makeText(widget.context, "无法打开链接，请检查浏览器设置", Toast.LENGTH_SHORT).show()
+                        Toast.makeText(widget.context, UiText.text(R.string.ui_917512cfe37f, "无法打开链接，请检查浏览器设置"), Toast.LENGTH_SHORT).show()
                     }
                 }
             }, start, text.length, Spanned.SPAN_EXCLUSIVE_EXCLUSIVE)

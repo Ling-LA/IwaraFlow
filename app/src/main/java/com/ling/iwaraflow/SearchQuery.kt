@@ -31,9 +31,28 @@ data class SearchQuery(val groups: List<List<String>>) {
             .replace(Regex("\\s+"), "_")
 
         private val tokens = Regex("\"([^\"]+)\"|“([^”]+)”|([^\\s,，、;；]+)")
-        fun terms(raw: String): List<String> = tokens.findAll(Normalizer.normalize(raw, Normalizer.Form.NFKC))
-            .map { match -> match.groupValues.drop(1).first { it.isNotEmpty() }.trim().removePrefix("#") }
-            .filter { it.isNotBlank() }.distinctBy(::normalize).toList()
+        fun terms(raw: String): List<String> {
+            val input = Normalizer.normalize(raw, Normalizer.Form.NFKC)
+            val matches = tokens.findAll(input).toList()
+            val result = mutableListOf<String>()
+            var index = 0
+            while (index < matches.size) {
+                val first = matches[index]
+                var term = first.groupValues.drop(1).first { it.isNotEmpty() }.trim().removePrefix("#")
+                var consumed = 1
+                // Known multiword names are a single concept, not separately translated words.
+                if (first.groupValues[3].isNotEmpty()) for (end in index + 1 until minOf(matches.size, index + 6)) {
+                    val next = matches[end]
+                    val gap = input.substring(matches[end - 1].range.last + 1, next.range.first)
+                    if (next.groupValues[3].isEmpty() || gap.any { !it.isWhitespace() }) break
+                    val phrase = input.substring(first.range.first, next.range.last + 1).removePrefix("#")
+                    if (knownAliases(phrase) != null) { term = phrase; consumed = end - index + 1 }
+                }
+                if (term.isNotBlank()) result += term
+                index += consumed
+            }
+            return result.distinctBy(::normalize)
+        }
 
         fun literal(raw: String) = SearchQuery(terms(raw).map { listOf(it) })
         fun local(raw: String, aiPrecision: Boolean = false) = SearchQuery(terms(raw).map { term ->
@@ -51,16 +70,35 @@ data class SearchQuery(val groups: List<List<String>>) {
             ?.let { (listOf(term) + it).distinctBy(::normalize) }
 
         fun canonicalTag(raw: String): String = aliasIndex[tagKey(raw)]?.first() ?: tagKey(raw)
+        private val patterns = object : LinkedHashMap<String, Regex>(128, .75f, true) {
+            override fun removeEldestEntry(eldest: MutableMap.MutableEntry<String, Regex>?) = size > 256
+        }
+
+        internal fun conceptsIn(text: String): Set<String> = aliases.filter { group ->
+            group.any { containsTerm(text, it) }
+        }.map { it.first() }.toSet()
+
+        internal fun withoutKnownConcepts(text: String): String {
+            var remaining = normalize(text).replace('_', ' ')
+            aliases.flatten().sortedByDescending(String::length).forEach { alias ->
+                remaining = termPattern(normalize(alias).replace('_', ' ')).replace(remaining, " ")
+            }
+            return remaining
+        }
 
         private fun containsTerm(text: String, term: String): Boolean {
             val needle = normalize(term).replace('_', ' ')
             if (needle.isBlank()) return false
             val haystack = normalize(text).replace('_', ' ')
-            val left = if (needle.first().isAsciiWord()) "(?<![a-z0-9])" else ""
-            val right = if (needle.last().isAsciiWord()) "(?![a-z0-9])" else ""
-            val phrase = needle.split(Regex("\\s+")).joinToString("\\s+", transform = Regex::escape)
-            return Regex(left + phrase + right).containsMatchIn(haystack)
+            return termPattern(needle).containsMatchIn(haystack)
         }
+
+        private fun termPattern(needle: String): Regex = synchronized(patterns) { patterns.getOrPut(needle) {
+                val left = if (needle.first().isAsciiWord()) "(?<![\\p{IsLatin}0-9])" else ""
+                val right = if (needle.last().isAsciiWord()) "(?![\\p{IsLatin}0-9])" else ""
+                val phrase = needle.split(Regex("\\s+")).joinToString("\\s+", transform = Regex::escape)
+                Regex(left + phrase + right)
+            } }
 
         private fun Char.isAsciiWord() = this in 'a'..'z' || this in '0'..'9'
     }

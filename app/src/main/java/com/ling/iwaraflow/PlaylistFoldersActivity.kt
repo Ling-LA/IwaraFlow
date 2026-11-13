@@ -37,27 +37,27 @@ class PlaylistFoldersActivity : AppCompatActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         api = IwaraApi(this); history = HistoryStore(this); favorites = PlaylistFavorites(this, api, history)
-        page = PageLayout(this, "我的收藏")
+        page = PageLayout(this, UiText.text(R.string.ui_9385bfefca58, "我的收藏"))
         val actions = LinearLayout(this).apply { gravity = Gravity.CENTER_VERTICAL; setPadding(page.dp(14), 0, page.dp(14), 0) }
-        actions.addView(page.action("收藏夹") {}, LinearLayout.LayoutParams(0, -2, 1f))
-        actions.addView(page.action("＋ 新建") { PlaylistPicker.createDialog(this, favorites) { reload() } })
+        actions.addView(page.action(UiText.text(R.string.ui_796d20e91588, "收藏夹")) {}, LinearLayout.LayoutParams(0, -2, 1f))
+        actions.addView(page.action(UiText.text(R.string.ui_710895850bb2, "＋ 新建")) { PlaylistPicker.createDialog(this, favorites) { reload() } })
         page.body.addView(actions)
-        status = page.text("与 Iwara 官方播放列表同步 · 长按收藏夹管理", 13f).apply { setPadding(page.dp(22), 0, page.dp(22), page.dp(8)) }
+        status = page.text(UiText.text(R.string.ui_2b129ce72fc5, "与 Iwara 官方播放列表同步 · 长按收藏夹管理"), 13f).apply { setPadding(page.dp(22), 0, page.dp(22), page.dp(8)) }
         page.body.addView(status)
         val legacy = LinearLayout(this).apply { gravity = Gravity.CENTER_VERTICAL; setPadding(page.dp(14), 0, page.dp(14), 0) }
-        legacy.addView(page.action("旧版本地收藏 ›") {
+        legacy.addView(page.action(UiText.text(R.string.ui_c3d04660ff82, "旧版本地收藏 ›")) {
             startActivity(Intent(this, SavedVideosActivity::class.java).putExtra(SavedVideosActivity.EXTRA_KIND, SavedVideosActivity.KIND_FAVORITES))
         }, LinearLayout.LayoutParams(0, -2, 1f))
-        legacy.addView(page.action("重试同步") {
+        legacy.addView(page.action(UiText.text(R.string.ui_87d53fea3f05, "重试同步")) {
             val pendingCreation = favorites.store.migrationCreation(favorites.store.snapshot()) != null
-            if (!importing) AlertDialog.Builder(this).setTitle("导入旧版收藏")
-                .setMessage("将旧版本地收藏导入单独新建的默认公开收藏夹；已有官网分类与本地记录均保留，已处理或已移除的视频不会重复添加。" +
-                    if (pendingCreation) "\n\n上次创建结果未确认。请先到官网核对：若没有新收藏夹，点击导入会重试创建；若有多个同名新夹，请先在官网处理重名。" else "")
-                .setNegativeButton("取消", null).setPositiveButton("导入") { _, _ ->
-                    importing = true; status.text = "正在导入旧版收藏…"
+            if (!importing) AlertDialog.Builder(this).setTitle(UiText.text(R.string.ui_0d3156aa7c21, "导入旧版收藏"))
+                .setMessage(UiText.text(R.string.ui_1af9d7d5c7ad, "将旧版本地收藏导入单独新建的默认公开收藏夹；已有官网分类与本地记录均保留，已处理或已移除的视频不会重复添加。") +
+                    if (pendingCreation) UiText.text(R.string.ui_c597d8e2f2a8, "\n\n上次创建结果未确认。请先到官网核对：若没有新收藏夹，点击导入会重试创建；若有多个同名新夹，请先在官网处理重名。") else "")
+                .setNegativeButton(UiText.text(R.string.ui_2cd0f3be8738, "取消"), null).setPositiveButton(UiText.text(R.string.ui_576d81bb0631, "导入")) { _, _ ->
+                    importing = true; status.text = UiText.text(R.string.ui_b2f8ddcd4ef0, "正在导入旧版收藏…")
                     favorites.importLegacy(retryUnconfirmedCreation = pendingCreation) { result ->
                         importing = false
-                        result.onSuccess { Toast.makeText(this, "已导入 $it 条", Toast.LENGTH_LONG).show(); reload() }
+                        result.onSuccess { Toast.makeText(this, UiText.text(R.string.ui_877eb4da4a84, "已导入 %1\$s 条", it), Toast.LENGTH_LONG).show(); reload() }
                             .onFailure { status.text = it.message }
                     }
                 }.show()
@@ -106,11 +106,11 @@ class PlaylistFoldersActivity : AppCompatActivity() {
             result.onSuccess {
                 updateFolders(it)
                 status.text = favorites.store.migrationStatus().ifBlank {
-                    if (it.isEmpty()) "暂无收藏夹 · 点击新建 · 旧版收藏自动同步" else "${it.size} 个收藏夹 · 已与 Iwara 同步 · 公开"
+                    if (it.isEmpty()) UiText.text(R.string.ui_64e0973e3c3e, "暂无收藏夹 · 点击新建 · 旧版收藏自动同步") else UiText.text(R.string.ui_75ad45fad547, "%1\$s 个收藏夹 · 已与 Iwara 同步 · 公开", it.size)
                 }
             }.onFailure {
                 updateFolders(favorites.store.folders())
-                status.text = if (folders.isNotEmpty()) "显示本地缓存 · 同步失败：${it.message}" else "${it.message} · 下拉重试"
+                status.text = if (folders.isNotEmpty()) UiText.text(R.string.ui_7560ce7a5aca, "显示本地缓存 · 同步失败：%1\$s", it.message) else UiText.text(R.string.ui_30d3408ece83, "%1\$s · 下拉重试", it.message)
             }
         }
     }
@@ -136,7 +136,7 @@ class PlaylistFoldersActivity : AppCompatActivity() {
                 card.removeAllViews()
                 val title = LinearLayout(this@PlaylistFoldersActivity).apply { gravity = Gravity.CENTER_VERTICAL }
                 title.addView(page.text(folder.title, 19f).apply { maxLines = 1; ellipsize = android.text.TextUtils.TruncateAt.END }, LinearLayout.LayoutParams(0, page.dp(42), 1f))
-                title.addView(page.text("${folder.count} 个视频 ›", 13f))
+                title.addView(page.text(UiText.text(R.string.ui_d673ad8cabf4, "%1\$s 个视频 ›", folder.count), 13f))
                 card.addView(title)
                 val previews = if (folder.count > 0) favorites.store.previews(folder.id) else emptyList()
                 val shouldLoad = folder.count > 0 && folder.id !in previewRequested && folder.id !in previewLoading
@@ -154,12 +154,12 @@ class PlaylistFoldersActivity : AppCompatActivity() {
                     row.addView(cell, LinearLayout.LayoutParams(0, -2, 1f))
                 }
                 if (cells.isEmpty()) row.addView(page.text(when {
-                    folder.count == 0 -> "暂无视频"
-                    shouldLoad || folder.id in previewLoading -> "正在加载预览…"
-                    else -> "暂无预览 · 下拉重试"
+                    folder.count == 0 -> UiText.text(R.string.ui_536cc0d55121, "暂无视频")
+                    shouldLoad || folder.id in previewLoading -> UiText.text(R.string.ui_8e141609917b, "正在加载预览…")
+                    else -> UiText.text(R.string.ui_824bdf84bdc7, "暂无预览 · 下拉重试")
                 }, 14f).apply { minHeight = page.dp(48) })
                 card.addView(row); card.setOnClickListener { open(folder) }
-                card.contentDescription = "${folder.title}，${folder.count} 个视频，长按管理收藏夹"
+                card.contentDescription = UiText.text(R.string.ui_f1618e20804b, "%1\$s，%2\$s 个视频，长按管理收藏夹", folder.title, folder.count)
                 card.setOnLongClickListener {
                     PlaylistManagement.folderMenu(this@PlaylistFoldersActivity, favorites, folder) { reload() }; true
                 }

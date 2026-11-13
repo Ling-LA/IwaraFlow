@@ -19,7 +19,7 @@
             android:id="@+id/videoThumbnail"
             android:layout_width="match_parent"
             android:layout_height="match_parent"
-            android:contentDescription="视频缩略图"
+            android:contentDescription="@string/ui_a0581c5cba73"
             android:scaleType="centerCrop" />
 
         <TextView

@@ -53,7 +53,7 @@ class CommentInputDialog(
         else { target.visibility = View.VISIBLE; target.text = replyTo }
 
         field = view.findViewById(R.id.inputField)
-        field.hint = hint ?: if (replyTo.isNullOrBlank()) "说点什么…" else "回复 $replyTo"
+        field.hint = hint ?: if (replyTo.isNullOrBlank()) UiText.text(R.string.ui_72a70e767e8c, "说点什么…") else UiText.text(R.string.ui_c2b8ba5cc9f1, "回复 %1\$s", replyTo)
         field.setText(draft)
         field.setSelection(draft.length)
         field.requestFocus()
@@ -65,7 +65,7 @@ class CommentInputDialog(
     private fun submit() {
         val text = field.text.toString().trim()
         if (text.isBlank()) {
-            Toast.makeText(context, "先写点内容", Toast.LENGTH_SHORT).show()
+            Toast.makeText(context, UiText.text(R.string.ui_9ddcc549d251, "先写点内容"), Toast.LENGTH_SHORT).show()
             return
         }
         // 发出去的内容不再当草稿留着。

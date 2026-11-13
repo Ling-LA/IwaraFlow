@@ -215,6 +215,19 @@ class TranslationAccuracyTest {
         assertEquals(SearchQuery.knownAliases("长风"), result)
         assertTrue(warning.contains("未完成")); assertEquals(1, server.requestCount)
     }
+
+    @Test fun aiCannotReplaceCuratedNamesOrBorrowAnotherQueryTerm() {
+        server.enqueue(reply("""{"aliases":[{"text":"Long Wind","language":"en","equivalent":true,"confidence":0.99}]}"""))
+        var curated: List<String>? = null
+        QueryTranslator.expand("长风", aiPrecision = true) { curated = it }
+        waitFor { curated != null }
+        assertEquals(SearchQuery.knownAliases("长风"), curated)
+        server.enqueue(reply("""{"aliases":[{"text":"robot","language":"en","equivalent":true,"confidence":0.99}]}"""))
+        var contextual: List<String>? = null
+        QueryTranslator.expand("春雨", aiPrecision = true, context = "春雨 机器人") { contextual = it }
+        waitFor { contextual != null }
+        assertEquals(listOf("春雨"), contextual)
+    }
     @Test fun danmakuTranslationIsOptInAndReusesTheTranslationCache() {
         val controller = org.robolectric.Robolectric.buildActivity(android.app.Activity::class.java).setup()
         val activity = controller.get()

@@ -68,14 +68,14 @@ object DislikeSheet {
             setOnTouchListener(drag)
         }
         header.addView(TextView(activity).apply {
-            text = "不感兴趣"; textSize = 17f; setTextColor(0xFF17324A.toInt())
+            text = UiText.text(R.string.ui_2abc3ad8d471, "不感兴趣"); textSize = 17f; setTextColor(0xFF17324A.toInt())
             typeface = android.graphics.Typeface.DEFAULT_BOLD
             gravity = Gravity.CENTER_VERTICAL
             androidx.core.view.ViewCompat.setAccessibilityHeading(this, true)
         }, LinearLayout.LayoutParams(0, -1, 1f))
         header.addView(TextView(activity).apply {
             text = "✕"; textSize = 18f; gravity = Gravity.CENTER; setTextColor(0xFF607D93.toInt())
-            contentDescription = "关闭不感兴趣选项"
+            contentDescription = UiText.text(R.string.ui_fd23d71de286, "关闭不感兴趣选项")
             setOnClickListener { dialog.dismiss() }
         }, LinearLayout.LayoutParams(dp(44), dp(44)))
         container.addView(header, LinearLayout.LayoutParams(-1, dp(48)))
@@ -110,22 +110,22 @@ object DislikeSheet {
             history.post {
                 runCatching { apply(activity, item, history, kind, tag, onApplied) }.onFailure {
                     activity.runOnUiThread {
-                        Toast.makeText(activity, "未能保存不感兴趣设置，请检查存储空间后重试", Toast.LENGTH_LONG).show()
+                        Toast.makeText(activity, UiText.text(R.string.ui_7eb35aecd020, "未能保存不感兴趣设置，请检查存储空间后重试"), Toast.LENGTH_LONG).show()
                     }
                 }
             }
         }
-        row("减少推荐：当前视频", strong = true) { choose(Kind.VIDEO) }
+        row(UiText.text(R.string.ui_5391f415c191, "减少推荐：当前视频"), strong = true) { choose(Kind.VIDEO) }
         if (item.author.isNotBlank()) {
             divider()
-            row("屏蔽作者 @${item.author}") { choose(Kind.AUTHOR) }
+            row(UiText.text(R.string.ui_4654c216b0db, "屏蔽作者 @%1\$s", item.author)) { choose(Kind.AUTHOR) }
         }
         item.tags.take(MAX_TAGS).forEach { tag ->
             divider()
-            row("屏蔽标签 #$tag") { choose(Kind.TAG, tag) }
+            row(UiText.text(R.string.ui_65b314fc440b, "屏蔽标签 #%1\$s", tag)) { choose(Kind.TAG, tag) }
         }
         divider()
-        row("取消") { }
+        row(UiText.text(R.string.ui_2cd0f3be8738, "取消")) { }
 
         // Floating windows are kept above the navigation bar on newer Android versions.
         // Use a transparent full-window host, with only the actual panel drawn and clickable.
@@ -213,12 +213,12 @@ object DislikeSheet {
             val activity = hostActivity(context)
             if (activity != null && (activity.isFinishing || activity.isDestroyed)) return@Runnable
             Toast.makeText(context, when (kind) {
-                Kind.VIDEO -> "已跳过这条视频"
-                Kind.AUTHOR -> "不再推荐 @" + item.author
-                Kind.TAG -> "不再推荐 #" + tag
+                Kind.VIDEO -> UiText.text(R.string.ui_6684967993e6, "已跳过这条视频")
+                Kind.AUTHOR -> UiText.text(R.string.ui_ef3685448f7d, "不再推荐 @") + item.author
+                Kind.TAG -> UiText.text(R.string.ui_57942c0b33f8, "不再推荐 #") + tag
             }, Toast.LENGTH_SHORT).show()
             onApplied?.invoke(item, kind)
-            activity?.let { UndoNotice.show(it, if (kind == Kind.VIDEO) "已减少此视频的推荐" else "已屏蔽，搜索不受影响") {
+            activity?.let { UndoNotice.show(it, if (kind == Kind.VIDEO) UiText.text(R.string.ui_50d1930fc32c, "已减少此视频的推荐") else UiText.text(R.string.ui_56c9f1d6ed64, "已屏蔽，搜索不受影响")) {
                 history.post {
                     when (kind) {
                         Kind.VIDEO -> history.interestDatabase.delete("interactions", "video_id=? AND action=? AND created_at>=?", arrayOf(item.id, HistoryStore.ACTION_DISLIKE_VIDEO, at.toString()))

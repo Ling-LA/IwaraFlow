@@ -47,6 +47,16 @@ object SharePanel {
         putExtra(Intent.EXTRA_SUBJECT, subject)
     }
 
+    internal fun imageIntent(text: String, subject: String, uri: android.net.Uri): Intent = sendIntent(text, subject).apply {
+        type = "image/jpeg"
+        putExtra(Intent.EXTRA_STREAM, uri)
+        clipData = ClipData.newRawUri("thumbnail", uri)
+        addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
+    }
+
+    internal fun wantsThumbnail(packageName: String): Boolean = packageName == "com.twitter.android" ||
+        packageName.startsWith("org.telegram.")
+
     /** 能接收纯文本分享的应用，每个一条显式 Intent；本应用自己除外。 */
     fun targets(context: Context, text: String, subject: String): List<Target> {
         val send = sendIntent(text, subject)
@@ -71,7 +81,8 @@ object SharePanel {
      * 弹出面板。[launch] 负责真正启动目标应用——播放页要用自己的 launcher，
      * 这样返回时能接上状态。
      */
-    fun show(activity: Activity, text: String, subject: String, chooserTitle: String, launch: (Intent) -> Unit) {
+    fun show(activity: Activity, text: String, subject: String, chooserTitle: String,
+        thumbnailUrl: String = "", launch: (Intent) -> Unit) {
         if (activity.isFinishing || activity.isDestroyed) return
         val dialog = Dialog(activity)
         dialog.requestWindowFeature(Window.FEATURE_NO_TITLE)
@@ -92,8 +103,22 @@ object SharePanel {
         targets.forEach { target ->
             row.addView(targetView(activity, target.label, target.icon, density) {
                 dialog.dismiss()
-                runCatching { launch(target.intent) }
-                    .onFailure { Toast.makeText(activity, "打不开 ${target.label}", Toast.LENGTH_SHORT).show() }
+                fun open(intent: Intent) {
+                    if (!activity.isFinishing && !activity.isDestroyed) runCatching { launch(intent) }
+                        .onFailure { Toast.makeText(activity, UiText.text(R.string.ui_6c00beb19626, "打不开 %1\$s", target.label), Toast.LENGTH_SHORT).show() }
+                }
+                if (wantsThumbnail(target.packageName) && thumbnailUrl.isNotBlank()) {
+                    Toast.makeText(activity, UiText.text(R.string.ui_7208feb4108b, "正在准备分享缩略图…"), Toast.LENGTH_SHORT).show()
+                    ShareThumbnail.prepare(activity, thumbnailUrl) { uri ->
+                        val send = uri?.let { imageIntent(text, subject, it).setPackage(target.packageName) }
+                        // Image and text entry activities can differ. Resolve again for the MIME type.
+                        if (send != null && send.resolveActivity(activity.packageManager) != null) open(send)
+                        else {
+                            if (!activity.isDestroyed) Toast.makeText(activity, UiText.text(R.string.ui_59092019deb2, "缩略图暂不可用，已改为分享链接"), Toast.LENGTH_SHORT).show()
+                            open(target.intent)
+                        }
+                    }
+                } else open(target.intent)
             })
         }
         if (targets.isEmpty()) view.findViewById<View>(R.id.shareEmpty).visibility = View.VISIBLE
@@ -105,13 +130,13 @@ object SharePanel {
                         putBoolean(ClipboardLinkHandler.OWN_COPY, true)
                     }
                 })
-            Toast.makeText(activity, "链接已复制", Toast.LENGTH_SHORT).show()
+            Toast.makeText(activity, UiText.text(R.string.ui_6ce7dfa5ecf5, "链接已复制"), Toast.LENGTH_SHORT).show()
             dialog.dismiss()
         }
         view.findViewById<View>(R.id.shareMore).setOnClickListener {
             dialog.dismiss()
             runCatching { launch(Intent.createChooser(sendIntent(text, subject), chooserTitle)) }
-                .onFailure { Toast.makeText(activity, "没有可用的分享应用", Toast.LENGTH_SHORT).show() }
+                .onFailure { Toast.makeText(activity, UiText.text(R.string.ui_14c08712a70e, "没有可用的分享应用"), Toast.LENGTH_SHORT).show() }
         }
         view.findViewById<View>(R.id.shareCancel).setOnClickListener { dialog.dismiss() }
         dialog.show()

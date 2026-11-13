@@ -13,7 +13,7 @@ import androidx.viewpager2.widget.ViewPager2
  * 没有更多数据时才提示；提示有节流，一次连续拉动只弹一次。
  */
 object EndOfFeedHint {
-    const val MESSAGE = "没有更多视频了"
+    val MESSAGE: String get() = UiText.text(R.string.ui_d3c5894b7260, "没有更多视频了")
     private const val THROTTLE_MS = 2_500L
 
     fun install(pager: ViewPager2, hasMore: () -> Boolean) {

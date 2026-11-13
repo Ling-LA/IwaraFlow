@@ -20,7 +20,7 @@
             android:layout_width="wrap_content"
             android:layout_height="40dp"
             android:gravity="center_vertical"
-            android:text="‹  返回"
+            android:text="@string/ui_29ebafb31c58"
             android:textColor="@color/page_accent"
             android:textSize="16sp"
             android:textStyle="bold" />
@@ -30,7 +30,7 @@
             android:layout_height="wrap_content"
             android:layout_marginTop="6dp"
             android:id="@+id/followingTitle"
-            android:text="已关注用户"
+            android:text="@string/ui_6c9e84574483"
             android:textColor="@color/page_text"
             android:textSize="25sp"
             android:textStyle="bold" />
@@ -40,7 +40,7 @@
             android:layout_width="match_parent"
             android:layout_height="wrap_content"
             android:layout_marginTop="4dp"
-            android:text="正在读取 Iwara 关注列表…"
+            android:text="@string/ui_632d22a6a563"
             android:textColor="@color/page_secondary"
             android:textSize="13sp" />
     </LinearLayout>

@@ -31,9 +31,9 @@ class AuthorVideoListAdapter(
 
         fun bind(item: VideoItem) {
             title.text = item.title
-            meta.text = "${formatCount(item.views)} 播放  ·  ${formatCount(item.likes)} 赞\n上传于 " +
+            meta.text = UiText.text(R.string.ui_950155cb3e60, "%1\$s 播放  ·  %2\$s 赞\n上传于 ", formatCount(item.views), formatCount(item.likes)) +
                 if (item.createdAt > 0L) java.time.Instant.ofEpochMilli(item.createdAt)
-                    .atZone(java.time.ZoneId.systemDefault()).toLocalDate().toString() else "未知日期"
+                    .atZone(java.time.ZoneId.systemDefault()).toLocalDate().toString() else UiText.text(R.string.ui_a3f1cde9f177, "未知日期")
             tags.text = item.tags.take(5).joinToString("  ") { "#$it" }
 
             icon.visibility = View.VISIBLE

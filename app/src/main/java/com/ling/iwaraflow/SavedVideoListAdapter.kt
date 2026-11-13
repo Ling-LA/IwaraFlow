@@ -35,7 +35,7 @@ class SavedVideoListAdapter(
             title.text = item.title
             meta.text = buildString {
                 append("@${item.author}")
-                if (item.views > 0 || item.likes > 0) append("  ·  ${formatCount(item.views)} 播放  ·  ${formatCount(item.likes)} 赞")
+                if (item.views > 0 || item.likes > 0) append(UiText.text(R.string.ui_55956f8dbeb7, "  ·  %1\$s 播放  ·  %2\$s 赞", formatCount(item.views), formatCount(item.likes)))
             }
             tags.text = item.tags.take(5).joinToString("  ") { "#$it" }
             val label = note(item)

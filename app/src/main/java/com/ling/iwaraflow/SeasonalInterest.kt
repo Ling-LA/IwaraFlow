@@ -7,6 +7,7 @@ import java.time.temporal.ChronoUnit
 
 /** A small, temporary calendar bonus. It never becomes a learned/manual preference. */
 object SeasonalInterest {
+    @Volatile private var inactiveCache: Pair<LocalDate, Set<String>>? = null
     data class Occasion(val name: String, val tag: String, val aliases: Set<String>, val strength: Double)
     private data class Holiday(val name: String, val tag: String, val month: Int, val day: Int,
         val before: Int, val after: Int, val aliases: Set<String>)
@@ -37,6 +38,28 @@ object SeasonalInterest {
     fun eligible(taste: PreferenceProfile, occasion: Occasion): Boolean = occasion.aliases.none { alias ->
         taste.mutedTags.any { SearchQuery.canonicalTag(it) == alias } ||
             (taste.manualTagPreferences[alias] ?: 0) < 0 || (taste.tagWeights[alias] ?: 0.0) < 0.0
+    }
+
+    /** Automatic holiday exposure must not become a year-round positive preference.
+     * Keep the stored evidence, negative feedback and explicit manual choices intact. */
+    fun inactiveTags(now: Long): Set<String> {
+        val date = Instant.ofEpochMilli(now).atZone(ZoneId.systemDefault()).toLocalDate()
+        inactiveCache?.takeIf { it.first == date }?.let { return it.second }
+        val activeTags = active(now).map { it.tag }.toSet()
+        return holidays.filter { it.tag !in activeTags }.flatMap { it.aliases }
+            .map(SearchQuery::canonicalTag).toSet().also { inactiveCache = date to it }
+    }
+
+    fun withoutExpiredLearning(taste: PreferenceProfile, now: Long): PreferenceProfile {
+        val inactive = inactiveTags(now)
+        if (taste.tagWeights.none { (tag, weight) -> weight > 0 && SearchQuery.canonicalTag(tag) in inactive } &&
+            taste.positiveTagWeights.keys.none { SearchQuery.canonicalTag(it) in inactive } &&
+            taste.textWeights.keys.none { SearchQuery.canonicalTag(it) in inactive }) return taste
+        return taste.copy(
+            tagWeights = taste.tagWeights.filterNot { (tag, weight) -> weight > 0 && SearchQuery.canonicalTag(tag) in inactive },
+            positiveTagWeights = taste.positiveTagWeights.filterKeys { SearchQuery.canonicalTag(it) !in inactive },
+            textWeights = taste.textWeights.filterKeys { SearchQuery.canonicalTag(it) !in inactive }
+        )
     }
 
     fun boost(item: VideoItem, taste: PreferenceProfile, now: Long): Double {

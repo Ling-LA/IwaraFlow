@@ -42,7 +42,7 @@ internal object PlaylistPicker {
         val drag = SheetDragToDismiss(root) { dialog.dismiss() }
         val handle = FrameLayout(activity).apply {
             tag = "playlist_drag_handle"
-            contentDescription = "下拉关闭收藏夹"
+            contentDescription = UiText.text(R.string.ui_2a73561a19a3, "下拉关闭收藏夹")
             addView(View(activity).apply {
                 background = GradientDrawable().apply { setColor(0xFFD3DCE2.toInt()); cornerRadius = dp(2).toFloat() }
             }, FrameLayout.LayoutParams(dp(40), dp(4), Gravity.CENTER))
@@ -50,18 +50,18 @@ internal object PlaylistPicker {
         }
         root.addView(handle, LinearLayout.LayoutParams(-1, dp(24)))
         val title = LinearLayout(activity).apply { gravity = Gravity.CENTER_VERTICAL }
-        title.addView(text("选择收藏夹", 19f).apply { setTypeface(null, Typeface.BOLD) }, LinearLayout.LayoutParams(0, dp(48), 1f))
-        val close = text("×", 25f).apply { contentDescription = "关闭收藏夹"; setOnClickListener { dialog.dismiss() } }
+        title.addView(text(UiText.text(R.string.ui_462982c2c971, "选择收藏夹"), 19f).apply { setTypeface(null, Typeface.BOLD) }, LinearLayout.LayoutParams(0, dp(48), 1f))
+        val close = text("×", 25f).apply { contentDescription = UiText.text(R.string.ui_b16df9746bbb, "关闭收藏夹"); setOnClickListener { dialog.dismiss() } }
         title.addView(close)
         root.addView(title)
-        root.addView(text("与 Iwara 官方播放列表同步 · 公开", 12f).apply { minHeight = dp(28) })
-        val create = text("＋ 新建收藏夹").apply { setTextColor(UiPalette.resolve(activity, 0xFF285D78.toInt())) }
+        root.addView(text(UiText.text(R.string.ui_05886df62096, "与 Iwara 官方播放列表同步 · 公开"), 12f).apply { minHeight = dp(28) })
+        val create = text(UiText.text(R.string.ui_669460aacc70, "＋ 新建收藏夹")).apply { setTextColor(UiPalette.resolve(activity, 0xFF285D78.toInt())) }
         root.addView(create)
         val list = LinearLayout(activity).apply { orientation = LinearLayout.VERTICAL }
-        val status = text("正在读取收藏夹…", 14f)
+        val status = text(UiText.text(R.string.ui_888f7a6a6d73, "正在读取收藏夹…"), 14f)
         list.addView(status)
         root.addView(ScrollView(activity).apply { addView(list); isFillViewport = false }, LinearLayout.LayoutParams(-1, 0, 1f))
-        val done = text("完成", 18f).apply {
+        val done = text(UiText.text(R.string.ui_c0b3fbff51cc, "完成"), 18f).apply {
             gravity = Gravity.CENTER; isEnabled = false
             background = GradientDrawable().apply { setColor(UiPalette.resolve(activity, 0xFFDCF0FC.toInt())); cornerRadius = dp(22).toFloat() }
         }
@@ -94,13 +94,13 @@ internal object PlaylistPicker {
                     selected.addAll(if (preserveDraft) draft.intersect(rows.map { it.id }.toSet()) else rows.filter { it.added }.map { it.id })
                     selectNew?.let(selected::add)
                     list.removeAllViews()
-                    if (rows.isEmpty()) list.addView(text("还没有收藏夹，点击上方新建", 14f))
+                    if (rows.isEmpty()) list.addView(text(UiText.text(R.string.ui_f1a07a82d399, "还没有收藏夹，点击上方新建"), 14f))
                     rows.forEach { folder ->
                         list.addView(CheckBox(activity).apply {
-                            text = "${folder.title}\n${folder.count} 个视频 · 公开"; textSize = 16f
+                            text = UiText.text(R.string.ui_a03945350766, "%1\$s\n%2\$s 个视频 · 公开", folder.title, folder.count); textSize = 16f
                             setTextColor(UiPalette.resolve(context, 0xFF17324A.toInt()))
                             minHeight = dp(70); setPadding(dp(16), dp(8), dp(16), dp(8)); isChecked = folder.id in selected
-                            contentDescription = "收藏夹 ${folder.title}"
+                            contentDescription = UiText.text(R.string.ui_eff706d728f4, "收藏夹 %1\$s", folder.title)
                             setOnCheckedChangeListener { _, checked -> if (!busy) { if (checked) selected.add(folder.id) else selected.remove(folder.id) } }
                         })
                         list.addView(View(activity).apply { setBackgroundColor(UiPalette.resolve(context, 0xFFEAF0F5.toInt())) }, LinearLayout.LayoutParams(-1, dp(1)))
@@ -108,7 +108,7 @@ internal object PlaylistPicker {
                     done.isEnabled = true; create.isEnabled = true
                 }.onFailure {
                     create.isEnabled = true
-                    list.removeAllViews(); list.addView(text("读取失败：${it.message}\n点此重试", 14f).apply { setOnClickListener { load(selectNew, preserveDraft) } })
+                    list.removeAllViews(); list.addView(text(UiText.text(R.string.ui_f5dfecfe97a3, "读取失败：%1\$s\n点此重试", it.message), 14f).apply { setOnClickListener { load(selectNew, preserveDraft) } })
                 }
             }
         }
@@ -117,17 +117,17 @@ internal object PlaylistPicker {
         }
         done.setOnClickListener {
             if (!current() || busy) return@setOnClickListener
-            busy = true; done.isEnabled = false; create.isEnabled = false; enableRows(false); done.text = "正在保存…"
+            busy = true; done.isEnabled = false; create.isEnabled = false; enableRows(false); done.text = UiText.text(R.string.ui_6bdb4435095e, "正在保存…")
             handle.isEnabled = false; close.isEnabled = false
             dialog.setCancelable(false); dialog.setCanceledOnTouchOutside(false)
             favorites.applySelection(item, selected.toSet()) { result ->
                 busy = false
                 if (!current() || !dialog.isShowing) return@applySelection
                 result.onSuccess { dialog.dismiss(); callback(Result.success(it)) }.onFailure {
-                    callback(Result.failure(it)); Toast.makeText(activity, "保存未完成，将重新读取官网已保存的选择", Toast.LENGTH_LONG).show()
+                    callback(Result.failure(it)); Toast.makeText(activity, UiText.text(R.string.ui_c9dfe0bf06b2, "保存未完成，将重新读取官网已保存的选择"), Toast.LENGTH_LONG).show()
                     handle.isEnabled = true; close.isEnabled = true
                     dialog.setCancelable(true); dialog.setCanceledOnTouchOutside(true)
-                    done.text = "完成"; create.isEnabled = true; load()
+                    done.text = UiText.text(R.string.ui_c0b3fbff51cc, "完成"); create.isEnabled = true; load()
                 }
             }
         }
@@ -139,10 +139,10 @@ internal object PlaylistPicker {
         val session = favorites.store.snapshot()
         val density = activity.resources.displayMetrics.density
         val content = LinearLayout(activity).apply { orientation = LinearLayout.VERTICAL; setPadding((20*density).toInt(), 0, (20*density).toInt(), 0) }
-        val input = EditText(activity).apply { hint = "收藏夹名称"; setSingleLine(); filters = arrayOf(android.text.InputFilter.LengthFilter(100)) }
+        val input = EditText(activity).apply { hint = UiText.text(R.string.ui_b161b3f76a60, "收藏夹名称"); setSingleLine(); filters = arrayOf(android.text.InputFilter.LengthFilter(100)) }
         content.addView(input)
-        content.addView(TextView(activity).apply { text = "创建 Iwara 官方公开播放列表，可在官网查看。"; textSize = 13f })
-        val dialog = AlertDialog.Builder(activity).setTitle("新建收藏夹").setView(content).setNegativeButton("取消", null).setPositiveButton("创建", null).create()
+        content.addView(TextView(activity).apply { text = UiText.text(R.string.ui_cae527f1bfee, "创建 Iwara 官方公开播放列表，可在官网查看。"); textSize = 13f })
+        val dialog = AlertDialog.Builder(activity).setTitle(UiText.text(R.string.ui_fdf0b569d820, "新建收藏夹")).setView(content).setNegativeButton(UiText.text(R.string.ui_2cd0f3be8738, "取消"), null).setPositiveButton(UiText.text(R.string.ui_cde2cd071d25, "创建"), null).create()
         fun current(): Boolean {
             if (!activity.isFinishing && !activity.isDestroyed && favorites.store.current(session)) return true
             dialog.dismiss()
@@ -151,7 +151,7 @@ internal object PlaylistPicker {
         dialog.setOnShowListener {
             dialog.getButton(AlertDialog.BUTTON_POSITIVE).setOnClickListener {
                 if (!current()) return@setOnClickListener
-                if (input.text.toString().trim().isBlank()) { input.error = "请输入收藏夹名称"; return@setOnClickListener }
+                if (input.text.toString().trim().isBlank()) { input.error = UiText.text(R.string.ui_c20a8f9fbab1, "请输入收藏夹名称"); return@setOnClickListener }
                 val button = dialog.getButton(AlertDialog.BUTTON_POSITIVE)
                 button.isEnabled = false
                 favorites.createFolder(input.text.toString()) { result ->

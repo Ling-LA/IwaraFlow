@@ -55,7 +55,10 @@ class PauseIndicatorView @JvmOverloads constructor(
     init {
         setOnClickListener {
             val player = findPlayer() ?: return@setOnClickListener
-            if (player.isPlaying) player.pause() else player.play()
+            if (player.isPlaying) player.pause() else {
+                if (player.playbackState == Player.STATE_ENDED) player.seekTo(0L)
+                player.play()
+            }
             refreshState()
         }
     }
@@ -79,16 +82,16 @@ class PauseIndicatorView @JvmOverloads constructor(
         }
         val player = findPlayer()
         val alive = player != null &&
-            player.playbackState != Player.STATE_IDLE &&
-            player.playbackState != Player.STATE_ENDED
-        val explicitlyPaused = alive && player != null && !player.playWhenReady
+            player.playbackState != Player.STATE_IDLE
+        val explicitlyPaused = alive && player != null &&
+            (player.playbackState == Player.STATE_ENDED || !player.playWhenReady)
         // 点出来的控件里也有这个按钮：正在播就显示暂停图标。
         val shown = (explicitlyPaused || (controlsPinned && alive)) && !(explicitlyPaused && hidePausedControls)
         visibility = if (shown) View.VISIBLE else View.GONE
         if (shown) {
             val playing = player != null && player.isPlaying
             setBackgroundResource(if (playing) R.drawable.ic_pause else R.drawable.ic_play)
-            contentDescription = if (playing) "暂停" else "继续播放"
+            contentDescription = if (playing) UiText.text(R.string.ui_8d12fc0d4eb2, "暂停") else UiText.text(R.string.ui_11a6c8e68b59, "继续播放")
         }
     }
 

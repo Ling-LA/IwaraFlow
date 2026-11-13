@@ -453,7 +453,7 @@ class VideoAdapter(
                 val item = bound
                 if (item != null && active && playbackEnabled && !released && sourceRequest == null) {
                     recoveryAttempts = 0
-                    refreshSourceAfterError(item, "手动重试")
+                    refreshSourceAfterError(item, UiText.text(R.string.ui_2a00db0959dd, "手动重试"))
                 }
             }
         }.also { (view as android.widget.FrameLayout).addView(it,
@@ -680,7 +680,7 @@ class VideoAdapter(
             landscape = false
             aspect = 0f
             applyVideoInsets()
-            comments.contentDescription = "评论，长按 0.5 秒发送弹幕评论"
+            comments.contentDescription = UiText.text(R.string.ui_34bc8395e43f, "评论，长按 0.5 秒发送弹幕评论")
             comments.visibility = if (onComments == null) View.GONE else View.VISIBLE
             comments.setOnClickListener {
                 // 打开评论区也是一点兴趣，比点赞轻得多。
@@ -698,7 +698,7 @@ class VideoAdapter(
             tags.isClickable = onInfo != null
             resetWatchSignals()
             item.localFavorite = favoriteController?.isFavorite(item.id) == true
-            favorite.contentDescription = "收藏，长按选择收藏夹"
+            favorite.contentDescription = UiText.text(R.string.ui_d133179bf3d4, "收藏，长按选择收藏夹")
             applyDisplayPrefs()
             skipBack.setOnClickListener { skipBy(-prefs.skipSeconds * 1000L) }
             skipForward.setOnClickListener { skipBy(prefs.skipSeconds * 1000L) }
@@ -724,8 +724,8 @@ class VideoAdapter(
             }
             accessibilityActions.forEach { androidx.core.view.ViewCompat.removeAccessibilityAction(itemView, it) }
             accessibilityActions.clear()
-            accessibilityActions += androidx.core.view.ViewCompat.addAccessibilityAction(itemView, "点赞、收藏并关注作者") { _, _ -> doubleReaction(includeFollow = true); true }
-            accessibilityActions += androidx.core.view.ViewCompat.addAccessibilityAction(itemView, "减少推荐或屏蔽") { _, _ ->
+            accessibilityActions += androidx.core.view.ViewCompat.addAccessibilityAction(itemView, UiText.text(R.string.ui_e92b2e8f25f2, "点赞、收藏并关注作者")) { _, _ -> doubleReaction(includeFollow = true); true }
+            accessibilityActions += androidx.core.view.ViewCompat.addAccessibilityAction(itemView, UiText.text(R.string.ui_0afa51ddb915, "减少推荐或屏蔽")) { _, _ ->
                 DislikeSheet.show(itemView.context, item, history) { target, kind -> onDisliked?.invoke(target, kind) }; true
             }
             quality.setOnClickListener { showQualityChooser(item, false) }
@@ -765,9 +765,14 @@ class VideoAdapter(
                             if (prefs.tapToPause) {
                                 setPausedControlsHidden(false)
                                 setControlsPinned(false)
-                                player?.let { p -> if (p.isPlaying) p.pause() else if (active) p.play() }
+                                player?.let { p ->
+                                    if (p.isPlaying) p.pause() else if (active) {
+                                        if (p.playbackState == Player.STATE_ENDED) p.seekTo(0L)
+                                        p.play()
+                                    }
+                                }
                             } else {
-                                val paused = player?.let { !it.playWhenReady } == true
+                                val paused = player?.let { it.playbackState == Player.STATE_ENDED || !it.playWhenReady } == true
                                 val showing = if (paused) !pausedControlsHidden else controlsPinned
                                 setPausedControlsHidden(paused && showing)
                                 setControlsPinned(!showing)
@@ -887,7 +892,7 @@ class VideoAdapter(
                 }
                 done?.invoke()
             }.onFailure {
-                if (bound === item) Toast.makeText(itemView.context, "收藏同步失败：${IwaraApi.explainError(it)}", Toast.LENGTH_LONG).show()
+                if (bound === item) Toast.makeText(itemView.context, UiText.text(R.string.ui_ae50f7dd1b16, "收藏同步失败：%1\$s", IwaraApi.explainError(it)), Toast.LENGTH_LONG).show()
             }
         }
 
@@ -927,7 +932,7 @@ class VideoAdapter(
                 addFavorite(item) {
                     if (!likeStates.isCurrent(session)) return@addFavorite
                     if (includeFollow) finishReactionFollow(item, session)
-                    else if (bound === item) Toast.makeText(itemView.context, "已点赞并收藏", Toast.LENGTH_SHORT).show()
+                    else if (bound === item) Toast.makeText(itemView.context, UiText.text(R.string.ui_1de0dd18b8e2, "已点赞并收藏"), Toast.LENGTH_SHORT).show()
                 }
             }
             if (item.liked) finishFavorite() else toggleRemoteLike(item, true, onSuccess = { finishFavorite() })
@@ -938,7 +943,7 @@ class VideoAdapter(
             if (released || !likeStates.isCurrent(session)) return
             val button = itemView.findViewById<AuthorFollowButton>(R.id.authorFollow)
             if (bound === item && !button.isEnabled) {
-                Toast.makeText(itemView.context, "已点赞并收藏，作者关注操作正在处理中", Toast.LENGTH_SHORT).show()
+                Toast.makeText(itemView.context, UiText.text(R.string.ui_0fd668274060, "已点赞并收藏，作者关注操作正在处理中"), Toast.LENGTH_SHORT).show()
                 return
             }
             if (bound === item) { reactionFollowBusy = true; button.isEnabled = false }
@@ -951,15 +956,15 @@ class VideoAdapter(
                     RecommendationEngine.notifyFollowChanged(item.authorId, true)
                 }
                 if (bound === item) Toast.makeText(itemView.context, when {
-                    error != null -> "已点赞并收藏，关注失败：${IwaraApi.explainError(error)}"
-                    self -> "已点赞并收藏，自己的作品无需关注"
-                    else -> "已完成三连：点赞、收藏、关注"
+                    error != null -> UiText.text(R.string.ui_dfafeb579d88, "已点赞并收藏，关注失败：%1\$s", IwaraApi.explainError(error))
+                    self -> UiText.text(R.string.ui_cc975be326e5, "已点赞并收藏，自己的作品无需关注")
+                    else -> UiText.text(R.string.ui_9fcb8eedf2a4, "已完成三连：点赞、收藏、关注")
                 }, Toast.LENGTH_SHORT).show()
             }
             fun follow(id: String, following: Boolean) {
-                if (released || !likeStates.isCurrent(session)) { finish(java.io.IOException("账号已切换")); return }
+                if (released || !likeStates.isCurrent(session)) { finish(java.io.IOException(UiText.text(R.string.ui_78deb9551a5a, "账号已切换"))); return }
                 when {
-                    id.isBlank() -> finish(java.io.IOException("缺少作者资料"))
+                    id.isBlank() -> finish(java.io.IOException(UiText.text(R.string.ui_1fab1e18dc80, "缺少作者资料")))
                     id == session.account -> finish(self = true)
                     following -> finish()
                     else -> api.ensureUserFollowed(id, item.authorUsername) { result -> itemView.post { finish(result.exceptionOrNull()) } }
@@ -968,7 +973,7 @@ class VideoAdapter(
             if (item.authorFollowing) { finish(); return }
             if (item.authorId.isNotBlank() || item.authorUsername.isBlank()) { follow(item.authorId, false); return }
             api.getAuthorProfile(item.authorUsername) { result -> itemView.post {
-                if (!likeStates.isCurrent(session) || released) { finish(java.io.IOException("账号已切换")); return@post }
+                if (!likeStates.isCurrent(session) || released) { finish(java.io.IOException(UiText.text(R.string.ui_78deb9551a5a, "账号已切换"))); return@post }
                 result.onSuccess { author ->
                     item.authorId = author.id.ifBlank { item.authorId }
                     follow(item.authorId, author.following)
@@ -1030,7 +1035,7 @@ class VideoAdapter(
                         val cause = error.cause
                         NavigationDiagnostics.note(
                             itemView.context,
-                            "播放错误：${error.errorCodeName}" +
+                            UiText.text(R.string.ui_d21818aedf82, "播放错误：%1\$s", error.errorCodeName) +
                                 (cause?.let { "（${it.javaClass.simpleName}: ${it.message?.take(120)}）" } ?: "") +
                                 " 源=${item.streamUrl?.substringBefore(':')?.take(12) ?: "无"}"
                         )
@@ -1098,7 +1103,7 @@ class VideoAdapter(
                         item.sources = sources
                         prepareChosenSource(item, sources, preservePosition = false)
                     }.onFailure {
-                        NavigationDiagnostics.note(itemView.context, "当前视频播放源解析失败：${it.javaClass.simpleName}")
+                        NavigationDiagnostics.note(itemView.context, UiText.text(R.string.ui_b2050c2b1837, "当前视频播放源解析失败：%1\$s", it.javaClass.simpleName))
                         showPlaybackRetry()
                     }
                 }
@@ -1116,7 +1121,7 @@ class VideoAdapter(
             val shouldPlay = active && item.resumePlayWhenReady
             item.streamUrl = source.url
             if (item.selectedQuality == null && preferred != "highest") item.selectedQuality = source.name
-            quality.text = "画质\n" + (item.selectedQuality ?: if (preferred == "highest") "最高" else source.name)
+            quality.text = UiText.text(R.string.ui_647fef831b82, "画质\n") + (item.selectedQuality ?: if (preferred == "highest") UiText.text(R.string.ui_8672864e9041, "最高") else source.name)
             mediaCache.registerSources(item.id, sources)
             playbackMetrics?.intentionalChange()
             p.setMediaSource(mediaCache.createMediaSource(source.url))
@@ -1377,7 +1382,7 @@ class VideoAdapter(
             p.volume = 1f
             p.playWhenReady = true
             p.play()
-            Toast.makeText(itemView.context, "播放器已自动恢复", Toast.LENGTH_SHORT).show()
+            Toast.makeText(itemView.context, UiText.text(R.string.ui_3113d7edb2c2, "播放器已自动恢复"), Toast.LENGTH_SHORT).show()
         }
 
         /**
@@ -1401,7 +1406,7 @@ class VideoAdapter(
             val scheme = item.streamUrl?.substringBefore(':').orEmpty().lowercase()
             if (scheme == "content" || scheme == "file") {
                 // 本地文件放不出来不该悄悄转成在线播放——用户会以为“下载没用、还得等很久”。
-                Toast.makeText(itemView.context, "本地文件播放失败（$reason），改为在线播放", Toast.LENGTH_LONG).show()
+                Toast.makeText(itemView.context, UiText.text(R.string.ui_84ac591b1fd2, "本地文件播放失败（%1\$s），改为在线播放", reason), Toast.LENGTH_LONG).show()
             }
             item.sources = null
             item.streamUrl = null
@@ -1415,7 +1420,7 @@ class VideoAdapter(
                         item.resumePositionMs = position
                         prepareChosenSource(item, sources, preservePosition = false)
                     }.onFailure {
-                        NavigationDiagnostics.note(itemView.context, "当前视频播放源刷新失败：${it.javaClass.simpleName}")
+                        NavigationDiagnostics.note(itemView.context, UiText.text(R.string.ui_951aa19692a1, "当前视频播放源刷新失败：%1\$s", it.javaClass.simpleName))
                         showPlaybackRetry()
                     }
                 }
@@ -1423,7 +1428,7 @@ class VideoAdapter(
         }
 
         private fun showPlaybackRetry(loading: Boolean = false) {
-            sourceRetry.text = if (loading) "正在重新连接…" else "播放失败 · 点击重试"
+            sourceRetry.text = if (loading) UiText.text(R.string.ui_90e28b54e030, "正在重新连接…") else UiText.text(R.string.ui_96eee7baae2d, "播放失败 · 点击重试")
             sourceRetry.contentDescription = sourceRetry.text
             sourceRetry.isEnabled = !loading
             sourceRetry.visibility = View.VISIBLE
@@ -1483,8 +1488,8 @@ class VideoAdapter(
                         if (bound?.id == item.id) updateLikeUi(item)
                         onSuccess?.invoke()
                     }.onFailure {
-                        Toast.makeText(itemView.context, it.message ?: "点赞同步失败", Toast.LENGTH_SHORT).show()
-                        if (it.message?.contains("登录") == true || it.message?.contains("401") == true) onNeedLogin()
+                        Toast.makeText(itemView.context, it.message ?: UiText.text(R.string.ui_553c9535d247, "点赞同步失败"), Toast.LENGTH_SHORT).show()
+                        if (it.message?.contains("登录") == true || it.message?.contains("401") == true) onNeedLogin() // ui-literal: API error detection
                     }
                 }
             }
@@ -1494,8 +1499,8 @@ class VideoAdapter(
 
         private fun updateLikeUi(item: VideoItem) {
             likeStates.apply(item)
-            like.contentDescription = if (item.liked) "取消点赞" else "点赞"
-            favorite.contentDescription = if (item.localFavorite) "取消收藏，长按管理收藏夹" else "收藏，长按选择收藏夹"
+            like.contentDescription = if (item.liked) UiText.text(R.string.ui_3ab399c75fa6, "取消点赞") else UiText.text(R.string.ui_aced5d7f9fc9, "点赞")
+            favorite.contentDescription = if (item.localFavorite) UiText.text(R.string.ui_b5ebf982e47c, "取消收藏，长按管理收藏夹") else UiText.text(R.string.ui_d133179bf3d4, "收藏，长按选择收藏夹")
             like.setIcon(
                 if (item.liked) R.drawable.ic_heart_rounded else R.drawable.ic_heart_rounded_outline,
                 if (item.liked) 0xFFFF365D.toInt() else 0xFFFFFFFF.toInt()
@@ -1506,7 +1511,7 @@ class VideoAdapter(
             )
             likeCount.text = formatCount(item.likes)
             fullscreenLikeCount.text = "${if (item.liked) "♥" else "♡"} ${formatCount(item.likes)}"
-            fullscreenLikeCount.contentDescription = "${item.likes} 个赞"
+            fullscreenLikeCount.contentDescription = UiText.text(R.string.ui_4b3520b0447d, "%1\$s 个赞", item.likes)
         }
 
         /** ImageView 不回传当前是哪个图标，记在 tag 上，点没点赞一读就知道。 */
@@ -1524,7 +1529,7 @@ class VideoAdapter(
             if (!cached.isNullOrEmpty() && !item.refreshSourcesForSelection) { openSourceDialog(item, cached, forDownload); return }
             val bindGeneration = generation
             val requestPlayer = player
-            Toast.makeText(itemView.context, "正在读取清晰度…", Toast.LENGTH_SHORT).show()
+            Toast.makeText(itemView.context, UiText.text(R.string.ui_e013be1bb433, "正在读取清晰度…"), Toast.LENGTH_SHORT).show()
             cancelQualityRequest()
             val requestGeneration = choiceGeneration
             choiceRequest = api.resolveSources(item.id) { result ->
@@ -1536,7 +1541,7 @@ class VideoAdapter(
                         item.sources = sources; item.refreshSourcesForSelection = false
                         openSourceDialog(item, sources, forDownload)
                     }
-                        .onFailure { Toast.makeText(itemView.context, "清晰度获取失败：${it.message}", Toast.LENGTH_SHORT).show() }
+                        .onFailure { Toast.makeText(itemView.context, UiText.text(R.string.ui_ac784d381e7d, "清晰度获取失败：%1\$s", it.message), Toast.LENGTH_SHORT).show() }
                 }
             }
         }
@@ -1549,16 +1554,16 @@ class VideoAdapter(
         }
 
         private fun openSourceDialog(item: VideoItem, sources: List<VideoSource>, forDownload: Boolean) {
-            val labels = sources.map { if (it.score >= 10000) "${it.name}（原画）" else it.name }.toTypedArray()
+            val labels = sources.map { if (it.score >= 10000) UiText.text(R.string.ui_1ef1b48ad4b5, "%1\$s（原画）", it.name) else it.name }.toTypedArray()
             AlertDialog.Builder(itemView.context)
-                .setTitle(if (forDownload) "选择下载清晰度" else "播放清晰度")
+                .setTitle(if (forDownload) UiText.text(R.string.ui_6f401794a1d7, "选择下载清晰度") else UiText.text(R.string.ui_dda659a8833d, "播放清晰度"))
                 .setItems(labels) { _, which ->
                     val source = sources[which]
                     if (forDownload) onDownload(item, source)
                     else {
                         item.selectedQuality = source.name
                         item.streamUrl = source.url
-                        quality.text = "画质\n${source.name}"
+                        quality.text = UiText.text(R.string.ui_0e1922d93995, "画质\n%1\$s", source.name)
                         prepareChosenSource(item, sources, preservePosition = true)
                     }
                 }.show()
@@ -1635,8 +1640,8 @@ class VideoAdapter(
         }
 
         private fun displayQuality(item: VideoItem): String {
-            val value = item.selectedQuality ?: when (prefs.defaultQuality) { "highest" -> "最高"; else -> prefs.defaultQuality }
-            return "画质\n$value"
+            val value = item.selectedQuality ?: when (prefs.defaultQuality) { "highest" -> UiText.text(R.string.ui_8672864e9041, "最高"); else -> prefs.defaultQuality }
+            return UiText.text(R.string.ui_0e1922d93995, "画质\n%1\$s", value)
         }
 
         private fun formatCount(value: Int): String = when {

@@ -58,7 +58,7 @@ class ManualTagPreferencesTest {
         }
         HistoryStore(context).use { store ->
             store.setManualTagPreference("dance", 1)
-            assertEquals(12, store.readableDatabase.version)
+            assertEquals(13, store.readableDatabase.version)
             assertTrue(store.loadStatuses(listOf("old-video")).seen.contains("old-video"))
         }
     }

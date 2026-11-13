@@ -11,16 +11,16 @@ object DanmakuSettings {
             val pad = (20 * resources.displayMetrics.density).toInt(); setPadding(pad, pad, pad, pad)
         }
         panel.addView(CheckBox(context).apply {
-            text = "显示评论弹幕"; isChecked = prefs.danmakuEnabled
+            text = UiText.text(R.string.ui_9ba74fb74032, "显示评论弹幕"); isChecked = prefs.danmakuEnabled
             setOnCheckedChangeListener { _, value -> prefs.danmakuEnabled = value }
         })
-        panel.addView(TextView(context).apply { text = "评论从右向左滚动，每条只显示一次；重新打开视频或从头播放时重新显示。设置即时保存。" })
+        panel.addView(TextView(context).apply { text = UiText.text(R.string.ui_f1d13331728e, "评论从右向左滚动，每条只显示一次；重新打开视频或从头播放时重新显示。设置即时保存。") })
         panel.addView(CheckBox(context).apply {
-            text = "将弹幕翻译为中文"; isChecked = prefs.translateDanmaku
+            text = UiText.text(R.string.ui_95d2c0e08ff6, "将弹幕翻译为中文"); isChecked = prefs.translateDanmaku
             setOnCheckedChangeListener { _, value -> prefs.translateDanmaku = value }
         })
         panel.addView(TextView(context).apply {
-            text = "复用设置中的翻译服务，按需翻译正在显示的弹幕。使用付费 AI 模型可能额外消耗 token 并产生费用；翻译失败时保留原文。"
+            text = UiText.text(R.string.ui_ff0ae7ed3631, "复用设置中的翻译服务，按需翻译正在显示的弹幕。使用付费 AI 模型可能额外消耗 token 并产生费用；翻译失败时保留原文。")
             textSize = 12f; setTextColor(UiPalette.resolve(context, 0xFF607D93.toInt()))
         })
         fun slider(title: String, min: Int, max: Int, value: Int, save: (Int) -> Unit) {
@@ -37,13 +37,13 @@ object DanmakuSettings {
                 })
             })
         }
-        slider("同时显示行数", 1, 6, prefs.danmakuDensity) { prefs.danmakuDensity = it }
-        slider("字体大小", 12, 32, prefs.danmakuSize) { prefs.danmakuSize = it }
-        slider("不透明度 %", 20, 100, prefs.danmakuOpacity) { prefs.danmakuOpacity = it }
-        slider("穿过画面的秒数（越小越快）", 4, 20, prefs.danmakuDuration) { prefs.danmakuDuration = it }
-        panel.addView(TextView(context).apply { text = "显示位置" })
+        slider(UiText.text(R.string.ui_b2c1c0d60e82, "同时显示行数"), 1, 6, prefs.danmakuDensity) { prefs.danmakuDensity = it }
+        slider(UiText.text(R.string.ui_0c30c37c6ead, "字体大小"), 12, 32, prefs.danmakuSize) { prefs.danmakuSize = it }
+        slider(UiText.text(R.string.ui_644fd4e495f6, "不透明度 %"), 20, 100, prefs.danmakuOpacity) { prefs.danmakuOpacity = it }
+        slider(UiText.text(R.string.ui_e0af533e9bc1, "穿过画面的秒数（越小越快）"), 4, 20, prefs.danmakuDuration) { prefs.danmakuDuration = it }
+        panel.addView(TextView(context).apply { text = UiText.text(R.string.ui_5ac9489c03e4, "显示位置") })
         panel.addView(Spinner(context).apply {
-            adapter = ArrayAdapter(context, android.R.layout.simple_spinner_dropdown_item, arrayOf("上半屏", "下半屏", "全屏"))
+            adapter = ArrayAdapter(context, android.R.layout.simple_spinner_dropdown_item, arrayOf(UiText.text(R.string.ui_f197cb63ea99, "上半屏"), UiText.text(R.string.ui_a07f31bfe4b1, "下半屏"), UiText.text(R.string.ui_22ea3f47fee8, "全屏")))
             setSelection(prefs.danmakuRegion)
             onItemSelectedListener = object : android.widget.AdapterView.OnItemSelectedListener {
                 override fun onNothingSelected(parent: android.widget.AdapterView<*>?) {}

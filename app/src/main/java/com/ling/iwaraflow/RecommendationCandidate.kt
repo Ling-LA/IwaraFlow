@@ -49,18 +49,18 @@ data class RecommendationCandidate(
 ) {
     /** 「为什么推荐给我」：挑最能说明问题的那一条理由。 */
     fun reason(): String = when {
-        subscribed -> "你关注的作者更新了"
-        exploration -> "为你探索的新内容"
-        seasonalTag.isNotBlank() -> "应季节日内容 #$seasonalTag"
-        matchedTags.isNotEmpty() -> "你最近常看 #${matchedTags.first()}"
-        matchedAuthorId.isNotBlank() -> "你喜欢这位作者的作品"
-        classic -> "历史上的高赞作品"
-        interestSuggested -> "猜你喜欢 · 根据点赞、收藏、关注和完整观看分析"
-        Source.MONTH_TOP in sources -> "近期的高赞作品"
-        Source.TRENDING in sources -> "热门榜上的作品"
-        Source.POPULARITY in sources -> "流行榜上的作品"
-        Source.DATE in sources -> "最近的新投稿"
-        else -> "综合推荐"
+        subscribed -> UiText.text(R.string.ui_ed658df03965, "你关注的作者更新了")
+        exploration -> UiText.text(R.string.ui_1c1f07b25529, "为你探索的新内容")
+        seasonalTag.isNotBlank() -> UiText.text(R.string.ui_c95d7d0e18f5, "应季节日内容 #%1\$s", seasonalTag)
+        matchedTags.isNotEmpty() -> UiText.text(R.string.ui_323fda11691f, "你最近常看 #%1\$s", matchedTags.first())
+        matchedAuthorId.isNotBlank() -> UiText.text(R.string.ui_18d5c13b3a0e, "你喜欢这位作者的作品")
+        classic -> UiText.text(R.string.ui_a2c823653025, "历史上的高赞作品")
+        interestSuggested -> UiText.text(R.string.ui_c79cb9b0cd36, "猜你喜欢 · 根据点赞、收藏、关注和完整观看分析")
+        Source.MONTH_TOP in sources -> UiText.text(R.string.ui_fba8a81f428b, "近期的高赞作品")
+        Source.TRENDING in sources -> UiText.text(R.string.ui_62a6d501e516, "热门榜上的作品")
+        Source.POPULARITY in sources -> UiText.text(R.string.ui_d82d9fa17967, "流行榜上的作品")
+        Source.DATE in sources -> UiText.text(R.string.ui_67a85a0e3349, "最近的新投稿")
+        else -> UiText.text(R.string.ui_6b277a6c9804, "综合推荐")
     }
 
     /**
@@ -76,6 +76,30 @@ data class RecommendationCandidate(
         groupScores[group] = maxOf(groupScores[group] ?: 0.0, boost)
         groupHits[group] = (groupHits[group] ?: 0) + 1
         recomputeSourceScore()
+    }
+
+    /** Also expire recalled explanations/bonuses in a queue restored after the holiday. */
+    fun expireSeasonal(taste: PreferenceProfile, now: Long) {
+        val inactive = SeasonalInterest.inactiveTags(now)
+        val removedTag = matchedTags.removeAll { tag -> SearchQuery.canonicalTag(tag) in inactive &&
+            taste.manualTagPreferences.none { (key, value) -> value > 0 && SearchQuery.canonicalTag(key) == SearchQuery.canonicalTag(tag) } }
+        var changed = false
+        if (seasonalTag.isNotBlank() && SearchQuery.canonicalTag(seasonalTag) in inactive) {
+            seasonalTag = ""
+            sources.remove(Source.SEASONAL)
+            groupScores.remove(Source.SEASONAL); groupHits.remove(Source.SEASONAL)
+            // Compatibility with pre-0.19.0 queues, where seasonal and date shared a group.
+            if (Source.DATE !in sources) { groupScores.remove(Group.FRESH); groupHits.remove(Group.FRESH) }
+            changed = true
+        }
+        if (removedTag && matchedTags.isEmpty() && sources.remove(Source.TAG)) {
+            if (matchedAuthorId.isBlank()) { groupScores.remove(Group.PERSONAL); groupHits.remove(Group.PERSONAL) }
+            changed = true
+        }
+        if (changed) {
+            sourceScore = 0.0
+            recomputeSourceScore()
+        }
     }
 
     private fun recomputeSourceScore() {
@@ -123,7 +147,8 @@ data class RecommendationCandidate(
         fun sourceGroup(label: String): String = when (label) {
             Source.TAG, Source.AUTHOR -> Group.PERSONAL
             Source.SUBSCRIBED -> Group.SOCIAL
-            Source.DATE, Source.SEASONAL -> Group.FRESH
+            Source.DATE -> Group.FRESH
+            Source.SEASONAL -> Source.SEASONAL
             // 热门 / 流行 / 月高赞 / 老片 / 官方回退：说的都是“很多人喜欢”。
             else -> Group.QUALITY
         }

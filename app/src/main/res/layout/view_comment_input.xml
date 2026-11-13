@@ -47,7 +47,7 @@
             android:layout_width="0dp"
             android:layout_height="wrap_content"
             android:layout_weight="1"
-            android:text="发到 Iwara，和网页端评论一样"
+            android:text="@string/ui_00ed07c0d4ee"
             android:textColor="#FF8A9BAA"
             android:textSize="11sp" />
 
@@ -59,7 +59,7 @@
             android:gravity="center"
             android:paddingStart="22dp"
             android:paddingEnd="22dp"
-            android:text="发送"
+            android:text="@string/ui_edecf0ae6e51"
             android:textColor="#FFFFFFFF"
             android:textSize="14sp"
             android:textStyle="bold" />

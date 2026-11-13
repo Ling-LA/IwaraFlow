@@ -43,7 +43,7 @@
                 android:layout_width="28dp"
                 android:layout_height="28dp"
                 android:layout_gravity="center"
-                android:contentDescription="后退"
+                android:contentDescription="@string/ui_2d1d8c1e3895"
                 android:src="@drawable/ic_skip_back" />
 
             <TextView
@@ -66,7 +66,7 @@
             android:layout_marginStart="6dp"
             android:layout_marginEnd="6dp"
             android:background="@drawable/ic_play"
-            android:contentDescription="继续播放"
+            android:contentDescription="@string/ui_11a6c8e68b59"
             android:text=""
             android:visibility="gone" />
 
@@ -82,7 +82,7 @@
                 android:layout_width="28dp"
                 android:layout_height="28dp"
                 android:layout_gravity="center"
-                android:contentDescription="前进"
+                android:contentDescription="@string/ui_d681c6e2947a"
                 android:src="@drawable/ic_skip_forward" />
 
             <TextView
@@ -111,7 +111,7 @@
         android:paddingTop="9dp"
         android:paddingEnd="18dp"
         android:paddingBottom="9dp"
-        android:text="2× 加速中"
+        android:text="@string/ui_7d20d2620a28"
         android:textColor="#FFFFFFFF"
         android:textSize="14sp"
         android:textStyle="bold"
@@ -190,7 +190,7 @@
             android:id="@+id/like"
             android:layout_width="match_parent"
             android:layout_height="36dp"
-            android:contentDescription="点赞"
+            android:contentDescription="@string/ui_aced5d7f9fc9"
             android:padding="2dp"
             android:scaleType="fitCenter"
             android:src="@drawable/ic_heart_rounded_outline" />
@@ -210,7 +210,7 @@
             android:layout_width="match_parent"
             android:layout_height="36dp"
             android:layout_marginTop="14dp"
-            android:contentDescription="收藏"
+            android:contentDescription="@string/ui_60a53514eb92"
             android:padding="2dp"
             android:scaleType="fitCenter"
             android:src="@drawable/ic_star_rounded_outline" />
@@ -225,7 +225,7 @@
             android:drawablePadding="3dp"
             android:gravity="center"
             android:includeFontPadding="false"
-            android:text="评论"
+            android:text="@string/ui_6849b8254d20"
             android:textColor="#FFFFFFFF"
             android:textSize="12sp"
             android:textStyle="bold" />
@@ -238,7 +238,7 @@
             android:gravity="center"
             android:includeFontPadding="false"
             android:lineSpacingExtra="3dp"
-            android:text="画质\n最高"
+            android:text="@string/ui_6c551d3c70a5"
             android:textColor="#FFFFFFFF"
             android:textSize="11sp"
             android:textStyle="bold" />
@@ -252,7 +252,7 @@
             android:drawablePadding="3dp"
             android:gravity="center"
             android:includeFontPadding="false"
-            android:text="下载"
+            android:text="@string/ui_4673a2306165"
             android:textColor="#FFFFFFFF"
             android:textSize="12sp"
             android:textStyle="bold" />
@@ -266,7 +266,7 @@
             android:drawablePadding="3dp"
             android:gravity="center"
             android:includeFontPadding="false"
-            android:text="全屏"
+            android:text="@string/ui_22ea3f47fee8"
             android:textColor="#FFFFFFFF"
             android:textSize="12sp"
             android:textStyle="bold" />
@@ -280,7 +280,7 @@
             android:drawablePadding="3dp"
             android:gravity="center"
             android:includeFontPadding="false"
-            android:text="分享"
+            android:text="@string/ui_7e564575eb7d"
             android:textColor="#FFFFFFFF"
             android:textSize="12sp"
             android:textStyle="bold" />
@@ -316,7 +316,7 @@
             android:id="@+id/pauseFullscreenExit"
             android:layout_width="34dp"
             android:layout_height="34dp"
-            android:contentDescription="退出全屏"
+            android:contentDescription="@string/ui_0f1505b6ad3f"
             android:padding="6dp"
             android:src="@drawable/ic_fullscreen_exit"
             android:visibility="gone" />
@@ -325,7 +325,7 @@
             android:id="@+id/pausePip"
             android:layout_width="34dp"
             android:layout_height="34dp"
-            android:contentDescription="小窗"
+            android:contentDescription="@string/ui_9859161216f6"
             android:padding="6dp"
             android:src="@drawable/ic_pip" />
 
@@ -333,7 +333,7 @@
             android:id="@+id/pauseDownload"
             android:layout_width="34dp"
             android:layout_height="34dp"
-            android:contentDescription="下载视频"
+            android:contentDescription="@string/ui_eec15b2c1bab"
             android:padding="6dp"
             android:src="@drawable/ic_download"
             android:visibility="gone" />
@@ -392,9 +392,9 @@
             android:layout_width="64dp"
             android:layout_height="match_parent"
             android:layout_marginStart="8dp"
-            android:contentDescription="全屏评论，长按发送弹幕评论"
+            android:contentDescription="@string/ui_be055eac9f13"
             android:gravity="center"
-            android:text="评论"
+            android:text="@string/ui_6849b8254d20"
             android:textColor="#FFFFFFFF"
             android:textSize="14sp" />
     </LinearLayout>

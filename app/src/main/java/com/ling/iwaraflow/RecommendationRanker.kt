@@ -43,7 +43,13 @@ class RecommendationRanker(private val random: Random = Random(), private val no
     fun startGeneration() { generation += 1 }
 
     /** 「为什么推荐给我」：这条视频是怎么被选出来的。没记录就返回 null。 */
-    fun reasonFor(videoId: String): String? = candidates[videoId]?.reason()
+    fun reasonFor(videoId: String): String? = candidates[videoId]?.let {
+        val taste = SeasonalInterest.withoutExpiredLearning(profile, nowMs())
+        it.expireSeasonal(taste, nowMs())
+        if (it.interestSuggested && !it.subscribed && !it.exploration && !it.classic && it.seasonalTag.isBlank() &&
+            it.matchedTags.isEmpty() && it.matchedAuthorId.isBlank() && ContentInterest.score(it.item, taste) >= .2)
+            UiText.text(R.string.ui_db4508017615, "标题或简介与你近期偏好相符") else it.reason()
+    }
 
     fun candidateFor(videoId: String): RecommendationCandidate? = candidates[videoId]
 
@@ -134,11 +140,13 @@ class RecommendationRanker(private val random: Random = Random(), private val no
     internal fun scoreParts(item: VideoItem, taste: PreferenceProfile, now: Long): ScoreParts {
         val ageDays = if (item.createdAt > 0L) ((now - item.createdAt).coerceAtLeast(0L) / 86_400_000.0) else 30.0
         val known = candidates[item.id]
+        known?.expireSeasonal(taste, now)
+        val currentTaste = SeasonalInterest.withoutExpiredLearning(taste, now)
         return ScoreParts(
             source = known?.sourceScore ?: 0.0,
             quality = known?.baseQuality ?: qualityScore(item.likes, item.views),
             freshness = 1.6 / (1.0 + ageDays / 30.0),
-            taste = taste.rankingScore(item) * TASTE_WEIGHT,
+            taste = currentTaste.rankingScore(item) * TASTE_WEIGHT,
             jitter = ((item.id.hashCode().toLong() and 0xffff) / 65535.0) * JITTER_WEIGHT,
             seasonal = SeasonalInterest.boost(item, taste, now)
         )
@@ -159,6 +167,8 @@ class RecommendationRanker(private val random: Random = Random(), private val no
             append("\n来源 ${signed(parts.source)} · 质量 ${signed(parts.quality)}")
             append(" · 新鲜度 ${signed(parts.freshness)}")
             append("\n画像 ${signed(parts.taste)} · 扰动 ${signed(parts.jitter)}")
+            val text = ContentInterest.score(item, SeasonalInterest.withoutExpiredLearning(taste, now))
+            if (text != 0.0) append(" · 标题/简介 ${signed(text)}（计入画像）")
             if (parts.seasonal > 0) append(" · 节日 ${signed(parts.seasonal)}")
             val hitTags = item.tags.mapNotNull { tag ->
                 taste.tagWeights[tag.lowercase()]?.let { tag to it }
@@ -229,7 +239,9 @@ class RecommendationRanker(private val random: Random = Random(), private val no
                 val evidence = item.tags.map(SearchQuery::canonicalTag).distinct().mapNotNull { tag ->
                     taste.positiveTagWeights[tag]?.takeIf { it >= 1.0 && (taste.tagWeights[tag] ?: 0.0) > 0.0 }
                 }.sortedDescending().take(PreferenceProfile.TOP_TAGS).sum()
-                if (evidence <= 0.0) null else Triple(candidate, position, evidence)
+                val combinedEvidence = evidence + ContentInterest.score(item,
+                    SeasonalInterest.withoutExpiredLearning(taste, nowMs())).takeIf { it >= .2 }.orZero()
+                if (combinedEvidence <= 0.0) null else Triple(candidate, position, combinedEvidence)
             }.maxByOrNull { it.third }
             if (selected != null) {
                 val originalReason = selected.first.reason()
@@ -239,6 +251,8 @@ class RecommendationRanker(private val random: Random = Random(), private val no
             }
         }
     }
+
+    private fun Double?.orZero() = this ?: 0.0
 
     /**
      * Positive manual tags raise relevance without taking every slot. Unlike the local MMR

@@ -48,7 +48,7 @@
                 android:id="@+id/panelTabInfoLabel"
                 android:layout_width="wrap_content"
                 android:layout_height="wrap_content"
-                android:text="简介"
+                android:text="@string/ui_8131eafd0239"
                 android:textColor="#FF8A9BAA"
                 android:textSize="16sp" />
 
@@ -74,7 +74,7 @@
                 android:id="@+id/commentsTitle"
                 android:layout_width="wrap_content"
                 android:layout_height="wrap_content"
-                android:text="评论"
+                android:text="@string/ui_6849b8254d20"
                 android:textColor="#FF17324A"
                 android:textSize="16sp"
                 android:textStyle="bold" />
@@ -100,7 +100,7 @@
                 android:id="@+id/panelTabDanmakuLabel"
                 android:layout_width="wrap_content"
                 android:layout_height="wrap_content"
-                android:text="弹幕"
+                android:text="@string/ui_2591ec68705c"
                 android:textColor="#FF8A9BAA"
                 android:textSize="16sp" />
 
@@ -290,7 +290,7 @@
             android:paddingTop="9dp"
             android:paddingEnd="14dp"
             android:paddingBottom="9dp"
-            android:text="说点什么…"
+            android:text="@string/ui_72a70e767e8c"
             android:textColor="#FF8A9BAA"
             android:textSize="14sp" />
     </LinearLayout>

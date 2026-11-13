@@ -36,10 +36,10 @@ class MyActivity : AppCompatActivity() {
         }
         status = findViewById(R.id.authorStatus)
         findViewById<View>(R.id.authorBack).setOnClickListener { finish() }
-        findViewById<TextView>(R.id.authorName).text = "我的"
+        findViewById<TextView>(R.id.authorName).text = UiText.text(R.string.ui_7f1d9dd04cd1, "我的")
         findViewById<TextView>(R.id.authorShare).apply {
-            text = "上传"
-            contentDescription = "上传视频"
+            text = UiText.text(R.string.ui_9e07e3c0532d, "上传")
+            contentDescription = UiText.text(R.string.ui_0b58562cdfb7, "上传视频")
             setTextColor(android.graphics.Color.WHITE)
             setCompoundDrawablesRelativeWithIntrinsicBounds(0, 0, 0, 0)
             setBackgroundResource(R.drawable.bg_profile_primary)
@@ -52,11 +52,11 @@ class MyActivity : AppCompatActivity() {
             }
         }
         findViewById<TextView>(R.id.followButton).apply {
-            text = "我的关注"; isEnabled = false
+            text = UiText.text(R.string.ui_9dccba0eafbb, "我的关注"); isEnabled = false
             setOnClickListener { relation(false) }
         }
         findViewById<TextView>(R.id.friendButton).apply {
-            text = "我的粉丝"; isEnabled = false
+            text = UiText.text(R.string.ui_71ad32522ddf, "我的粉丝"); isEnabled = false
             setOnClickListener { relation(true) }
         }
         findViewById<View>(R.id.profileFavoritesButton).apply {
@@ -91,18 +91,18 @@ class MyActivity : AppCompatActivity() {
             })
         }
         if (!api.isLoggedIn()) {
-            status.text = "请先在主页登录 Iwara"
+            status.text = UiText.text(R.string.ui_1ff82bfd157a, "请先在主页登录 Iwara")
             status.setOnClickListener { PageNavigation.home(this) }
         } else loadProfile()
     }
 
     private fun loadProfile() {
-        status.text = "正在读取个人主页…"
+        status.text = UiText.text(R.string.ui_229bc6063d92, "正在读取个人主页…")
         status.setOnClickListener(null)
         api.getCurrentUser { result -> runOnUiThread {
             if (isFinishing || isDestroyed) return@runOnUiThread
             result.onSuccess { bindProfile(it); loadPage() }
-                .onFailure { status.text = "个人主页读取失败，点击重试"; status.setOnClickListener { loadProfile() } }
+                .onFailure { status.text = UiText.text(R.string.ui_3858488b86ec, "个人主页读取失败，点击重试"); status.setOnClickListener { loadProfile() } }
         } }
     }
 
@@ -140,7 +140,7 @@ class MyActivity : AppCompatActivity() {
         val user = me ?: return
         if (loading || !more) return
         loading = true
-        status.text = if (videos.isEmpty()) "正在读取我的作品…" else "作品 ${videos.size} 条 · 正在加载…"
+        status.text = if (videos.isEmpty()) UiText.text(R.string.ui_f33669a2ee38, "正在读取我的作品…") else UiText.text(R.string.ui_a41703a9ce79, "作品 %1\$s 条 · 正在加载…", videos.size)
         status.setOnClickListener(null)
         val requestGeneration = generation
         api.getAuthorVideoPage(user.id, page, 36) { result -> runOnUiThread {
@@ -152,14 +152,14 @@ class MyActivity : AppCompatActivity() {
                 videos += fresh; listAdapter.notifyItemRangeInserted(start, fresh.size)
                 page++; more = fresh.isNotEmpty() && (batch.total < 0 || videos.size < batch.total)
                 status.text = worksStatus(videos.size, more)
-            }.onFailure { status.text = "作品加载失败，点击重试"; status.setOnClickListener { loadPage() } }
+            }.onFailure { status.text = UiText.text(R.string.ui_d598717ad517, "作品加载失败，点击重试"); status.setOnClickListener { loadPage() } }
         } }
     }
 
     override fun onDestroy() { api.close(); super.onDestroy() }
 
     companion object {
-        internal fun worksStatus(count: Int, more: Boolean) = if (count == 0) "暂无上传视频"
-            else "作品 $count 条" + if (more) " · 下滑继续加载" else ""
+        internal fun worksStatus(count: Int, more: Boolean) = if (count == 0) UiText.text(R.string.ui_09a563b6233e, "暂无上传视频")
+            else UiText.text(R.string.ui_c61bfd9412a0, "作品 %1\$s 条", count) + if (more) UiText.text(R.string.ui_f8c598f6c605, " · 下滑继续加载") else ""
     }
 }

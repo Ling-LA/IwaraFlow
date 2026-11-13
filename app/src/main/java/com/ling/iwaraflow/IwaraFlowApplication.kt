@@ -3,8 +3,14 @@ package com.ling.iwaraflow
 import android.app.Application
 
 class IwaraFlowApplication : Application() {
+    override fun onConfigurationChanged(newConfig: android.content.res.Configuration) {
+        super.onConfigurationChanged(newConfig)
+        AppLanguage.initialize(this)
+    }
+
     override fun onCreate() {
         super.onCreate()
+        AppLanguage.initialize(this)
         NavigationDiagnostics.install(this)
         registerActivityLifecycleCallbacks(PlaybackGuideNavigation)
         registerActivityLifecycleCallbacks(ClipboardLinkHandler())

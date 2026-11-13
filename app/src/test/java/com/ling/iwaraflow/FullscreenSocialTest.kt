@@ -85,10 +85,10 @@ class FullscreenSocialTest {
             idle(); f.controls(true)
             f.playing(true); idle(); f.controls(false)
             f.playing(false); idle(); f.controls(true)
-            for (state in listOf(Player.STATE_IDLE, Player.STATE_ENDED)) {
-                `when`(f.player.playbackState).thenReturn(state)
-                idle(); f.controls(false)
-            }
+            `when`(f.player.playbackState).thenReturn(Player.STATE_ENDED)
+            idle(); f.controls(true) // Ended videos must still allow seek/replay and comments.
+            `when`(f.player.playbackState).thenReturn(Player.STATE_IDLE)
+            idle(); f.controls(false)
         }
     }
 

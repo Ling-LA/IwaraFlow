@@ -20,7 +20,7 @@ import org.robolectric.annotation.Config
 import org.robolectric.shadows.ShadowSettings
 
 @RunWith(RobolectricTestRunner::class)
-@Config(sdk = [36])
+@Config(sdk = [36], qualifiers = "zh-rCN")
 class ProfileRefreshTest {
     private fun texts(view: View): List<TextView> = buildList {
         if (view is TextView) add(view)

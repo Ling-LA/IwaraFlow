@@ -182,7 +182,7 @@ class SearchActivity : AppCompatActivity(), PlaybackGuideHost {
         refreshLayout.isEnabled = false
         refreshLayout.setColorSchemeColors(UiPalette.resolve(this, 0xFF285C7B.toInt()))
         refreshLayout.setOnRefreshListener { refreshResults() }
-        refreshLayout.contentDescription = "下拉刷新搜索结果"
+        refreshLayout.contentDescription = UiText.text(R.string.ui_7282a62f8bd1, "下拉刷新搜索结果")
         pager = findViewById(R.id.searchPager)
         statusView = findViewById(R.id.searchStatus)
         findViewById<View>(R.id.searchMatchOptions).setOnClickListener { showMatchOptions() }
@@ -206,7 +206,7 @@ class SearchActivity : AppCompatActivity(), PlaybackGuideHost {
 
         videoAdapter = AuthorVideoListAdapter(videoTab.items) { item -> openWork(Tab.VIDEOS, item) }
         tagAdapter = AuthorVideoListAdapter(tagTab.items) { item -> openWork(Tab.TAGS, item) }
-        authorAdapter = FollowingAuthorAdapter(authorTab.items, emptyDescription = "查看作者主页", onClick = ::openAuthor)
+        authorAdapter = FollowingAuthorAdapter(authorTab.items, emptyDescription = UiText.text(R.string.ui_8fc9e82f204e, "查看作者主页"), onClick = ::openAuthor)
         excludeSeen = findViewById(R.id.searchExcludeSeen)
         excludeSeen.isChecked = prefs.searchExcludeSeen
         excludeSeen.setOnCheckedChangeListener { _, checked ->
@@ -234,7 +234,7 @@ class SearchActivity : AppCompatActivity(), PlaybackGuideHost {
             onEnterPip = { FloatingVideoService.request(this, feedAdapter, ::enterPip) },
             onShare = ::shareVideo,
             onEnded = ::nextWork,
-            onNeedLogin = { Toast.makeText(this, "请先在主页登录 Iwara", Toast.LENGTH_SHORT).show() },
+            onNeedLogin = { Toast.makeText(this, UiText.text(R.string.ui_1ff82bfd157a, "请先在主页登录 Iwara"), Toast.LENGTH_SHORT).show() },
             onComments = { comments.open(it) },
             onInfo = { comments.open(it, CommentsPanel.Tab.INFO) },
             onFullscreen = { _, enabled -> setFullscreen(enabled) }
@@ -251,7 +251,7 @@ class SearchActivity : AppCompatActivity(), PlaybackGuideHost {
             // 左上角的返回按钮：16dp 边距 + 44dp 高。
             topBarHeight = { (60 * density).toInt() },
             gapPx = (20 * density).toInt(),
-            onNeedLogin = { Toast.makeText(this, "请先在主页登录 Iwara", Toast.LENGTH_SHORT).show() },
+            onNeedLogin = { Toast.makeText(this, UiText.text(R.string.ui_1ff82bfd157a, "请先在主页登录 Iwara"), Toast.LENGTH_SHORT).show() },
             onOpenAuthor = ::openAuthor,
             onCommentPosted = { history.recordInteractionAsync(it, "comment", 1.5) },
             // 已经在搜索页了：点标签直接在本页重搜，落在「标签」那一栏。
@@ -280,11 +280,11 @@ class SearchActivity : AppCompatActivity(), PlaybackGuideHost {
         submit.setOnClickListener { runSearch(input.text.toString()) }
         input.doAfterTextChanged { text ->
             val link = IwaraSharedLink.parse(text.toString())
-            submit.text = if (link == null) "搜索" else "打开"
+            submit.text = if (link == null) UiText.text(R.string.ui_44ce7ae909bb, "搜索") else UiText.text(R.string.ui_c771248e511f, "打开")
             submit.contentDescription = when (link?.kind) {
-                IwaraSharedLink.Kind.VIDEO -> "打开 Iwara 视频"
-                IwaraSharedLink.Kind.AUTHOR -> "打开 Iwara 作者主页"
-                null -> "搜索关键词"
+                IwaraSharedLink.Kind.VIDEO -> UiText.text(R.string.ui_a70c0641899f, "打开 Iwara 视频")
+                IwaraSharedLink.Kind.AUTHOR -> UiText.text(R.string.ui_6c64d4d5ee47, "打开 Iwara 作者主页")
+                null -> UiText.text(R.string.ui_c00a21fdf784, "搜索关键词")
             }
             input.error = null
         }
@@ -336,7 +336,7 @@ class SearchActivity : AppCompatActivity(), PlaybackGuideHost {
         input.setText(initial)
         // 从简介页的标签点进来的：直接落在「标签」那一页。
         if (intent.getBooleanExtra(EXTRA_AS_TAG, false)) showTab(Tab.TAGS)
-        if (initial.isNotBlank()) runSearch(initial) else statusView.text = "输入关键词搜索，或粘贴 Iwara 视频 / 作者链接后打开"
+        if (initial.isNotBlank()) runSearch(initial) else statusView.text = UiText.text(R.string.ui_f455d8ecd5b4, "输入关键词搜索，或粘贴 Iwara 视频 / 作者链接后打开")
     }
 
     private fun runSearch(raw: String) {
@@ -357,11 +357,11 @@ class SearchActivity : AppCompatActivity(), PlaybackGuideHost {
             return
         }
         if (trimmed.contains(Regex("https?://", RegexOption.IGNORE_CASE))) {
-            input.error = "请输入有效的 Iwara 视频或作者主页链接"
+            input.error = UiText.text(R.string.ui_7bcc1d54db5a, "请输入有效的 Iwara 视频或作者主页链接")
             return
         }
         if (SearchQuery.terms(trimmed).isEmpty()) {
-            Toast.makeText(this, "请输入关键词或 Iwara 链接", Toast.LENGTH_SHORT).show()
+            Toast.makeText(this, UiText.text(R.string.ui_2f9b3109e1df, "请输入关键词或 Iwara 链接"), Toast.LENGTH_SHORT).show()
             return
         }
         hideKeyboard()
@@ -378,7 +378,7 @@ class SearchActivity : AppCompatActivity(), PlaybackGuideHost {
         // 已经翻过的词直接用四种写法开搜；没翻过的先按原词搜着，译文回来再补进去。
         // 作者名只按输入的原词搜：作者的用户名就是他自己起的那一个，翻成别的语言反而搜偏。
         matchingNote = if (!originalOnly && prefs.aiSearchMatching) {
-            if (Translator.aiReady()) "AI 正在核对匹配词…" else "AI 精准匹配需先在设置配置 AI 翻译"
+            if (Translator.aiReady()) UiText.text(R.string.ui_24b0388358f7, "AI 正在核对匹配词…") else UiText.text(R.string.ui_20117056fae4, "AI 精准匹配需先在设置配置 AI 翻译")
         } else ""
         searchPlan = if (originalOnly) SearchQuery.literal(trimmed) else ManualSearchTerms(this).merge(SearchQuery.local(trimmed, prefs.aiSearchMatching))
         availablePlan = searchPlan
@@ -432,7 +432,7 @@ class SearchActivity : AppCompatActivity(), PlaybackGuideHost {
                 groups[index] = expanded.ifEmpty { listOf(term) }
                 remaining--
                 if (remaining != 0) return@expand
-                if (matchingNote == "AI 正在核对匹配词…") matchingNote = "AI 建议匹配词，请在调整匹配词中核对"
+                if (matchingNote == UiText.text(R.string.ui_24b0388358f7, "AI 正在核对匹配词…")) matchingNote = UiText.text(R.string.ui_4d04183a45f9, "AI 建议匹配词，请在调整匹配词中核对")
                 updateStatus()
                 val updated = ManualSearchTerms(this).merge(SearchQuery(groups.toList()))
                 if (updated == searchPlan) return@expand
@@ -463,17 +463,17 @@ class SearchActivity : AppCompatActivity(), PlaybackGuideHost {
             orientation = android.widget.LinearLayout.VERTICAL
             setPadding(24, 8, 24, 8)
         }
-        extra.addView(TextView(this).apply { text = "以下为词库、翻译或 AI 建议；可取消错误词。手动补充的别名会保存在本机。" })
+        extra.addView(TextView(this).apply { text = UiText.text(R.string.ui_a39c789b8f2c, "以下为词库、翻译或 AI 建议；可取消错误词。手动补充的别名会保存在本机。") })
         val groupChoice = android.widget.Spinner(this).apply {
             adapter = android.widget.ArrayAdapter(this@SearchActivity, android.R.layout.simple_spinner_dropdown_item, terms)
         }
-        val customWord = EditText(this).apply { hint = "补充该关键词的别名，用逗号分隔"; setSingleLine() }
+        val customWord = EditText(this).apply { hint = UiText.text(R.string.ui_b559fb37f847, "补充该关键词的别名，用逗号分隔"); setSingleLine() }
         extra.addView(groupChoice); extra.addView(customWord)
-        androidx.appcompat.app.AlertDialog.Builder(this).setTitle("匹配词：同组任一，不同关键词全部匹配")
+        androidx.appcompat.app.AlertDialog.Builder(this).setTitle(UiText.text(R.string.ui_f2151cb86790, "匹配词：同组任一，不同关键词全部匹配"))
             .setView(extra)
             .setMultiChoiceItems(entries.map { (index, word) -> "${terms[index]} → $word" }.toTypedArray(), checked) { _, which, enabled -> checked[which] = enabled }
-            .setNeutralButton(if (originalOnly) "启用多语言" else "仅使用原词") { _, _ -> originalOnly = !originalOnly; runSearch(query) }
-            .setNegativeButton("取消", null).setPositiveButton("应用") { _, _ ->
+            .setNeutralButton(if (originalOnly) UiText.text(R.string.ui_a8b30e3ecb09, "启用多语言") else UiText.text(R.string.ui_3a0d7b01dbff, "仅使用原词")) { _, _ -> originalOnly = !originalOnly; runSearch(query) }
+            .setNegativeButton(UiText.text(R.string.ui_2cd0f3be8738, "取消"), null).setPositiveButton(UiText.text(R.string.ui_63c73c4730f4, "应用")) { _, _ ->
                 expansionSerial++; translationTasks.forEach { it.cancel() }; translationTasks.clear()
                 val removed = entries.filterIndexed { index, _ -> !checked[index] }.toSet()
                 querySerial++; api.cancelPendingRequests(); gate.cancelPending()
@@ -551,7 +551,7 @@ class SearchActivity : AppCompatActivity(), PlaybackGuideHost {
             view.setTextColor(if (selected) 0xFFFFFFFF.toInt() else UiPalette.resolve(this, 0xFF285C7B.toInt()))
             view.setTypeface(null, if (selected) android.graphics.Typeface.BOLD else android.graphics.Typeface.NORMAL)
         }
-        orderToggle.text = if (sortDescending) "倒序 ↓" else "顺序 ↑"
+        orderToggle.text = if (sortDescending) UiText.text(R.string.ui_a3ccfd5be651, "倒序 ↓") else UiText.text(R.string.ui_ececd4de66e3, "顺序 ↑")
     }
 
     /**
@@ -776,9 +776,9 @@ class SearchActivity : AppCompatActivity(), PlaybackGuideHost {
         if (query.isBlank()) { finishRefresh(); return }
         if (refreshingTab != null && (refreshingSerial != querySerial || refreshingTab != currentTab)) finishRefresh()
         val label = when (currentTab) {
-            Tab.VIDEOS -> "视频名"
-            Tab.TAGS -> "标签"
-            Tab.AUTHORS -> "作者名"
+            Tab.VIDEOS -> UiText.text(R.string.ui_a48323d55d7a, "视频名")
+            Tab.TAGS -> UiText.text(R.string.ui_1d0fd5f9336d, "标签")
+            Tab.AUTHORS -> UiText.text(R.string.ui_8dec2a269991, "作者名")
         }
         val loading = when (currentTab) {
             Tab.VIDEOS -> videoTab.loading
@@ -804,28 +804,28 @@ class SearchActivity : AppCompatActivity(), PlaybackGuideHost {
         val subject = plan.groups.joinToString(" AND ") { aliases ->
             aliases.joinToString(" / ", prefix = "(", postfix = ")") { "“$it”" }
         }
-        val sortHint = if (currentTab == Tab.AUTHORS) "关注数优先" else SearchSort.label(sortKey, sortDescending)
+        val sortHint = if (currentTab == Tab.AUTHORS) UiText.text(R.string.ui_82a729d0725b, "关注数优先") else SearchSort.label(sortKey, sortDescending)
         statusView.text = buildString {
             append("$subject · $label · $sortHint")
-            if (currentTab != Tab.AUTHORS && prefs.searchExcludeSeen) append(" · 已排除看过的视频")
+            if (currentTab != Tab.AUTHORS && prefs.searchExcludeSeen) append(UiText.text(R.string.ui_b04e7b771e8b, " · 已排除看过的视频"))
             if (currentTab != Tab.AUTHORS && matchingNote.isNotBlank()) append(" · $matchingNote")
-            if (currentTab != Tab.AUTHORS) append(" · 按已加载结果排序")
+            if (currentTab != Tab.AUTHORS) append(UiText.text(R.string.ui_95f6089e52de, " · 按已加载结果排序"))
             when {
-                failure != null && count == 0 -> append("  ·  加载失败：$failure")
-                failure != null -> append("  ·  $count 条 · 后续加载失败：$failure")
-                loading && count == 0 -> append("  ·  正在搜索…")
-                count == 0 && noMore -> append(if (currentTab == Tab.TAGS) "  ·  没有找到带这个标签的视频" else "  ·  没有找到结果")
-                count == 0 -> append("  ·  暂无匹配，点击继续搜索")
+                failure != null && count == 0 -> append(UiText.text(R.string.ui_bfb7b25f4a9a, "  ·  加载失败：%1\$s", failure))
+                failure != null -> append(UiText.text(R.string.ui_dca9f983309a, "  ·  %1\$s 条 · 后续加载失败：%2\$s", count, failure))
+                loading && count == 0 -> append(UiText.text(R.string.ui_91f27b70ed44, "  ·  正在搜索…"))
+                count == 0 && noMore -> append(if (currentTab == Tab.TAGS) UiText.text(R.string.ui_ef8adc67b602, "  ·  没有找到带这个标签的视频") else UiText.text(R.string.ui_70e28d785c6f, "  ·  没有找到结果"))
+                count == 0 -> append(UiText.text(R.string.ui_faa0cec287d8, "  ·  暂无匹配，点击继续搜索"))
                 else -> {
-                    append("  ·  $count 条")
+                    append(UiText.text(R.string.ui_8766e74c83ab, "  ·  %1\$s 条", count))
                     if (currentTab != Tab.AUTHORS) {
                         val unavailable = when (currentTab) {
                             Tab.VIDEOS -> videoTab.items.size - videoTab.playable.size
                             else -> tagTab.items.size - tagTab.playable.size
                         }
-                        if (unavailable > 0) append("  ·  $unavailable 条当前不可播放")
+                        if (unavailable > 0) append(UiText.text(R.string.ui_ab9ec3fc0de0, "  ·  %1\$s 条当前不可播放", unavailable))
                     }
-                    if (loading) append("  ·  正在加载更多…") else if (!noMore) append("  ·  下滑或点击继续加载")
+                    if (loading) append(UiText.text(R.string.ui_677b9f94f58c, "  ·  正在加载更多…")) else if (!noMore) append(UiText.text(R.string.ui_df9c9ada7e27, "  ·  下滑或点击继续加载"))
                 }
             }
         }
@@ -916,7 +916,7 @@ class SearchActivity : AppCompatActivity(), PlaybackGuideHost {
     private fun openAuthor(author: IwaraAuthor) {
         if (exiting) return
         if (author.id.isBlank() && author.username.isBlank()) {
-            Toast.makeText(this, "该作者没有资料", Toast.LENGTH_SHORT).show()
+            Toast.makeText(this, UiText.text(R.string.ui_5ef923104036, "该作者没有资料"), Toast.LENGTH_SHORT).show()
             return
         }
         // 全 App 单一播放所有权：进入作者页前先停下搜索结果页的播放器。
@@ -954,9 +954,9 @@ class SearchActivity : AppCompatActivity(), PlaybackGuideHost {
                 .setNotificationVisibility(DownloadManager.Request.VISIBILITY_VISIBLE_NOTIFY_COMPLETED)
                 .setDestinationInExternalPublicDir(Environment.DIRECTORY_DOWNLOADS, "IwaraFlow/$fileName")
             (getSystemService(Context.DOWNLOAD_SERVICE) as DownloadManager).enqueue(request)
-            Toast.makeText(this, "已加入下载", Toast.LENGTH_SHORT).show()
+            Toast.makeText(this, UiText.text(R.string.ui_146e9302fed6, "已加入下载"), Toast.LENGTH_SHORT).show()
         } catch (e: Exception) {
-            Toast.makeText(this, "下载失败：${e.message}", Toast.LENGTH_SHORT).show()
+            Toast.makeText(this, UiText.text(R.string.ui_42fb22bc6277, "下载失败：%1\$s", e.message), Toast.LENGTH_SHORT).show()
         }
     }
 
@@ -987,12 +987,12 @@ class SearchActivity : AppCompatActivity(), PlaybackGuideHost {
     private var leavingForShare = false
 
     private fun shareVideo(item: VideoItem) {
-        if (item.id.isBlank()) { Toast.makeText(this, "这个视频没有可分享的链接", Toast.LENGTH_SHORT).show(); return }
-        SharePanel.show(this, VideoShare.shareText(item), item.title, "分享视频链接") { intent ->
+        if (item.id.isBlank()) { Toast.makeText(this, UiText.text(R.string.ui_0099c344771f, "这个视频没有可分享的链接"), Toast.LENGTH_SHORT).show(); return }
+        SharePanel.show(this, VideoShare.shareText(item), item.title, UiText.text(R.string.ui_64a47947b19a, "分享视频链接"), item.thumbnailUrl) { intent ->
             leavingForShare = true
             runCatching { startActivity(intent) }.onFailure {
                 leavingForShare = false
-                Toast.makeText(this, "没有可用的分享应用", Toast.LENGTH_SHORT).show()
+                Toast.makeText(this, UiText.text(R.string.ui_14c08712a70e, "没有可用的分享应用"), Toast.LENGTH_SHORT).show()
             }
         }
     }
@@ -1009,7 +1009,7 @@ class SearchActivity : AppCompatActivity(), PlaybackGuideHost {
         val entered = runCatching { enterPictureInPictureMode(pipParams()) }.getOrDefault(false)
         if (!entered) {
             PipRegistry.leave(this)
-            Toast.makeText(this, "画中画启动失败", Toast.LENGTH_SHORT).show()
+            Toast.makeText(this, UiText.text(R.string.ui_e8412d85bb3e, "画中画启动失败"), Toast.LENGTH_SHORT).show()
         }
     }
 

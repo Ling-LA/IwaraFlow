@@ -93,16 +93,16 @@ class UpdateManager(private val activity: Activity) {
                 }
             }
             result.onSuccess { NavigationDiagnostics.note(activity, "检查更新：最新 v${it.version}（${it.source}），当前 v$current") }
-            result.onFailure { NavigationDiagnostics.note(activity, "检查更新失败：${it.message?.take(200)}") }
+            result.onFailure { NavigationDiagnostics.note(activity, UiText.text(R.string.ui_cb79f814f414, "检查更新失败：%1\$s", it.message?.take(200))) }
             activity.runOnUiThread {
                 waiting?.dismiss()
                 if (activeDialog === waiting) activeDialog = null
                 if (closed || activity.isFinishing || activity.isDestroyed) return@runOnUiThread
                 result.onSuccess { release ->
                     if (isNewer(release.version, current)) showUpdateDialog(release, current)
-                    else if (manual) Toast.makeText(activity, "当前已是最新版本 v$current", Toast.LENGTH_SHORT).show()
+                    else if (manual) Toast.makeText(activity, UiText.text(R.string.ui_2b1d76ce1c33, "当前已是最新版本 v%1\$s", current), Toast.LENGTH_SHORT).show()
                 }.onFailure {
-                    if (manual) Toast.makeText(activity, "检查更新失败：${explain(it)}", Toast.LENGTH_LONG).show()
+                    if (manual) Toast.makeText(activity, UiText.text(R.string.ui_cb79f814f414, "检查更新失败：%1\$s", explain(it)), Toast.LENGTH_LONG).show()
                 }
             }
         }
@@ -111,7 +111,7 @@ class UpdateManager(private val activity: Activity) {
     /** 把连接层的错误说成人话；GitHub 在国内经常连不上，提示里直接点出代理。 */
     private fun explain(error: Throwable): String {
         val message = error.message.orEmpty()
-        NetworkProxy.explain(message)?.let { return "连不上 GitHub，请检查代理 / VPN 是否对本应用生效" }
+        NetworkProxy.explain(message)?.let { return UiText.text(R.string.ui_b814fb72d0f2, "连不上 GitHub，请检查代理 / VPN 是否对本应用生效") }
         return message.ifBlank { error.javaClass.simpleName }
     }
 
@@ -125,9 +125,9 @@ class UpdateManager(private val activity: Activity) {
         viaApi.getOrNull()?.let { return it }
         val viaPage = runCatching { fetchLatestViaRedirect() }
         viaPage.getOrNull()?.let { return it }
-        val apiReason = viaApi.exceptionOrNull()?.message ?: "未知"
-        val pageReason = viaPage.exceptionOrNull()?.message ?: "未知"
-        throw IllegalStateException("$apiReason；备用通道：$pageReason", viaApi.exceptionOrNull())
+        val apiReason = viaApi.exceptionOrNull()?.message ?: UiText.text(R.string.ui_4d8c1c5b4283, "未知")
+        val pageReason = viaPage.exceptionOrNull()?.message ?: UiText.text(R.string.ui_4d8c1c5b4283, "未知")
+        throw IllegalStateException(UiText.text(R.string.ui_acb3f04cfd43, "%1\$s；备用通道：%2\$s", apiReason, pageReason), viaApi.exceptionOrNull())
     }
 
     private fun fetchLatestViaRedirect(): ReleaseInfo {
@@ -140,10 +140,10 @@ class UpdateManager(private val activity: Activity) {
             return ReleaseInfo(
                 version = version,
                 title = "IwaraFlow v$version",
-                notes = "修复问题并改进使用体验。",
+                notes = UiText.text(R.string.ui_8c9d2e08ed68, "修复问题并改进使用体验。"),
                 apkUrl = "https://github.com/$REPO/releases/download/v$version/$RELEASE_APK_NAME",
                 publishedAt = "",
-                source = "发布页跳转"
+                source = UiText.text(R.string.ui_e1f60461afa2, "发布页跳转")
             )
         }
     }
@@ -216,16 +216,16 @@ class UpdateManager(private val activity: Activity) {
     }
 
     private fun cleanReleaseNotes(raw: String): String {
-        if (raw.isBlank()) return "修复问题并改进使用体验。"
+        if (raw.isBlank()) return UiText.text(R.string.ui_8c9d2e08ed68, "修复问题并改进使用体验。")
         val useful = raw.lineSequence()
             .map { it.trim() }
             .filter { it.isNotBlank() }
             .filterNot { it.startsWith("IwaraFlow v", true) }
             .filterNot { it.startsWith("此 Release 由", true) }
-            .filterNot { it.startsWith("App 内", true) }
+            .filterNot { it.startsWith("App 内", true) } // ui-literal: release notes marker
             .filterNot { it.startsWith("Commit:", true) }
             .joinToString("\n")
-        return useful.ifBlank { "修复问题并改进使用体验。" }
+        return useful.ifBlank { UiText.text(R.string.ui_8c9d2e08ed68, "修复问题并改进使用体验。") }
     }
 
     private fun githubRequest(url: String): Request = Request.Builder()
@@ -242,13 +242,13 @@ class UpdateManager(private val activity: Activity) {
             setPadding(dp(24), dp(20), dp(24), dp(20))
             addView(ProgressBar(activity), LinearLayout.LayoutParams(dp(28), dp(28)))
             addView(TextView(activity).apply {
-                text = "正在检查新版本…"
+                text = UiText.text(R.string.ui_66891e15bd35, "正在检查新版本…")
                 textSize = 15f
                 setTextColor(0xFF17324A.toInt())
                 setPadding(dp(16), 0, 0, 0)
             })
         }
-        return AlertDialog.Builder(activity).setTitle("检查更新").setView(row).setCancelable(false).create().also { it.show() }
+        return AlertDialog.Builder(activity).setTitle(UiText.text(R.string.ui_7f68ebad19ba, "检查更新")).setView(row).setCancelable(false).create().also { it.show() }
     }
 
     private fun showUpdateDialog(release: ReleaseInfo, currentVersion: String) {
@@ -257,19 +257,19 @@ class UpdateManager(private val activity: Activity) {
             setPadding(dp(24), dp(6), dp(24), dp(8))
         }
         panel.addView(TextView(activity).apply {
-            text = "新版本  v${release.version}"
+            text = UiText.text(R.string.ui_4005fb10f70d, "新版本  v%1\$s", release.version)
             textSize = 22f
             setTextColor(0xFF17324A.toInt())
             setTypeface(null, android.graphics.Typeface.BOLD)
         })
         panel.addView(TextView(activity).apply {
-            text = "当前版本 v$currentVersion"
+            text = UiText.text(R.string.ui_3cb0839f4759, "当前版本 v%1\$s", currentVersion)
             textSize = 12f
             setTextColor(0xFF6C879A.toInt())
             setPadding(0, dp(3), 0, dp(14))
         })
         panel.addView(TextView(activity).apply {
-            text = "更新内容"
+            text = UiText.text(R.string.ui_6c89d3260903, "更新内容")
             textSize = 14f
             setTextColor(0xFFD84B73.toInt())
             setTypeface(null, android.graphics.Typeface.BOLD)
@@ -284,10 +284,10 @@ class UpdateManager(private val activity: Activity) {
             setPadding(0, 0, 0, dp(6))
         })
         val dialog = AlertDialog.Builder(activity)
-            .setTitle("发现新版本")
+            .setTitle(UiText.text(R.string.ui_ac217e4d1ca4, "发现新版本"))
             .setView(panel)
-            .setNegativeButton("以后再说", null)
-            .setPositiveButton("立即更新") { _, _ -> downloadRelease(release) }
+            .setNegativeButton(UiText.text(R.string.ui_9d2055b957c0, "以后再说"), null)
+            .setPositiveButton(UiText.text(R.string.ui_12487befb4ba, "立即更新")) { _, _ -> downloadRelease(release) }
             .create()
         dialog.setOnShowListener {
             dialog.getButton(AlertDialog.BUTTON_POSITIVE)?.apply {
@@ -307,7 +307,7 @@ class UpdateManager(private val activity: Activity) {
             if (updateFile.exists()) updateFile.delete()
             val request = DownloadManager.Request(Uri.parse(release.apkUrl))
                 .setTitle("IwaraFlow v${release.version}")
-                .setDescription("正在下载应用更新")
+                .setDescription(UiText.text(R.string.ui_28038654bd2c, "正在下载应用更新"))
                 .setMimeType(APK_MIME)
                 .setNotificationVisibility(DownloadManager.Request.VISIBILITY_VISIBLE_NOTIFY_COMPLETED)
                 .setAllowedOverMetered(true)
@@ -317,11 +317,11 @@ class UpdateManager(private val activity: Activity) {
             downloadId = dm.enqueue(request)
             downloadedUri = null
             prefs.edit().putLong(KEY_PENDING_DOWNLOAD_ID, downloadId).apply()
-            NavigationDiagnostics.note(activity, "更新包开始下载 v${release.version}")
-            Toast.makeText(activity, "更新包开始下载，完成后会自动打开安装界面", Toast.LENGTH_LONG).show()
+            NavigationDiagnostics.note(activity, UiText.text(R.string.ui_d47be76e98e4, "更新包开始下载 v%1\$s", release.version))
+            Toast.makeText(activity, UiText.text(R.string.ui_79eaf62d5f30, "更新包开始下载，完成后会自动打开安装界面"), Toast.LENGTH_LONG).show()
         } catch (e: Exception) {
-            NavigationDiagnostics.note(activity, "更新包下载失败：${e.message?.take(160)}")
-            Toast.makeText(activity, "更新下载失败：${e.message}", Toast.LENGTH_LONG).show()
+            NavigationDiagnostics.note(activity, UiText.text(R.string.ui_2bec0badef0b, "更新包下载失败：%1\$s", e.message?.take(160)))
+            Toast.makeText(activity, UiText.text(R.string.ui_59ae1eaf5914, "更新下载失败：%1\$s", e.message), Toast.LENGTH_LONG).show()
         }
     }
 
@@ -355,7 +355,7 @@ class UpdateManager(private val activity: Activity) {
                     val reasonIndex = cursor.getColumnIndex(DownloadManager.COLUMN_REASON)
                     val reason = if (reasonIndex >= 0) cursor.getInt(reasonIndex) else -1
                     NavigationDiagnostics.note(activity, "更新包下载失败：DownloadManager reason=$reason")
-                    if (showFailure) Toast.makeText(activity, "更新包下载失败（原因码 $reason），请重新检查更新", Toast.LENGTH_LONG).show()
+                    if (showFailure) Toast.makeText(activity, UiText.text(R.string.ui_63196655e600, "更新包下载失败（原因码 %1\$s），请重新检查更新", reason), Toast.LENGTH_LONG).show()
                     clearPendingDownload()
                 }
             }
@@ -365,7 +365,7 @@ class UpdateManager(private val activity: Activity) {
     private fun installDownloadedApk() {
         val uri = downloadedUri ?: return
         if (!canInstallPackages()) {
-            Toast.makeText(activity, "请允许 IwaraFlow 安装未知应用，然后返回继续安装", Toast.LENGTH_LONG).show()
+            Toast.makeText(activity, UiText.text(R.string.ui_7a0d6770fbec, "请允许 IwaraFlow 安装未知应用，然后返回继续安装"), Toast.LENGTH_LONG).show()
             if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
                 activity.startActivity(Intent(Settings.ACTION_MANAGE_UNKNOWN_APP_SOURCES, Uri.parse("package:${activity.packageName}")))
             }
@@ -387,7 +387,7 @@ class UpdateManager(private val activity: Activity) {
             })
             clearPendingDownload()
         } catch (e: Exception) {
-            Toast.makeText(activity, "无法打开安装程序：${e.message}", Toast.LENGTH_LONG).show()
+            Toast.makeText(activity, UiText.text(R.string.ui_76d186fdd702, "无法打开安装程序：%1\$s", e.message), Toast.LENGTH_LONG).show()
         }
     }
 

@@ -10,7 +10,7 @@ import androidx.recyclerview.widget.RecyclerView
 class FollowingAuthorAdapter(
     private val items: List<IwaraAuthor>,
     private val onClick: (IwaraAuthor) -> Unit,
-    private val emptyDescription: String = "已关注"
+    private val emptyDescription: String = UiText.text(R.string.ui_9fe1d0c9cca3, "已关注")
 ) : RecyclerView.Adapter<FollowingAuthorAdapter.Holder>() {
 
     override fun onCreateViewHolder(parent: ViewGroup, viewType: Int): Holder =
@@ -32,7 +32,7 @@ class FollowingAuthorAdapter(
                 // 搜索作者是按关注数排的，把这个数一起摆出来才看得出排序依据。
                 if (item.followers >= 0) {
                     if (isNotEmpty()) append("  ·  ")
-                    append("${formatCount(item.followers)} 粉丝")
+                    append(UiText.text(R.string.ui_631fcc6a3707, "%1\$s 粉丝", formatCount(item.followers)))
                 }
             }
             description.text = item.description.replace('\n', ' ').trim().ifBlank { emptyDescription }
@@ -41,7 +41,7 @@ class FollowingAuthorAdapter(
         }
 
         private fun formatCount(value: Int): String = when {
-            value >= 10_000 -> "%.1f 万".format(value / 10_000.0)
+            value >= 10_000 -> UiText.text(R.string.ui_2e9d50202040, "%.1f 万").format(value / 10_000.0)
             else -> value.toString()
         }
     }

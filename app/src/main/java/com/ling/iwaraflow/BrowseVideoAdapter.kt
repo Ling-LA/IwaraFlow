@@ -75,17 +75,17 @@ internal class BrowseVideoAdapter(private val onOpen: (VideoItem) -> Unit) : Rec
             likes.text = "${if (item.liked) "♥" else "♡"} ${count(item.likes)}"
             likes.setTextColor(if (item.liked) 0xFFE94C77.toInt() else UiPalette.resolve(context, 0xFF607D93.toInt()))
             date.text = if (item.createdAt > 0) java.time.Instant.ofEpochMilli(item.createdAt)
-                .atZone(java.time.ZoneId.systemDefault()).toLocalDate().toString() else "上传日期未知"
+                .atZone(java.time.ZoneId.systemDefault()).toLocalDate().toString() else UiText.text(R.string.ui_c1f771715787, "上传日期未知")
             cover.load(item.thumbnailUrl.takeIf { it.isNotBlank() }) {
                 crossfade(false); placeholder(R.drawable.bg_avatar_placeholder); error(R.drawable.bg_avatar_placeholder)
             }
-            itemView.contentDescription = "${item.title}，${item.author}，${item.likes} 赞"
+            itemView.contentDescription = UiText.text(R.string.ui_7b4c33b73b03, "%1\$s，%2\$s，%3\$s 赞", item.title, item.author, item.likes)
             itemView.setOnClickListener { onOpen(item) }
         }
     }
 
     private fun count(value: Int): String = when {
-        value >= 10000 -> "%.1f万".format(value / 10000.0)
+        value >= 10000 -> UiText.text(R.string.ui_196feb256f70, "%.1f万").format(value / 10000.0)
         value >= 1000 -> "%.1fk".format(value / 1000.0)
         else -> value.toString()
     }

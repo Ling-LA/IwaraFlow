@@ -63,7 +63,7 @@ object VideoShare {
         }
         val activity = context as? android.app.Activity
         if (activity != null) {
-            SharePanel.show(activity, authorShareText(author), author.name, UiText.text(R.string.ui_5192a0b97944, "分享作者主页"), author.avatarUrl) { start(activity, it) }
+            SharePanel.show(activity, authorShareText(author), author.name, UiText.text(R.string.ui_5192a0b97944, "分享作者主页"), authorCard = author.copy()) { start(activity, it) }
         } else {
             start(context, chooser(context, authorShareText(author), author.name, UiText.text(R.string.ui_5192a0b97944, "分享作者主页")))
         }

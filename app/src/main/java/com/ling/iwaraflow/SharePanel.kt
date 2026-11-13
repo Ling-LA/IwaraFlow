@@ -82,7 +82,7 @@ object SharePanel {
      * 这样返回时能接上状态。
      */
     fun show(activity: Activity, text: String, subject: String, chooserTitle: String,
-        thumbnailUrl: String = "", launch: (Intent) -> Unit) {
+        thumbnailUrl: String = "", authorCard: IwaraAuthor? = null, launch: (Intent) -> Unit) {
         if (activity.isFinishing || activity.isDestroyed) return
         val dialog = Dialog(activity)
         dialog.requestWindowFeature(Window.FEATURE_NO_TITLE)
@@ -107,9 +107,9 @@ object SharePanel {
                     if (!activity.isFinishing && !activity.isDestroyed) runCatching { launch(intent) }
                         .onFailure { Toast.makeText(activity, UiText.text(R.string.ui_6c00beb19626, "打不开 %1\$s", target.label), Toast.LENGTH_SHORT).show() }
                 }
-                if (wantsThumbnail(target.packageName) && thumbnailUrl.isNotBlank()) {
+                if (wantsThumbnail(target.packageName) && (thumbnailUrl.isNotBlank() || authorCard != null)) {
                     Toast.makeText(activity, UiText.text(R.string.ui_7208feb4108b, "正在准备分享缩略图…"), Toast.LENGTH_SHORT).show()
-                    ShareThumbnail.prepare(activity, thumbnailUrl) { uri ->
+                    val prepared: (android.net.Uri?) -> Unit = { uri ->
                         val send = uri?.let { imageIntent(text, subject, it).setPackage(target.packageName) }
                         // Image and text entry activities can differ. Resolve again for the MIME type.
                         if (send != null && send.resolveActivity(activity.packageManager) != null) open(send)
@@ -118,6 +118,8 @@ object SharePanel {
                             open(target.intent)
                         }
                     }
+                    if (authorCard != null) ShareThumbnail.prepareAuthor(activity, authorCard, prepared)
+                    else ShareThumbnail.prepare(activity, thumbnailUrl, prepared)
                 } else open(target.intent)
             })
         }

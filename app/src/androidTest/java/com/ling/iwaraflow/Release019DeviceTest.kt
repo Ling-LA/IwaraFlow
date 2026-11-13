@@ -159,6 +159,43 @@ class Release019DeviceTest {
         image.delete()
     }
 
+    @Test fun authorShareRendersProfileCardEvenWhenAvatarCannotLoad() {
+        val biography = "<p>记录山川与晨光，分享旅行中的风景。</p><p>Landscape films · 日々の記録 · 여행 이야기</p>"
+        assertEquals("Notes\nRead more", AuthorShareCard.plainText("## Notes<br>[Read more](https://example.com)"))
+        val author = IwaraAuthor("neutral-author", "自然记录者 / Nature Studio", "nature_studio", biography,
+            avatarUrl = File(context.cacheDir, "missing-avatar-019.png").toURI().toString())
+        val ready = CountDownLatch(1); var result: Uri? = null
+        main { ShareThumbnail.prepareAuthor(context, author) { result = it; ready.countDown() } }
+        assertTrue("Missing avatar prevented the profile card", ready.await(15, TimeUnit.SECONDS))
+        assertNotNull(result)
+        val jpeg = context.contentResolver.openInputStream(result!!)!!.use { it.readBytes() }
+        val bitmap = BitmapFactory.decodeByteArray(jpeg, 0, jpeg.size)
+        assertEquals(1200, bitmap.width); assertEquals(630, bitmap.height)
+        // A profile card has rendered name and biography ink outside the avatar bounds.
+        fun inkIn(left: Int, top: Int, right: Int, bottom: Int): Int {
+            var count = 0
+            for (y in top until bottom step 2) for (x in left until right step 2) {
+                if (android.graphics.Color.red(bitmap.getPixel(x, y)) < 150) count++
+            }
+            return count
+        }
+        assertTrue("Author name was not drawn", inkIn(224, 74, 1100, 130) > 100)
+        assertTrue("Biography was not drawn", inkIn(64, 252, 1136, 450) > 100)
+        bitmap.recycle()
+        File(context.getExternalFilesDir(null), "author-share-card-019.jpg").writeBytes(jpeg)
+        val send = SharePanel.imageIntent(VideoShare.authorShareText(author), author.name, result!!)
+        assertTrue(send.getStringExtra(Intent.EXTRA_TEXT)!!.contains(VideoShare.authorLinkFor(author)))
+        assertFalse(send.getStringExtra(Intent.EXTRA_TEXT)!!.contains(AppLinks.DOWNLOAD))
+        val longCard = AuthorShareCard.render(author.copy(name = "Long name ".repeat(80),
+            description = biography.repeat(100)), null)
+        assertEquals(630, longCard.height); longCard.recycle()
+        val avatar = Bitmap.createBitmap(80, 160, Bitmap.Config.ARGB_8888).apply { eraseColor(0xFF5379B9.toInt()) }
+        val withAvatar = AuthorShareCard.render(author, avatar)
+        assertEquals("Avatar was not center-cropped into the card", 0xFF5379B9.toInt(), withAvatar.getPixel(128, 124))
+        assertNotEquals("Avatar should have round corners", 0xFF5379B9.toInt(), withAvatar.getPixel(65, 61))
+        withAvatar.recycle(); avatar.recycle()
+    }
+
     @Test fun persistedTitleAndDescriptionEvidenceChangesRealDeviceRanking() {
         // Exercise the device's ICU regex engine, not the desktop JVM implementation.
         assertTrue(SearchQuery.literal("robot").matchesTitle("Robot dance"))

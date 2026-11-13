@@ -149,6 +149,69 @@ class PlaylistDeviceTest {
             session.putSecret("verified_user_id", account)
             prefs.accountId = account
         }
+        // Replace dependencies before onResume or queued page callbacks can observe a
+        // half-injected fixture. The production account-isolation checks stay intact.
+        fun injectVideoPage(opened: SavedVideosActivity) {
+            assertFalse("Fixture page finished before dependency injection", opened.isFinishing)
+            (field(opened, "playlistFavorites").get(opened) as PlaylistFavorites).close()
+            (field(opened, "api").get(opened) as IwaraApi).close()
+            val api = localApi(); field(opened, "api").set(opened, api)
+            val favorites = PlaylistFavorites(opened, api, field(opened, "history").get(opened) as HistoryStore)
+            field(opened, "playlistFavorites").set(opened, favorites)
+            val feed = opened.playbackGuideAdapter
+            (field(feed, "favoriteController").get(feed) as? PlaylistFavorites)?.close()
+            (field(feed, "favoriteSubscription").get(feed) as? java.io.Closeable)?.close()
+            field(feed, "favoriteController").set(feed, null); field(feed, "favoriteSubscription").set(feed, null)
+            field(feed, "api").set(feed, api)
+            val panel = (field(opened, "comments").get(opened) as CommentsHost).panel
+            field(panel, "api").set(panel, api)
+            loginFixture()
+            field(opened, "playlistPageSession").set(opened, favorites.store.snapshot())
+            invoke(opened, "loadLibraryPage", true)
+        }
+        fun openFolder(activity: PlaylistFoldersActivity, index: Int): SavedVideosActivity {
+            val app = activity.application
+            var injectionFailure: Throwable? = null
+            val lifecycle = object : android.app.Application.ActivityLifecycleCallbacks {
+                private var injected = false
+                override fun onActivityCreated(activity: Activity, state: android.os.Bundle?) {}
+                override fun onActivityStarted(activity: Activity) {
+                    if (activity is SavedVideosActivity && !injected) {
+                        injected = true
+                        runCatching { injectVideoPage(activity) }.onFailure { injectionFailure = it }
+                    }
+                }
+                override fun onActivityResumed(activity: Activity) {}
+                override fun onActivityPaused(activity: Activity) {}
+                override fun onActivityStopped(activity: Activity) {}
+                override fun onActivitySaveInstanceState(activity: Activity, state: android.os.Bundle) {}
+                override fun onActivityDestroyed(activity: Activity) {}
+            }
+            val monitor = instrumentation.addMonitor(SavedVideosActivity::class.java.name, null, false)
+            main { app.registerActivityLifecycleCallbacks(lifecycle) }
+            try {
+                // Check and click in one main-loop turn; a preview update can otherwise
+                // detach the holder between a separate await and performClick.
+                await("Folder card $index did not become clickable") {
+                    val list = descendants(activity.window.decorView).filterIsInstance<RecyclerView>().first()
+                    val holder = list.findViewHolderForAdapterPosition(index)
+                    if (!activity.hasWindowFocus() || list.isComputingLayout ||
+                        holder?.bindingAdapterPosition != index || !holder.itemView.isLaidOut) false
+                    else {
+                        session.clearAuthentication()
+                        assertTrue(holder.itemView.performClick())
+                        true
+                    }
+                }
+                val opened = instrumentation.waitForMonitorWithTimeout(monitor, 5000) as? SavedVideosActivity
+                instrumentation.waitForIdleSync()
+                injectionFailure?.let { throw AssertionError("Could not inject the local playlist API", it) }
+                return requireNotNull(opened) { "Folder card did not open its video page" }
+            } finally {
+                main { app.unregisterActivityLifecycleCallbacks(lifecycle) }
+                instrumentation.removeMonitor(monitor)
+            }
+        }
         var folders: PlaylistFoldersActivity? = null
         var videos: SavedVideosActivity? = null
         val clip = File.createTempFile("playlist-device-", ".mp4", context.cacheDir).apply {
@@ -258,32 +321,9 @@ class PlaylistDeviceTest {
             }
             ProfileUiDeviceTest().screenshot("playlist-folders-synced-018")
 
-            // Use the actual folder-card route, then inject the local API before authenticating.
-            main { session.clearAuthentication() }
-            val monitor = instrumentation.addMonitor(SavedVideosActivity::class.java.name, null, false)
-            main {
-                val list = descendants(activity.window.decorView).filterIsInstance<RecyclerView>().first()
-                list.findViewHolderForAdapterPosition(0)!!.itemView.performClick()
-            }
-            videos = instrumentation.waitForMonitorWithTimeout(monitor, 5000) as? SavedVideosActivity
-            instrumentation.removeMonitor(monitor)
-            val videoActivity = requireNotNull(videos) { "Folder card did not open its video page" }
-            main {
-                assertEquals("folder-1", videoActivity.intent.getStringExtra(SavedVideosActivity.EXTRA_PLAYLIST_ID))
-                (field(videoActivity, "playlistFavorites").get(videoActivity) as PlaylistFavorites).close()
-                (field(videoActivity, "api").get(videoActivity) as IwaraApi).close()
-                val api = localApi(); field(videoActivity, "api").set(videoActivity, api)
-                field(videoActivity, "playlistFavorites").set(videoActivity,
-                    PlaylistFavorites(videoActivity, api, field(videoActivity, "history").get(videoActivity) as HistoryStore))
-                val feed = videoActivity.playbackGuideAdapter
-                (field(feed, "favoriteController").get(feed) as? PlaylistFavorites)?.close()
-                (field(feed, "favoriteSubscription").get(feed) as? java.io.Closeable)?.close()
-                field(feed, "favoriteController").set(feed, null); field(feed, "favoriteSubscription").set(feed, null)
-                field(feed, "api").set(feed, api)
-                val panel = (field(videoActivity, "comments").get(videoActivity) as CommentsHost).panel
-                field(panel, "api").set(panel, api)
-                loginFixture(); invoke(videoActivity, "loadLibraryPage", true)
-            }
+            videos = openFolder(activity, 0)
+            val videoActivity = requireNotNull(videos)
+            assertEquals("folder-1", videoActivity.intent.getStringExtra(SavedVideosActivity.EXTRA_PLAYLIST_ID))
             await("Official playlist page did not render both saved videos") {
                 videoActivity.findViewById<RecyclerView>(R.id.savedVideos).adapter?.itemCount == 2
             }
@@ -355,20 +395,16 @@ class PlaylistDeviceTest {
                     favorites.store.folders().firstOrNull { it.id == "folder-1" }?.count == 1
             }
 
-            fun awaitFolderCard(index: Int) {
-                await("Folder overview card $index did not finish laying out after navigation") {
-                    val list = descendants(activity.window.decorView).filterIsInstance<RecyclerView>().firstOrNull()
-                    val holder = list?.findViewHolderForAdapterPosition(index)
-                    activity.hasWindowFocus() && list?.isComputingLayout == false &&
-                        holder?.bindingAdapterPosition == index && holder.itemView.isShown && holder.itemView.isLaidOut
-                }
-            }
             fun longFolder(index: Int) {
-                awaitFolderCard(index)
-                main {
-                    val card = descendants(activity.window.decorView).filterIsInstance<RecyclerView>().first()
-                        .findViewHolderForAdapterPosition(index)!!.itemView
-                    assertTrue("Visible folder card did not handle a long press", card.performLongClick())
+                await("Folder card $index did not become long-clickable") {
+                    val list = descendants(activity.window.decorView).filterIsInstance<RecyclerView>().first()
+                    val holder = list.findViewHolderForAdapterPosition(index)
+                    if (!activity.hasWindowFocus() || list.isComputingLayout ||
+                        holder?.bindingAdapterPosition != index || !holder.itemView.isLaidOut) false
+                    else {
+                        assertTrue("Visible folder card did not handle a long press", holder.itemView.performLongClick())
+                        true
+                    }
                 }
             }
             fun choose(label: String) {
@@ -422,32 +458,8 @@ class PlaylistDeviceTest {
             assertEquals("folder-1", favorites.store.dedicatedMigrationTarget(favorites.store.snapshot()))
 
             fun openManagedFolder(index: Int): SavedVideosActivity {
-                awaitFolderCard(index)
-                main { session.clearAuthentication() }
-                val nextMonitor = instrumentation.addMonitor(SavedVideosActivity::class.java.name, null, false)
-                main {
-                    descendants(activity.window.decorView).filterIsInstance<RecyclerView>().first()
-                        .findViewHolderForAdapterPosition(index)!!.itemView.performClick()
-                }
-                val next = instrumentation.waitForMonitorWithTimeout(nextMonitor, 5000) as? SavedVideosActivity
-                instrumentation.removeMonitor(nextMonitor)
-                val opened = requireNotNull(next)
+                val opened = openFolder(activity, index)
                 videos = opened
-                main {
-                    (field(opened, "playlistFavorites").get(opened) as PlaylistFavorites).close()
-                    (field(opened, "api").get(opened) as IwaraApi).close()
-                    val local = localApi(); field(opened, "api").set(opened, local)
-                    field(opened, "playlistFavorites").set(opened,
-                        PlaylistFavorites(opened, local, field(opened, "history").get(opened) as HistoryStore))
-                    val feed = opened.playbackGuideAdapter
-                    (field(feed, "favoriteController").get(feed) as? PlaylistFavorites)?.close()
-                    (field(feed, "favoriteSubscription").get(feed) as? java.io.Closeable)?.close()
-                    field(feed, "favoriteController").set(feed, null); field(feed, "favoriteSubscription").set(feed, null)
-                    field(feed, "api").set(feed, local)
-                    val panel = (field(opened, "comments").get(opened) as CommentsHost).panel
-                    field(panel, "api").set(panel, local)
-                    loginFixture(); invoke(opened, "loadLibraryPage", true)
-                }
                 await("Managed folder did not load its video") { opened.findViewById<RecyclerView>(R.id.savedVideos).adapter?.itemCount == 1 }
                 main { assertTrue("Manual sync button should be removed", texts().none { it.text.toString() == "同步收藏夹" }) }
                 return opened

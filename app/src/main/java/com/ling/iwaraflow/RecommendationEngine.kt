@@ -129,7 +129,7 @@ class RecommendationEngine(
      * 原样把 trending 首页贴上来，就是“越刷越不懂你”的由来。
      */
     fun rankOfficial(items: List<VideoItem>, skipSeen: Boolean, callback: (List<VideoItem>) -> Unit) {
-        if (items.size < 2) { callback(items); return }
+        if (items.isEmpty()) { callback(items); return }
         runCatching {
             io.execute {
                 val taste = runCatching { history.preferenceProfile() }.getOrNull()

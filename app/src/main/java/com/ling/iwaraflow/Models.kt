@@ -236,6 +236,7 @@ data class PreferenceProfile(
     fun isMuted(item: VideoItem): Boolean =
         (item.authorId.isNotBlank() && item.authorId in mutedAuthorIds) ||
             (item.author.isNotBlank() && item.author.lowercase() in mutedAuthors) ||
+            (item.authorUsername.isNotBlank() && item.authorUsername.lowercase() in mutedAuthors) ||
             item.tags.any { tag -> mutedTags.any { SearchQuery.canonicalTag(it) == SearchQuery.canonicalTag(tag) } }
 
     /**

@@ -54,14 +54,13 @@ class HoldReaction(private val view: View, color: Int, private val partner: View
                     cancel(); fired = false; cancelled = false
                     startX = event.x; startY = event.y
                     startedAt = android.os.SystemClock.uptimeMillis()
-                    view.parent?.requestDisallowInterceptTouchEvent(true)
                     // A tap must not create overlay layers or start rendering two rings.
                     handler.postDelayed(begin, android.view.ViewConfiguration.getLongPressTimeout().toLong().coerceAtLeast(450L))
                 }
                 MotionEvent.ACTION_MOVE -> {
                     val slop = android.view.ViewConfiguration.get(view.context).scaledTouchSlop * 2
-                    if (kotlin.math.abs(event.x - startX) > slop || kotlin.math.abs(event.y - startY) > slop) {
-                        cancelled = true; cancel()
+                    if (!cancelled && (kotlin.math.abs(event.x - startX) > slop || kotlin.math.abs(event.y - startY) > slop)) {
+                        cancel()
                     }
                 }
                 MotionEvent.ACTION_UP -> {

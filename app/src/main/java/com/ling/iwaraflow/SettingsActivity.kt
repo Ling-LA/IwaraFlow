@@ -6,15 +6,24 @@ import androidx.appcompat.app.AppCompatActivity
 
 class SettingsActivity : AppCompatActivity() {
     private lateinit var updates: UpdateManager
+    private var interestsChanged = false
+    private val interests = registerForActivityResult(androidx.activity.result.contract.ActivityResultContracts.StartActivityForResult()) { result ->
+        if (result.resultCode == RESULT_OK) {
+            interestsChanged = true
+            setResult(RESULT_OK, Intent().putExtra("interests_changed", true))
+        }
+    }
 
     override fun onCreate(state: Bundle?) {
         super.onCreate(state)
+        interestsChanged = state?.getBoolean("interests_changed") == true
+        if (interestsChanged) setResult(RESULT_OK, Intent().putExtra("interests_changed", true))
         updates = UpdateManager(this)
         SettingsDialogController(this, AppPrefs(this), { intent.getStringExtra("mode") ?: "recommend" }, {},
-            { reload -> setResult(RESULT_OK, Intent().putExtra("reload", reload)); finish() },
+            { reload -> setResult(RESULT_OK, Intent().putExtra("reload", reload).putExtra("interests_changed", interestsChanged)); finish() },
             { startActivity(Intent(this, MainActivityV3::class.java)
                 .addFlags(Intent.FLAG_ACTIVITY_CLEAR_TOP or Intent.FLAG_ACTIVITY_SINGLE_TOP).putExtra("sync_likes", true)) },
-            { startActivity(Intent(this, InterestActivity::class.java)) },
+            { interests.launch(Intent(this, InterestActivity::class.java)) },
             { NavigationDiagnostics.show(this) },
             { updates.check(manual = true) }).show()
     }
@@ -22,6 +31,11 @@ class SettingsActivity : AppCompatActivity() {
     override fun onStart() {
         super.onStart()
         updates.tryContinueInstall()
+    }
+
+    override fun onSaveInstanceState(outState: Bundle) {
+        super.onSaveInstanceState(outState)
+        outState.putBoolean("interests_changed", interestsChanged)
     }
 
     override fun onDestroy() {

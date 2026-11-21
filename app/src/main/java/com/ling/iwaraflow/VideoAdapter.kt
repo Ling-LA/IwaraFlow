@@ -602,7 +602,6 @@ class VideoAdapter(
                 screenReactionHold.start(downX, downY, android.os.SystemClock.uptimeMillis() - surfaceDownAt)
                 touchMoved = true // 已经长按，松手不再当作单击。
                 pendingSingleTap?.let { tapHandler.removeCallbacks(it) }; pendingSingleTap = null; lastTap = 0L
-                itemView.parent?.requestDisallowInterceptTouchEvent(true)
                 return@Runnable
             }
             if (downAction == FullscreenGesture.Action.DISLIKE) {

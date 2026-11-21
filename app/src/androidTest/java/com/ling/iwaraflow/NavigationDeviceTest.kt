@@ -247,6 +247,72 @@ class NavigationDeviceTest {
         }
     }
 
+    @Test fun upwardSwipeStartingOnLikeAdvancesRecommendationWithoutLiking() {
+        val context = instrumentation.targetContext
+        context.getSharedPreferences(AppPrefs.FILE, 0).edit().putBoolean(OverlayPermissionPrompt.KEY_SHOWN, true)
+            .putBoolean(PlaybackGuide.key(false), true).commit()
+        val home = instrumentation.startActivitySync(Intent(context, MainActivityV3::class.java)
+            .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)) as MainActivityV3
+        val media = fixtureVideo().toURI().toString()
+        val items = (1..3).map { VideoItem("swipe-$it", "Swipe $it", "Fixture", emptyList(), 0,
+            sources = listOf(VideoSource("fixture", media, 1))) }
+        try {
+            main {
+                invoke(home, "invalidateRequests")
+                set(home, "pagingEnabled", false)
+                (field(home, "adapter") as VideoAdapter).apply { replace(items); setActive(0) }
+            }
+            instrumentation.waitForIdleSync()
+            val pager = home.findViewById<androidx.viewpager2.widget.ViewPager2>(R.id.pager)
+            val bounds = android.graphics.Rect()
+            val readyBy = SystemClock.uptimeMillis() + 10000
+            while (bounds.isEmpty && SystemClock.uptimeMillis() < readyBy) {
+                main {
+                    val list = pager.getChildAt(0) as RecyclerView
+                    val like = list.findViewHolderForAdapterPosition(0)?.itemView?.findViewById<View>(R.id.like)
+                    if (home.hasWindowFocus() && like?.isShown == true && like.width > 0) {
+                        val location = IntArray(2)
+                        like.getLocationOnScreen(location)
+                        bounds.set(location[0], location[1], location[0] + like.width, location[1] + like.height)
+                    }
+                }
+                if (bounds.isEmpty) SystemClock.sleep(40)
+            }
+            assertFalse("Like button must be visible in the focused player", bounds.isEmpty)
+            var maxOffset = 0
+            main {
+                pager.registerOnPageChangeCallback(object : ViewPager2.OnPageChangeCallback() {
+                    override fun onPageScrolled(position: Int, offset: Float, pixels: Int) {
+                        maxOffset = maxOf(maxOffset, pixels)
+                    }
+                })
+            }
+            val down = SystemClock.uptimeMillis()
+            fun send(action: Int, y: Float) {
+                val event = android.view.MotionEvent.obtain(down, SystemClock.uptimeMillis(), action,
+                    bounds.exactCenterX(), y, 0)
+                event.source = android.view.InputDevice.SOURCE_TOUCHSCREEN
+                try { instrumentation.sendPointerSync(event) } finally { event.recycle() }
+            }
+            val startY = bounds.bottom - 2f
+            val distance = startY - pager.height * 0.012f
+            send(android.view.MotionEvent.ACTION_DOWN, startY)
+            for (step in 1 until 32) {
+                SystemClock.sleep(6)
+                send(android.view.MotionEvent.ACTION_MOVE, startY - distance * step / 32)
+            }
+            send(android.view.MotionEvent.ACTION_UP, startY - distance)
+            val end = android.os.SystemClock.uptimeMillis() + 4000
+            var position = 0
+            while (position == 0 && android.os.SystemClock.uptimeMillis() < end) {
+                main { position = pager.currentItem }
+                android.os.SystemClock.sleep(40)
+            }
+            assertEquals("Swipe from $bounds in a ${pager.height}px pager, largest page offset=$maxOffset", 1, position)
+            assertFalse(items.first().liked)
+        } finally { main { home.finish() } }
+    }
+
     @Test fun settingsGuideReturnsToSamePlayerAndRotatesTheActualWindow() {
         val app = instrumentation.targetContext.applicationContext as Application
         val prefs = app.getSharedPreferences(AppPrefs.FILE, 0)

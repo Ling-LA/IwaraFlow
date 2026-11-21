@@ -699,3 +699,8 @@ AI 接口返回错误：%1$s	AI API error: %1$s	AI API エラー：%1$s	AI API �
 点击切换	Tap to switch	タップして変更	눌러서 변경
 网络不佳 · %1$s %2$s	Weak network · %1$s to %2$s	接続が不安定 · %2$s に%1$s	네트워크 불안정 · %2$s(으)로 %1$s
 没有更多视频了	No more videos	これ以上動画はありません	더 이상 동영상이 없습니다
+输入作者名或标签	Enter a creator name or tag	投稿者名またはタグを入力	작성자 이름 또는 태그 입력
+请输入与屏蔽类型对应的名称	Enter a name that matches the block type	選択した種類に合った名前を入力してください	차단할 유형에 맞는 이름을 입력하세요
+屏蔽失败，请重试	Could not block this item. Try again.	非表示にできませんでした。もう一度お試しください	차단하지 못했습니다. 다시 시도하세요
+屏蔽作者	Block creator	投稿者を非表示	작성자 차단
+屏蔽标签	Block tag	タグを非表示	태그 차단

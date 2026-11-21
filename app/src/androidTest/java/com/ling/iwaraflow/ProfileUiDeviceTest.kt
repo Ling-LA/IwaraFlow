@@ -53,6 +53,39 @@ class ProfileUiDeviceTest {
         val output = command("wc -c $export/$name.png")
         assertTrue("Screenshot export failed: $output", (output.trim().substringBefore(' ').toLongOrNull() ?: 0) > 0)
     }
+    @Test fun blockedTabAddsAndRestoresManualTagsAndCreatorHandles() {
+        val context = instrumentation.targetContext
+        val activity = instrumentation.startActivitySync(Intent(context, InterestActivity::class.java)
+            .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)) as InterestActivity
+        val history = HistoryStore(context)
+        try {
+            main {
+                fun click(label: String) = texts(activity.window.decorView).single { it.text.toString() == label }.performClick()
+                fun input() = texts(activity.window.decorView).filterIsInstance<android.widget.EditText>().single()
+                click(activity.getString(R.string.ui_b66705ba0b8e))
+                val blockTag = activity.getString(R.string.ui_96e1b8a5eaa5)
+                val blockAuthor = activity.getString(R.string.ui_2cb429cc1254)
+                input().setText("#")
+                click(blockTag)
+                assertNotNull(input().error)
+                repeat(2) {
+                    input().setText("#Swipe Fixture")
+                    click(blockTag)
+                }
+                input().setText("@FixtureHandle")
+                click(blockAuthor)
+                val item = VideoItem("manual-mute-fixture", "", "Different name", emptyList(), 0, authorUsername = "FixtureHandle")
+                val tagged = item.copy(authorUsername = "", tags = listOf("Swipe_Fixture"))
+                assertTrue(history.preferenceProfile().isMuted(item))
+                assertTrue(history.preferenceProfile().isMuted(tagged))
+                click(UiText.text(R.string.ui_024968d06977, "恢复 %1\$s%2\$s", "@", "fixturehandle"))
+                click(UiText.text(R.string.ui_024968d06977, "恢复 %1\$s%2\$s", "#", "swipe_fixture"))
+                assertFalse(history.preferenceProfile().isMuted(item))
+                assertFalse(history.preferenceProfile().isMuted(tagged))
+            }
+        } finally { main { activity.finish() }; history.close() }
+    }
+
     @Test fun profileSectionsAndNativeUploadRenderAsFullPages() {
         val context = instrumentation.targetContext
         val my = instrumentation.startActivitySync(Intent(context, MyActivity::class.java).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)) as MyActivity

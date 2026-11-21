@@ -160,6 +160,33 @@ object InterestManager {
             val content = card()
             content.addView(label(UiText.text(R.string.ui_510f94b012a3, "已屏蔽的作者和标签"), 18f))
             content.addView(label(UiText.text(R.string.ui_e95b052c8265, "这些内容不会进入推荐。点击可恢复；主动设置标签偏好也会解除该标签的旧屏蔽。")))
+            val input = EditText(context).apply {
+                hint = UiText.text(R.string.ui_9db38f07f305, "输入作者名或标签")
+                setSingleLine(true)
+                filters = arrayOf(android.text.InputFilter.LengthFilter(100))
+            }
+            content.addView(input)
+            fun addBlock(type: String) {
+                val raw = input.text.toString().trim()
+                val key = if (type == HistoryStore.MUTE_TAG) SearchQuery.canonicalTag(raw.removePrefix("#").trim())
+                    else raw.removePrefix("@").trim().lowercase()
+                if (key.isBlank() || key.all { it == '#' || it == '@' } ||
+                    (type == HistoryStore.MUTE_TAG && raw.startsWith("@")) ||
+                    (type == HistoryStore.MUTE_AUTHOR && raw.startsWith("#"))) {
+                    input.error = UiText.text(R.string.ui_99e1eb17747a, "请输入与屏蔽类型对应的名称")
+                    return
+                }
+                runCatching { history.mute(type, key) }
+                    .onSuccess {
+                        onChanged()
+                        renderSection()
+                    }
+                    .onFailure { input.error = UiText.text(R.string.ui_329f7eaef48f, "屏蔽失败，请重试") }
+            }
+            rowButtons(content, listOf(
+                UiText.text(R.string.ui_2cb429cc1254, "屏蔽作者") to { addBlock(HistoryStore.MUTE_AUTHOR) },
+                UiText.text(R.string.ui_96e1b8a5eaa5, "屏蔽标签") to { addBlock(HistoryStore.MUTE_TAG) }
+            ))
             val muted = history.mutedEntities()
             val entries = (muted.authors + muted.authorIds).sorted().map { DislikeSheet.Kind.AUTHOR to it } +
                 muted.tags.sorted().map { DislikeSheet.Kind.TAG to it }

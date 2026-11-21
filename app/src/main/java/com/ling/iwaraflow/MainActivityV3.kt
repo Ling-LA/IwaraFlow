@@ -268,6 +268,11 @@ class MainActivityV3 : AppCompatActivity(), PlaybackGuideHost {
         onBackPressedDispatcher.addCallback(this, closeCommentsOnBack)
         onBackPressedDispatcher.addCallback(this, exitFullscreenOnBack)
         pager.registerOnPageChangeCallback(object : ViewPager2.OnPageChangeCallback() {
+            override fun onPageScrollStateChanged(state: Int) {
+                // At the last card a drag cannot select another page to retry a failed refill.
+                if (state == ViewPager2.SCROLL_STATE_DRAGGING) fillRecommendationTail()
+            }
+
             override fun onPageSelected(position: Int) {
                 if (showingBrowseGrid || FullscreenMode.isChangingViewport(pager)) return
                 if (mode in BrowseCatalogState.MODES) browseStates[mode]?.selectedIndex = position
@@ -695,6 +700,7 @@ class MainActivityV3 : AppCompatActivity(), PlaybackGuideHost {
             invalidateRequests()
             loading.visibility = View.VISIBLE
             error.visibility = View.GONE
+            loadingMore = true
         }
         val requestId = requestSerial
         val emptyMessage = if (mode == "recommend") {
@@ -719,6 +725,7 @@ class MainActivityV3 : AppCompatActivity(), PlaybackGuideHost {
                             recommendQueue.clear()
                             recommendQueue.addAll(rest)
                             raw.forEach { consumedCandidates += it.id }
+                            loadingMore = false
                             showFeedReset(requestId, playable, emptyMessage, first)
                         }
                     }
@@ -726,6 +733,7 @@ class MainActivityV3 : AppCompatActivity(), PlaybackGuideHost {
                     runOnUiThread {
                         if (requestId != requestSerial) return@runOnUiThread
                         awaitingFullFeed = false
+                        loadingMore = false
                         loading.visibility = View.GONE
                         note(UiText.text(R.string.ui_564889cbb195, "推荐加载失败：%1\$s", it.message?.take(120)))
                         showError(NetworkProxy.explain(it.message) ?: UiText.text(R.string.ui_befad4bc91a2, "推荐加载失败\n%1\$s", it.message), it)
@@ -780,7 +788,6 @@ class MainActivityV3 : AppCompatActivity(), PlaybackGuideHost {
      */
     private fun prepareOfficialCandidates(raw: List<VideoItem>, next: (List<VideoItem>) -> Unit) {
         if (mode == "recommend") {
-            if (raw.size < 2) { next(raw); return }
             recommender.rankOfficial(raw, prefs.skipSeen) { ranked -> next(ranked) }
             return
         }
@@ -826,6 +833,7 @@ class MainActivityV3 : AppCompatActivity(), PlaybackGuideHost {
         val list = decorate(playable)
         if (filling && adapter.itemCount > 0) {
             appendFeed(list)
+            fillRecommendationTail()
             return
         }
         if (list.isEmpty()) {
@@ -848,6 +856,7 @@ class MainActivityV3 : AppCompatActivity(), PlaybackGuideHost {
                 adapter.setActive(0)
                 if (lifecycle.currentState.isAtLeast(Lifecycle.State.RESUMED)) resumeVisiblePlayback()
                 Toast.makeText(this, "无法预检视频源，已直接显示未验证的视频", Toast.LENGTH_LONG).show()
+                fillRecommendationTail()
                 return
             }
             showError(emptyMessage)
@@ -858,13 +867,19 @@ class MainActivityV3 : AppCompatActivity(), PlaybackGuideHost {
             pager.setCurrentItem(0, false)
             adapter.setActive(0)
             if (lifecycle.currentState.isAtLeast(Lifecycle.State.RESUMED)) resumeVisiblePlayback()
+            fillRecommendationTail()
         }
+    }
+
+    private fun fillRecommendationTail() {
+        if (mode == "recommend" && pagingEnabled && !restoringWarmQueue &&
+            pager.currentItem >= adapter.itemCount - 5) loadMore()
     }
 
     private fun appendFeed(list: List<VideoItem>) {
         val before = adapter.itemCount
         adapter.append(list)
-        noteImpressions(list, before)
+        noteImpressions(adapter.items.drop(before), before)
         pager.post {
             if (!isFinishing && !isDestroyed) {
                 val current = pager.currentItem
@@ -954,11 +969,17 @@ class MainActivityV3 : AppCompatActivity(), PlaybackGuideHost {
         }
         val chunk = ArrayList<VideoItem>(recommendPageSize)
         while (recommendQueue.isNotEmpty() && chunk.size < recommendPageSize) chunk += recommendQueue.removeAt(0)
-        playableGate.filterPlayable(chunk, prefs.defaultQuality, maxItems = chunk.size, maxCandidates = chunk.size) { playable ->
+        var delivered = 0
+        playableGate.filterPlayable(chunk, prefs.defaultQuality, maxItems = chunk.size, maxCandidates = chunk.size,
+            onFirstBatch = { head -> runOnUiThread {
+                if (requestId == requestSerial) {
+                    delivered = head.size
+                    appendFeed(decorate(head))
+                }
+            } }) { playable ->
             runOnUiThread {
                 if (requestId != requestSerial) return@runOnUiThread
-                val list = decorate(playable)
-                if (list.isEmpty()) {
+                if (playable.isEmpty()) {
                     // 这一批全不可播放，直接继续下一批；队列见底时会重新生成或回退官方榜单。
                     loadMoreRecommend(requestId)
                     return@runOnUiThread
@@ -967,7 +988,8 @@ class MainActivityV3 : AppCompatActivity(), PlaybackGuideHost {
                 loading.visibility = View.GONE
                 // 真的产出了能播的新内容，降级计数才归零，见 refillRecommendQueue。
                 emptyRefills = 0
-                appendFeed(list)
+                appendFeed(decorate(playable.drop(delivered)))
+                fillRecommendationTail()
             }
         }
     }
@@ -989,8 +1011,8 @@ class MainActivityV3 : AppCompatActivity(), PlaybackGuideHost {
                 if (requestId != requestSerial) return@runOnUiThread
                 // 这一轮处理过的一概不再进队列：显示过的、还排着的、验证没通过的都算。
                 val fresh = result.getOrNull().orEmpty().filter { consumedCandidates.add(it.id) }
+                emptyRefills += 1 // Reset only after playable results, even if every new ID fails its probe.
                 if (fresh.isEmpty()) {
-                    emptyRefills += 1
                     if (emptyRefills >= maxEmptyRefills) loadMoreOfficialPage() else refillRecommendQueue(requestId)
                     return@runOnUiThread
                 }
@@ -1388,7 +1410,15 @@ class MainActivityV3 : AppCompatActivity(), PlaybackGuideHost {
     private val settingsLauncher = registerForActivityResult(androidx.activity.result.contract.ActivityResultContracts.StartActivityForResult()) { result ->
         recommender.classicsEvery = prefs.classicsEvery
         adapter.applyDisplayPrefs()
-        if (result.data?.getBooleanExtra("reload", false) == true) loadFeed(reset = true) else rerankQueue()
+        val interestsChanged = result.data?.getBooleanExtra("interests_changed", false) == true
+        if (interestsChanged) {
+            homeFeedSessions.forget("recommend")
+            recommendQueue.clear()
+            if (mode == "recommend") adapter.replace(emptyList())
+        }
+        if ((interestsChanged && mode == "recommend") || result.data?.getBooleanExtra("reload", false) == true) {
+            loadFeed(reset = true)
+        } else rerankQueue()
     }
 
     private fun showSettingsDialog() {

@@ -701,4 +701,9 @@
     <string name="ui_f4dfe64726ba" formatted="false">"タップして変更"</string>
     <string name="ui_f7b83ee3989d" formatted="false">"接続が不安定 · %2$s に%1$s"</string>
     <string name="ui_d3c5894b7260" formatted="false">"これ以上動画はありません"</string>
+    <string name="ui_9db38f07f305" formatted="false">"投稿者名またはタグを入力"</string>
+    <string name="ui_99e1eb17747a" formatted="false">"選択した種類に合った名前を入力してください"</string>
+    <string name="ui_329f7eaef48f" formatted="false">"非表示にできませんでした。もう一度お試しください"</string>
+    <string name="ui_2cb429cc1254" formatted="false">"投稿者を非表示"</string>
+    <string name="ui_96e1b8a5eaa5" formatted="false">"タグを非表示"</string>
 </resources>

@@ -77,6 +77,45 @@ class SharedLinkNavigationTest {
         }
     }
 
+    @Test fun shortRecommendationHeadPrefetchesAndAppendsWithoutAnotherPageSelection() {
+        val loads = mutableListOf<(Result<List<VideoItem>>) -> Unit>()
+        var first: ((List<VideoItem>) -> Unit)? = null
+        lateinit var finish: (List<VideoItem>) -> Unit
+        mockConstruction(IwaraApi::class.java).use {
+            mockConstruction(RecommendationEngine::class.java, withSettings().defaultAnswer { call ->
+                if (call.method.name == "load") loads += call.getArgument<(Result<List<VideoItem>>) -> Unit>(1)
+                if (call.method.name == "getRecallNote") "" else RETURNS_DEFAULTS.answer(call)
+            }).use {
+                mockConstruction(PlayableVideoGate::class.java, withSettings().defaultAnswer { call ->
+                    if (call.method.name == "filterPlayable") {
+                        first = call.getArgument(4)
+                        finish = call.getArgument(5)
+                    }
+                    RETURNS_DEFAULTS.answer(call)
+                }).use {
+                    mockConstruction(UpdateManager::class.java).use {
+                        val controller = Robolectric.buildActivity(MainActivityV3::class.java).setup()
+                        try {
+                            val initial = listOf(item("first"))
+                            loads.single()(Result.success(initial))
+                            first!!(initial)
+                            finish(initial)
+                            assertEquals("A single card cannot trigger a second page selection", 2, loads.size)
+                            val next = (1..7).map { item("next-" + it) }
+                            loads.last()(Result.success(next))
+                            first!!(next.take(3))
+                            val adapter = adapter(controller.get())
+                            assertEquals(initial + next.take(3), adapter.items)
+                            finish(next)
+                            assertEquals(initial + next, adapter.items)
+                            assertEquals(2, loads.size)
+                        } finally { controller.pause().stop().destroy() }
+                    }
+                }
+            }
+        }
+    }
+
     @Test fun authorLinkLaunchesTheMatchingProfile() {
         mockConstruction(IwaraApi::class.java).use {
             mockConstruction(RecommendationEngine::class.java).use {

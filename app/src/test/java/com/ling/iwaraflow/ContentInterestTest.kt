@@ -54,10 +54,53 @@ class ContentInterestTest {
     @Test fun descriptionIsWeakerAndTagsAreNotCountedTwice() {
         val taste = empty.copy(textWeights = mapOf("robot" to .6))
         assertEquals(.6, ContentInterest.score(video("robot"), taste), .0001)
-        assertEquals(.15, ContentInterest.score(video("", "robot"), taste), .0001)
+        assertEquals(.3, ContentInterest.score(video("", "robot"), taste), .0001)
         assertEquals(.6, ContentInterest.score(video("robot", "robot"), taste), .0001)
-        assertEquals(0.0, ContentInterest.score(video("机器人", tags = listOf("robot")), taste), .0001)
+        val tagged = video("机器人", tags = listOf("robot"))
+        assertEquals(.6, ContentInterest.score(tagged, taste), .0001)
+        assertEquals(0.0, ContentInterest.score(tagged, taste.copy(tagWeights = mapOf("robot" to 1.0))), .0001)
     }
+    @Test fun mixedPromotionSentencesRetainSubjectsAcrossScripts() {
+        val f = ContentInterest.features(video("镜头下的星空，禁止转载", "Forest robot — download available\nｆａｎｂｏｘ support me"))
+        assertTrue("星空" in f.title)
+        assertTrue("forest" in f.body)
+        assertFalse("fanbox" in f.body)
+        assertTrue("星空夜景" in ContentInterest.features(video("星空夜景摄影")).title)
+        assertTrue("ほたる" in ContentInterest.features(video("ほたる")).title)
+    }
+
+    @Test fun revokedReactionsAndMissingCreatorsCannotPromoteKeywords() {
+        fun weights(vararg actions: String, second: String = "b"): Map<String, Double> {
+            val learning = ContentInterest.Learning()
+            for ((id, author) in listOf("1" to "a", "2" to second)) for (action in actions) {
+                learning.observe(id, author, action, 2.0, 0L, listOf("forest"), emptyList())
+            }
+            return learning.weights(now)
+        }
+        assertTrue(weights("unlike", "like", "unfavorite", "favorite").isEmpty())
+        assertTrue(weights("like", second = "").isEmpty())
+        assertTrue(weights("like", second = "Iwara").isEmpty())
+        assertEquals(weights("favorite"), weights("unlike", "like", "favorite"))
+        assertEquals(weights("like"), weights("like", "unlike", "like"))
+    }
+
+    @Test fun replayingTheSamePoolMeasuresOnlyTheBoundedTextContribution() {
+        val seed = 713L
+        val items = (0..11).map { i -> video(if (i % 2 == 0) "forest" else "ocean").copy(id = "v$i") }
+        val taste = empty.copy(textWeights = mapOf("forest" to .6))
+        var assisted = 0
+        var baseline = 0
+        for (trial in 0 until 256) {
+            fun hits(profile: PreferenceProfile): Int {
+                val ranker = RecommendationRanker(java.util.Random(seed + trial))
+                return ranker.weightedOrder(items, profile, now).take(4).count { it.title == "forest" }
+            }
+            assisted += hits(taste)
+            baseline += hits(empty)
+        }
+        assertTrue("Equal pools/seeds: $assisted with text vs $baseline without", assisted > baseline)
+    }
+
     @Test fun keywordStuffingCannotDominateOrOverrideHardMute() {
         val title = "forest ocean mountain robot music dance animation"
         val taste = empty.copy(textWeights = ContentInterest.features(video(title)).title.associateWith { .6 })

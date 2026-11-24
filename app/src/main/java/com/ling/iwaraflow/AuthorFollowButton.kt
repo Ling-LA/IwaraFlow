@@ -4,11 +4,7 @@ import android.content.Context
 import android.graphics.Color
 import android.graphics.drawable.GradientDrawable
 import android.util.AttributeSet
-import android.view.View
-import android.view.ViewGroup
-import android.widget.TextView
 import android.widget.Toast
-import androidx.recyclerview.widget.RecyclerView
 
 /** Small capsule follow button used inside the vertical video feed. */
 class AuthorFollowButton @JvmOverloads constructor(
@@ -17,7 +13,8 @@ class AuthorFollowButton @JvmOverloads constructor(
 ) : androidx.appcompat.widget.AppCompatTextView(context, attrs) {
 
     private var busy = false
-    private var lastVideoId: String? = null
+    private var boundItem: VideoItem? = null
+    private var boundAdapter: VideoAdapter? = null
     private var stateGeneration = 0
 
     init {
@@ -34,45 +31,41 @@ class AuthorFollowButton @JvmOverloads constructor(
 
     override fun onAttachedToWindow() {
         super.onAttachedToWindow()
-        post { resolveCurrentState() }
+        resolveCurrentState()
     }
 
-    private fun currentItemAndAdapter(): Pair<VideoItem, VideoAdapter>? {
-        var child: View = this
-        var parent = child.parent
-        while (parent is ViewGroup && parent !is RecyclerView) {
-            child = parent as View
-            parent = child.parent
-        }
-        val recycler = parent as? RecyclerView ?: return null
-        val position = recycler.getChildAdapterPosition(child)
-        if (position == RecyclerView.NO_POSITION) return null
-        val adapter = recycler.adapter as? VideoAdapter ?: return null
-        val item = adapter.items.getOrNull(position) ?: return null
-        return item to adapter
+    fun bind(item: VideoItem, adapter: VideoAdapter) {
+        stateGeneration++
+        boundItem = item
+        boundAdapter = adapter
+        busy = false
+        isEnabled = true
+        item.authorFollowing = adapter.api.knownFollowing(item.authorId) ?: item.authorFollowing
+        showFollowing(item.authorFollowing)
+        if (isAttachedToWindow) resolveCurrentState()
+    }
+
+    fun unbind() {
+        stateGeneration++
+        boundItem = null
+        boundAdapter = null
     }
 
     private fun resolveCurrentState() {
-        val pair = currentItemAndAdapter() ?: return
-        val item = pair.first
-        lastVideoId = item.id
-        if (item.authorFollowing) {
-            showFollowing(true)
-            return
-        }
-        if (!api().isLoggedIn() || item.authorUsername.isBlank()) {
-            showFollowing(false)
-            return
-        }
-        val expectedVideo = item.id
+        val item = boundItem ?: return
+        val adapter = boundAdapter ?: return
+        val api = adapter.api
+        api.recentFollowing(item.authorId)?.let { item.authorFollowing = it; render(it); return }
+        if (!api.isLoggedIn() || item.authorUsername.isBlank()) return
+        val session = adapter.prefs.likeStates.snapshot()
         val expectedGeneration = stateGeneration
-        api().getAuthorProfile(item.authorUsername) { result ->
+        api.getAuthorProfile(item.authorUsername) { result ->
             result.onSuccess { author ->
                 post {
-                    val current = currentItemAndAdapter() ?: return@post
-                    if (current.first.id != expectedVideo || expectedGeneration != stateGeneration) return@post
-                    updateAuthorState(current.second, current.first, author.following)
-                    showFollowing(author.following)
+                    if (expectedGeneration != stateGeneration || !adapter.prefs.likeStates.isCurrent(session)) return@post
+                    if (item.authorId.isBlank()) item.authorId = author.id
+                    adapter.applyFollowState(AuthorActivity.FollowResult(author.id, item.authorUsername,
+                        api.knownFollowing(author.id) ?: author.following))
                 }
             }
         }
@@ -80,8 +73,9 @@ class AuthorFollowButton @JvmOverloads constructor(
 
     private fun toggleFollow() {
         if (busy) return
-        val (item, adapter) = currentItemAndAdapter() ?: return
-        val api = api()
+        val item = boundItem ?: return
+        val adapter = boundAdapter ?: return
+        val api = adapter.api
         if (!api.isLoggedIn()) {
             Toast.makeText(context, UiText.text(R.string.ui_79f8f482032b, "请先登录 Iwara 后再关注作者"), Toast.LENGTH_SHORT).show()
             return
@@ -91,55 +85,53 @@ class AuthorFollowButton @JvmOverloads constructor(
             return
         }
         busy = true
-        stateGeneration++
+        val request = ++stateGeneration
+        val session = adapter.prefs.likeStates.snapshot()
         isEnabled = false
         text = "…"
 
-        fun commit(userId: String, currentlyFollowing: Boolean) {
-            val desired = !currentlyFollowing
-            api.followUser(userId, desired) { result ->
-                post {
-                    busy = false
-                    isEnabled = true
-                    result.onSuccess {
-                        updateAuthorState(adapter, item, desired)
-                        showFollowing(desired)
-                        Toast.makeText(context, if (desired) UiText.text(R.string.ui_415ceaf14d1d, "已关注 %1\$s", item.author) else UiText.text(R.string.ui_d0aaadd68b8d, "已取消关注 %1\$s", item.author), Toast.LENGTH_SHORT).show()
-                    }.onFailure {
-                        showFollowing(item.authorFollowing)
-                        Toast.makeText(context, it.message ?: UiText.text(R.string.ui_81c13adcedb3, "关注操作失败"), Toast.LENGTH_SHORT).show()
-                    }
+        val desired = !(api.knownFollowing(item.authorId) ?: item.authorFollowing)
+        fun finish(result: Result<Unit>) {
+            post {
+                if (stateGeneration != request) return@post
+                busy = false
+                isEnabled = true
+                if (!adapter.prefs.likeStates.isCurrent(session)) return@post
+                result.onSuccess {
+                    showFollowing(api.knownFollowing(item.authorId) ?: desired)
+                    Toast.makeText(context, if (desired) UiText.text(R.string.ui_415ceaf14d1d, "已关注 %1\$s", item.author) else UiText.text(R.string.ui_d0aaadd68b8d, "已取消关注 %1\$s", item.author), Toast.LENGTH_SHORT).show()
+                }.onFailure {
+                    showFollowing(item.authorFollowing)
+                    Toast.makeText(context, it.message ?: UiText.text(R.string.ui_81c13adcedb3, "关注操作失败"), Toast.LENGTH_SHORT).show()
                 }
             }
         }
 
-        if (item.authorUsername.isNotBlank()) {
+        fun commit(id: String) {
+            if (!adapter.prefs.likeStates.isCurrent(session)) { finish(Result.success(Unit)); return }
+            item.authorId = id
+            val accepted: (Result<Unit>) -> Unit = { result ->
+                if (result.isSuccess && adapter.prefs.likeStates.isCurrent(session)) RecommendationEngine.notifyFollowChanged(id, desired)
+                finish(result)
+            }
+            if (desired) api.ensureUserFollowed(id, item.authorUsername, accepted)
+            else api.followUser(id, false, item.authorUsername, accepted)
+        }
+        if (item.authorId.isBlank()) {
             api.getAuthorProfile(item.authorUsername) { profileResult ->
                 profileResult.onSuccess { profile ->
-                    commit(profile.id.ifBlank { item.authorId }, profile.following)
+                    commit(profile.id)
                 }.onFailure {
-                    commit(item.authorId, item.authorFollowing)
+                    finish(Result.failure(it))
                 }
             }
         } else {
-            commit(item.authorId, item.authorFollowing)
-        }
-    }
-
-    private fun updateAuthorState(adapter: VideoAdapter, item: VideoItem, following: Boolean) {
-        item.authorFollowing = following
-        // 推荐引擎立刻知道：关注的作者按位置插入，不用等关注名单缓存过期。
-        RecommendationEngine.notifyFollowChanged(item.authorId, following)
-        val authorKey = item.authorId.ifBlank { item.authorUsername }
-        adapter.items.forEach { candidate ->
-            val candidateKey = candidate.authorId.ifBlank { candidate.authorUsername }
-            if (authorKey.isNotBlank() && candidateKey == authorKey) candidate.authorFollowing = following
+            commit(item.authorId)
         }
     }
 
     /** 外部（例如从作者页返回）直接给出的关注状态。 */
     fun render(following: Boolean) {
-        stateGeneration++
         if (busy) return
         showFollowing(following)
     }
@@ -161,14 +153,4 @@ class AuthorFollowButton @JvmOverloads constructor(
 
     private fun dp(value: Int): Int = (value * resources.displayMetrics.density).toInt()
 
-    companion object {
-        @Volatile private var sharedApi: IwaraApi? = null
-        private fun apiFor(context: Context): IwaraApi {
-            return sharedApi ?: synchronized(this) {
-                sharedApi ?: IwaraApi(context.applicationContext).also { sharedApi = it }
-            }
-        }
-    }
-
-    private fun api(): IwaraApi = apiFor(context)
 }

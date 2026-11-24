@@ -22,6 +22,8 @@ class FollowingActivity : AppCompatActivity() {
     private val profilePool = Executors.newFixedThreadPool(4)
     private var closed = false
     private var followingTotal = -1
+    private var loadingMore = true
+    private var followSubscription: java.io.Closeable? = null
     private val followers: Boolean get() = intent.getBooleanExtra("followers", false)
 
     private val authorLauncher = registerForActivityResult(ActivityResultContracts.StartActivityForResult()) {
@@ -49,7 +51,27 @@ class FollowingActivity : AppCompatActivity() {
             finish()
             return
         }
+        if (!followers) followSubscription = api.listenFollowing { if (it.fromWrite) applyFollowChange(it) }
         loadFollowing()
+    }
+
+    private fun applyFollowChange(change: FollowWriteState.Change) {
+        val id = change.key.author
+        val index = items.indexOfFirst { it.id == id }
+        if (change.following && index < 0) {
+            val added = IwaraAuthor(id, change.username.ifBlank { id }, change.username, following = true)
+            items.add(0, added)
+            seenIds.add(id)
+            adapter.notifyItemInserted(0)
+            enrichProfile(added)
+            if (followingTotal >= 0) followingTotal++
+        } else if (!change.following && index >= 0) {
+            items.removeAt(index)
+            seenIds.remove(id)
+            adapter.notifyItemRemoved(index)
+            if (followingTotal > 0) followingTotal--
+        } else return
+        status.text = statusText(followingTotal, loadingMore)
     }
 
     private fun loadFollowing() {
@@ -71,13 +93,18 @@ class FollowingActivity : AppCompatActivity() {
                 runOnUiThread {
                     if (closed) return@runOnUiThread
                     // 同一位作者可能同时出现在相邻两页（关注顺序会随分页请求变化）。
-                    val fresh = followingPage.users.filter { author -> seenIds.add(author.id.ifBlank { author.username }) }
+                    val fresh = followingPage.users.filter { author ->
+                        (followers || api.recentFollowing(author.id) != false) && seenIds.add(author.id.ifBlank { author.username })
+                    }
                     val start = items.size
                     items += fresh
                     adapter.notifyItemRangeInserted(start, fresh.size)
+                    loadingMore = more
                     followingTotal = followingPage.total
-                    status.text = statusText(followingPage.total, more)
-                    fresh.forEachIndexed { offset, author -> enrichProfile(start + offset, author) }
+                    if (!followers && !more) api.recentFollowChanges().forEach(::applyFollowChange)
+                    if (!followingPage.hasMore) followingTotal = items.size
+                    status.text = statusText(followingTotal, more)
+                    fresh.forEach(::enrichProfile)
                 }
                 if (more) loadFollowingPage(userId, page + 1)
             }.onFailure { e -> runOnUiThread {
@@ -93,7 +120,7 @@ class FollowingActivity : AppCompatActivity() {
         return (if (followers) UiText.text(R.string.ui_09f360f3582a, "粉丝 %1\$s 位", progress) else UiText.text(R.string.ui_4d73fdd626d3, "已关注 %1\$s 位作者", progress)) + if (loadingMore) UiText.text(R.string.ui_95229c92b00d, " · 正在加载更多…") else ""
     }
 
-    private fun enrichProfile(index: Int, author: IwaraAuthor) {
+    private fun enrichProfile(author: IwaraAuthor) {
         if (author.username.isBlank()) return
         profilePool.execute {
             val updated = runCatching {
@@ -102,13 +129,15 @@ class FollowingActivity : AppCompatActivity() {
                     name = profile.name.ifBlank { author.name },
                     description = profile.description.ifBlank { author.description },
                     avatarUrl = profile.avatarUrl.ifBlank { author.avatarUrl },
-                    following = author.following || profile.following,
+                    following = if (followers) profile.following else true,
                     followers = profile.followers.takeIf { it >= 0 } ?: author.followers
                 )
             }.getOrDefault(author)
 
             runOnUiThread {
-                if (closed || index !in items.indices || items[index].id != author.id) return@runOnUiThread
+                if (closed) return@runOnUiThread
+                val index = items.indexOfFirst { it === author }
+                if (index < 0) return@runOnUiThread
                 if (items[index] != updated) {
                     items[index] = updated
                     adapter.notifyItemChanged(index)
@@ -129,6 +158,7 @@ class FollowingActivity : AppCompatActivity() {
 
     override fun onDestroy() {
         closed = true
+        followSubscription?.close()
         api.close()
         profilePool.shutdownNow()
         super.onDestroy()

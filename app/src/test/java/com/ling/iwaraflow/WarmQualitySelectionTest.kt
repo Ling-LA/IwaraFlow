@@ -30,7 +30,7 @@ class WarmQualitySelectionTest {
         var cancelled = false
         val api = mock(IwaraApi::class.java) { invocation ->
             if (invocation.method.name == "resolveSources") {
-                requested = invocation.getArgument(0)
+                requested = invocation.getArgument<VideoItem>(0).id
                 reply = invocation.getArgument(1)
                 java.io.Closeable { cancelled = true }
             } else Answers.RETURNS_DEFAULTS.answer(invocation)

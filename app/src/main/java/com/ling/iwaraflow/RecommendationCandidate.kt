@@ -47,6 +47,8 @@ data class RecommendationCandidate(
     var interestSuggested: Boolean = false,
     var seasonalTag: String = ""
 ) {
+    @Volatile internal var rankedScore: RecommendationRanker.ScoreParts? = null
+
     /** 「为什么推荐给我」：挑最能说明问题的那一条理由。 */
     fun reason(): String = when {
         subscribed -> UiText.text(R.string.ui_ed658df03965, "你关注的作者更新了")
@@ -55,6 +57,7 @@ data class RecommendationCandidate(
         matchedTags.isNotEmpty() -> UiText.text(R.string.ui_323fda11691f, "你最近常看 #%1\$s", matchedTags.first())
         matchedAuthorId.isNotBlank() -> UiText.text(R.string.ui_18d5c13b3a0e, "你喜欢这位作者的作品")
         classic -> UiText.text(R.string.ui_a2c823653025, "历史上的高赞作品")
+        Source.TEXT in sources -> UiText.text(R.string.ui_db4508017615, "标题或简介与你近期偏好相符")
         interestSuggested -> UiText.text(R.string.ui_c79cb9b0cd36, "猜你喜欢 · 根据点赞、收藏、关注和完整观看分析")
         Source.MONTH_TOP in sources -> UiText.text(R.string.ui_fba8a81f428b, "近期的高赞作品")
         Source.TRENDING in sources -> UiText.text(R.string.ui_62a6d501e516, "热门榜上的作品")
@@ -118,6 +121,7 @@ data class RecommendationCandidate(
         const val POPULARITY = "popularity"
         const val DATE = "date"
         const val MONTH_TOP = "month_top"
+        const val TEXT = "text_topic"
         const val TAG = "tag"
         const val AUTHOR = "author"
         const val CLASSICS = "classics"
@@ -145,7 +149,7 @@ data class RecommendationCandidate(
         const val MULTI_HIT_CAP = 3
 
         fun sourceGroup(label: String): String = when (label) {
-            Source.TAG, Source.AUTHOR -> Group.PERSONAL
+            Source.TAG, Source.TEXT, Source.AUTHOR -> Group.PERSONAL
             Source.SUBSCRIBED -> Group.SOCIAL
             Source.DATE -> Group.FRESH
             Source.SEASONAL -> Source.SEASONAL

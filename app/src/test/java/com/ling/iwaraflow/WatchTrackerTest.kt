@@ -39,6 +39,21 @@ class WatchTrackerTest {
         assertEquals(0, streaks)
     }
 
+    @Test fun readyWithoutAFrameIsNotASkipAndRecoveredVideoCounts() {
+        val watch = tracker()
+        watch.noteReady()
+        watch.report(item(), 60_000, false, true, "")
+        assertEquals(0, streaks)
+        watch.reset()
+        watch.noteError()
+        watch.noteReady()
+        assertTrue(watch.noteFrame())
+        assertFalse(watch.noteFrame())
+        watch.noteEnded()
+        watch.report(item(), 60_000, false, true, "")
+        assertEquals(1, watched)
+    }
+
     @Test fun anErrorMeansTheSwipeIsNotAnOpinion() {
         val watch = tracker()
         watch.noteReady()
@@ -79,6 +94,7 @@ class WatchTrackerTest {
     @Test fun aLongWatchIsPositiveAndBreaksTheSkipStreak() {
         val watch = tracker()
         watch.noteReady()
+        watch.noteFrame()
         watch.noteEnded()
         watch.report(item(), durationMs = 1_000, playing = false, swipedAway = true, impressionSession = "")
         assertEquals(1, watched)

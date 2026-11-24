@@ -27,6 +27,7 @@ class FloatingVideoService : Service() {
     private var window: FrameLayout? = null
     private var controls: FloatingControls? = null
     private var returnIntent: Intent? = null
+    private var clearReturnListener: (() -> Unit)? = null
     private var videoId = ""
     private var closed = false
     private var api: IwaraApi? = null
@@ -104,9 +105,19 @@ class FloatingVideoService : Service() {
         }
         control(R.drawable.ic_floating_return, "返回软件", Gravity.TOP or Gravity.START) {
             val reopen = returnIntent ?: return@control
-            savePosition()
-            releaseWindow(); stopSelf()
-            startActivity(reopen.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_REORDER_TO_FRONT or Intent.FLAG_ACTIVITY_SINGLE_TOP))
+            // The visible overlay authorizes the foreground transition. resumeActive()
+            // takes over its latest playback state and closes it when the activity returns.
+            val sourceTask = intent.getIntExtra("sourceTask", -1)
+            val restored = runCatching {
+                val task = getSystemService(ActivityManager::class.java).appTasks.firstOrNull {
+                    @Suppress("DEPRECATION")
+                    it.taskInfo.let { info -> info.id == sourceTask && info.topActivity == reopen.component }
+                } ?: return@runCatching false
+                task.moveToFront()
+                true
+            }.getOrDefault(false)
+            if (!restored) startActivity(reopen.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_REORDER_TO_FRONT or Intent.FLAG_ACTIVITY_SINGLE_TOP))
+            finishReturnOnFocus()
         }
         control(R.drawable.ic_floating_close, "关闭小窗", Gravity.TOP or Gravity.END) { savePosition(); releaseWindow(); stopSelf() }
         val toggle = control(R.drawable.ic_pause, "播放或暂停", Gravity.BOTTOM or Gravity.CENTER_HORIZONTAL) {
@@ -206,12 +217,32 @@ class FloatingVideoService : Service() {
             } }
         }, if (recoveryAttempts == 1) 500L else 1500L)
     }
+    // Two fast transitions can leave the original Activity resumed throughout.
+    // In that case Android only restores focus and never calls its onResume again.
+    private fun finishReturnOnFocus() {
+        val owner = sourceActivity?.get() ?: return
+        val adapter = (owner as? PlaybackGuideHost)?.playbackGuideAdapter ?: return
+        val decor = owner.window.decorView
+        fun resumeIfFocused() {
+            if (instance === this && !owner.isDestroyed && !owner.isFinishing && owner.hasWindowFocus() &&
+                adapter.activeItem()?.id == videoId) adapter.resumeActive()
+        }
+        clearReturnListener?.invoke()
+        val listener = ViewTreeObserver.OnWindowFocusChangeListener { focused -> if (focused) decor.post { resumeIfFocused() } }
+        decor.viewTreeObserver.addOnWindowFocusChangeListener(listener)
+        clearReturnListener = {
+            if (decor.viewTreeObserver.isAlive) decor.viewTreeObserver.removeOnWindowFocusChangeListener(listener)
+        }
+        decor.post { resumeIfFocused() }
+    }
+
     private fun savePosition() {
         val p = player ?: return
         if (videoId.isNotBlank()) lastPlayback = PlaybackState(videoId, p.currentPosition.coerceAtLeast(0L), p.playWhenReady)
     }
     private fun releaseWindow() {
         closed = true
+        clearReturnListener?.invoke(); clearReturnListener = null
         retryHandler.removeCallbacksAndMessages(null)
         sourceRequest?.close(); sourceRequest = null
         api?.close(); api = null
@@ -229,6 +260,7 @@ class FloatingVideoService : Service() {
     companion object {
         private const val CHANNEL = "floating_video"
         private var instance: FloatingVideoService? = null
+        private var sourceActivity: java.lang.ref.WeakReference<Activity>? = null
         private var lastPlayback: PlaybackState? = null
         fun restorePlayback(videoId: String?): PlaybackState? {
             instance?.let { it.savePosition(); it.releaseWindow(); it.stopSelf() }
@@ -242,12 +274,14 @@ class FloatingVideoService : Service() {
             val item = adapter.activeItem() ?: return false
             val url = item.streamUrl ?: return false
             val intent = Intent(activity, FloatingVideoService::class.java)
+                .putExtra("sourceTask", activity.taskId)
                 .putExtra("url", url).putExtra("id", item.id).putExtra("title", item.title).putExtra("position", item.resumePositionMs)
                 .putExtra("playWhenReady", item.resumePlayWhenReady)
                 .putExtra("quality", item.selectedQuality ?: AppPrefs(activity).defaultQuality)
                 .putExtra("return", Intent(activity.intent).setClass(activity, activity.javaClass))
             return runCatching {
                 activity.startForegroundService(intent)
+                sourceActivity = java.lang.ref.WeakReference(activity)
                 adapter.pauseAll(); activity.moveTaskToBack(true); true
             }.getOrDefault(false)
         }

@@ -25,9 +25,9 @@ import java.lang.ref.WeakReference
 import kotlin.math.abs
 
 class VideoAdapter(
-    private val api: IwaraApi,
+    internal val api: IwaraApi,
     private val history: HistoryStore,
-    private val prefs: AppPrefs,
+    internal val prefs: AppPrefs,
     private val mediaCache: MediaPreloadCache,
     private val onDownload: (VideoItem, VideoSource) -> Unit,
     private val onEnterPip: () -> Unit,
@@ -52,6 +52,7 @@ class VideoAdapter(
 ) : RecyclerView.Adapter<VideoAdapter.Holder>() {
 
     var onQuickComment: ((VideoItem) -> Unit)? = null
+    var onFirstFrame: ((VideoItem, Int) -> Unit)? = null
     var onUpcomingChanged: ((List<VideoItem>) -> Unit)? = null
     fun appendDanmaku(videoId: String, comment: IwaraComment) {
         holders.forEach { it.appendDanmaku(videoId, comment) }
@@ -60,11 +61,18 @@ class VideoAdapter(
     private val holders = mutableSetOf<Holder>()
     private val preloadHandler = Handler(Looper.getMainLooper())
     private val likeStates = prefs.likeStates
+    private val followSubscription = api.listenFollowing { change ->
+        if (!released) applyFollowState(AuthorActivity.FollowResult(change.key.author, change.username, change.following))
+    }
     private val likeSubscription = likeStates.listen { videoId ->
         if (!released) {
             items.filter { videoId == null || it.id == videoId }.forEach(likeStates::apply)
             holders.toList().forEach { it.refreshLikeState(videoId) }
-            if (videoId == null) favoriteController?.migrateLegacyIfNeeded()
+            if (videoId == null) {
+                items.forEach { it.authorFollowing = api.knownFollowing(it.authorId) ?: false }
+                holders.toList().forEach { it.rebindFollowButton() }
+                favoriteController?.migrateLegacyIfNeeded()
+            }
         }
     }
     private var preloadTask: Runnable? = null
@@ -136,6 +144,7 @@ class VideoAdapter(
         playbackEnabled = false
         released = true
         likeSubscription.close()
+        followSubscription?.close()
         favoriteSubscription?.close()
         favoriteController?.close()
         cancelIdlePreload()
@@ -336,7 +345,7 @@ class VideoAdapter(
                     if (url != null) {
                         allowed += url
                     } else if (resolvingPreloads.add(item.id)) {
-                        api.resolvePreloadSources(item.id) { result ->
+                        api.resolvePreloadSources(item.id, item) { result ->
                             preloadHandler.post {
                                 resolvingPreloads.remove(item.id)
                                 if (!released && playbackEnabled && position == activePosition) result.onSuccess { sources ->
@@ -408,6 +417,9 @@ class VideoAdapter(
         private val infoPanel = view.findViewById<View>(R.id.infoPanel)
         private val actionPanel = view.findViewById<View>(R.id.actionPanel)
         private val author = view.findViewById<TextView>(R.id.author)
+        private val fullscreenAuthor = view.findViewById<TextView>(R.id.fullscreenAuthor)
+        private val fullscreenDescription = view.findViewById<TextView>(R.id.fullscreenDescription)
+        private var requestedFullscreenDescription = false
         private val title = view.findViewById<TextView>(R.id.title)
         private val tags = view.findViewById<TextView>(R.id.tags)
         private val like = view.findViewById<ImageView>(R.id.like)
@@ -667,13 +679,14 @@ class VideoAdapter(
 
         fun bind(item: VideoItem) {
             release()
+            requestedFullscreenDescription = false
             // 卡片被回收复用：上一条点出来的控件不要跟着带到下一条。
             setPausedControlsHidden(false)
             setControlsPinned(false)
             bound = item
             likeBusy = false
             reactionFollowBusy = false
-            itemView.findViewById<AuthorFollowButton>(R.id.authorFollow).isEnabled = true
+            itemView.findViewById<AuthorFollowButton>(R.id.authorFollow).bind(item, this@VideoAdapter)
             favoriteBusy = false
             recoveryAttempts = 0
             landscape = false
@@ -691,6 +704,8 @@ class VideoAdapter(
             fullscreenComments.setOnClickListener { comments.performClick() }
             // 标题和标签行都能打开简介。
             val openInfo = onInfo?.let { open -> View.OnClickListener { open(item) } }
+            fullscreenDescription.setOnClickListener(openInfo)
+            fullscreenAuthor.setOnClickListener { author.performClick() }
             title.setOnClickListener(openInfo)
             title.isClickable = onInfo != null
             tags.setOnClickListener(openInfo)
@@ -702,6 +717,8 @@ class VideoAdapter(
             skipBack.setOnClickListener { skipBy(-prefs.skipSeconds * 1000L) }
             skipForward.setOnClickListener { skipBy(prefs.skipSeconds * 1000L) }
             author.text = "@${item.author}"
+            fullscreenAuthor.text = author.text
+            fullscreenDescription.text = item.description.ifBlank { item.title }
             title.text = item.title
             tags.text = item.tags.take(8).joinToString("  ") { "#$it" }
             updateLikeUi(item)
@@ -833,7 +850,7 @@ class VideoAdapter(
                         true
                     }
                     MotionEvent.ACTION_UP -> {
-                        screenReactionHold.cancel()
+                        screenReactionHold.releaseTouch()
                         tapHandler.removeCallbacks(holdToSpeed)
                         itemView.parent?.requestDisallowInterceptTouchEvent(false)
                         when {
@@ -874,7 +891,7 @@ class VideoAdapter(
 
         private var favoriteBusy = false
 
-        private fun acceptFavorite(item: VideoItem, result: Result<PlaylistFavorites.Change>, done: (() -> Unit)? = null) {
+        private fun acceptFavorite(item: VideoItem, result: Result<PlaylistFavorites.Change>, showBurst: Boolean = true, done: (() -> Unit)? = null) {
             if (released) return
             if (bound === item) favoriteBusy = false
             result.onSuccess { change ->
@@ -887,7 +904,7 @@ class VideoAdapter(
                 }
                 if (bound === item) {
                     updateLikeUi(item)
-                    if (change.saved && change.changed) reactionBurst.playOn(favorite, ReactionBurstView.Kind.FAVORITE)
+                    if (showBurst && change.saved && change.changed) reactionBurst.playOn(favorite, ReactionBurstView.Kind.FAVORITE)
                 }
                 done?.invoke()
             }.onFailure {
@@ -895,13 +912,13 @@ class VideoAdapter(
             }
         }
 
-        private fun addFavorite(item: VideoItem, done: (() -> Unit)? = null) {
+        private fun addFavorite(item: VideoItem, showBurst: Boolean = true, done: (() -> Unit)? = null) {
             if (released || (bound === item && favoriteBusy)) return
             if (!api.isLoggedIn()) { onNeedLogin(); return }
             // A successful like may arrive after this holder was rebound during a swipe.
             // Finish the original double action without locking the new video's controls.
             if (bound === item) favoriteBusy = true
-            favoriteController?.add(item) { acceptFavorite(item, it, done) }
+            favoriteController?.add(item) { acceptFavorite(item, it, showBurst, done) }
         }
 
         private fun openFavoritePicker() {
@@ -926,11 +943,12 @@ class VideoAdapter(
             if (!active || likeBusy || favoriteBusy || reactionFollowBusy) return
             if (!api.isLoggedIn()) { onNeedLogin(); return }
             val session = likeStates.snapshot()
+            val fullscreenTriple = includeFollow && fullscreenMode
             fun finishFavorite() {
                 if (released || !likeStates.isCurrent(session)) return
-                addFavorite(item) {
+                addFavorite(item, showBurst = !fullscreenTriple) {
                     if (!likeStates.isCurrent(session)) return@addFavorite
-                    if (includeFollow) finishReactionFollow(item, session)
+                    if (includeFollow) finishReactionFollow(item, session, fullscreenTriple)
                     else if (bound === item) Toast.makeText(itemView.context, UiText.text(R.string.ui_1de0dd18b8e2, "已点赞并收藏"), Toast.LENGTH_SHORT).show()
                 }
             }
@@ -938,7 +956,7 @@ class VideoAdapter(
         }
 
         /** The screen gesture only adds a follow; it can never toggle an existing follow off. */
-        private fun finishReactionFollow(item: VideoItem, session: VideoLikeStore.Snapshot) {
+        private fun finishReactionFollow(item: VideoItem, session: VideoLikeStore.Snapshot, fullscreenTriple: Boolean) {
             if (released || !likeStates.isCurrent(session)) return
             val button = itemView.findViewById<AuthorFollowButton>(R.id.authorFollow)
             if (bound === item && !button.isEnabled) {
@@ -954,7 +972,7 @@ class VideoAdapter(
                     applyFollowState(AuthorActivity.FollowResult(item.authorId, item.authorUsername, true))
                     RecommendationEngine.notifyFollowChanged(item.authorId, true)
                 }
-                if (bound === item) Toast.makeText(itemView.context, when {
+                if (bound === item && (!fullscreenTriple || error != null)) Toast.makeText(itemView.context, when {
                     error != null -> UiText.text(R.string.ui_dfafeb579d88, "已点赞并收藏，关注失败：%1\$s", IwaraApi.explainError(error))
                     self -> UiText.text(R.string.ui_cc975be326e5, "已点赞并收藏，自己的作品无需关注")
                     else -> UiText.text(R.string.ui_9fcb8eedf2a4, "已完成三连：点赞、收藏、关注")
@@ -969,8 +987,10 @@ class VideoAdapter(
                     else -> api.ensureUserFollowed(id, item.authorUsername) { result -> itemView.post { finish(result.exceptionOrNull()) } }
                 }
             }
-            if (item.authorFollowing) { finish(); return }
-            if (item.authorId.isNotBlank() || item.authorUsername.isBlank()) { follow(item.authorId, false); return }
+            if (item.authorId.isNotBlank() || item.authorUsername.isBlank()) {
+                follow(item.authorId, api.knownFollowing(item.authorId) ?: item.authorFollowing)
+                return
+            }
             api.getAuthorProfile(item.authorUsername) { result -> itemView.post {
                 if (!likeStates.isCurrent(session) || released) { finish(java.io.IOException(UiText.text(R.string.ui_78deb9551a5a, "账号已切换"))); return@post }
                 result.onSuccess { author ->
@@ -1025,6 +1045,14 @@ class VideoAdapter(
 
                     override fun onIsPlayingChanged(isPlaying: Boolean) {
                         if (bound?.id == item.id) { notePlaying(isPlaying); danmaku.invalidate() }
+                    }
+
+                    override fun onRenderedFirstFrame() {
+                        if (!active || released || generation != bindGeneration || bound !== item) return
+                        if (watch.noteFrame()) {
+                            persistHistory(completed = false)
+                            onFirstFrame?.invoke(item, bindingAdapterPosition)
+                        }
                     }
 
                     override fun onPlayerError(error: PlaybackException) {
@@ -1094,7 +1122,7 @@ class VideoAdapter(
                 return
             }
             sourceRequest?.close()
-            sourceRequest = api.resolveSources(item.id) { result ->
+            sourceRequest = api.resolveSources(item) { result ->
                 itemView.post {
                     if (released || !playbackEnabled || !active || generation != bindGeneration || bound?.id != item.id || player !== p) return@post
                     sourceRequest = null
@@ -1118,6 +1146,10 @@ class VideoAdapter(
             source ?: run { showPlaybackRetry(); return }
             val oldPosition = if (preservePosition) p.currentPosition else item.resumePositionMs.coerceAtLeast(0L)
             val shouldPlay = active && item.resumePlayWhenReady
+            if (fullscreenMode) {
+                fullscreenDescription.text = item.description.ifBlank { item.title }
+                loadFullscreenDescription()
+            }
             item.streamUrl = source.url
             if (item.selectedQuality == null && preferred != "highest") item.selectedQuality = source.name
             quality.text = UiText.text(R.string.ui_647fef831b82, "画质\n") + (item.selectedQuality ?: if (preferred == "highest") UiText.text(R.string.ui_8672864e9041, "最高") else source.name)
@@ -1137,7 +1169,9 @@ class VideoAdapter(
             if (enabled) {
                 if (released || !playbackEnabled) return
                 if (active && player != null) return
+                if (!active && player == null) resetWatchSignals()
                 active = true
+                loadFullscreenDescription()
                 bound?.let { favoriteController?.refresh(it) }
                 if (player == null) bound?.let { start(it) }
                 else player?.apply {
@@ -1146,14 +1180,10 @@ class VideoAdapter(
                     if (guideVisible) { resumeAfterGuide = shouldPlay; pause() }
                     else { playWhenReady = shouldPlay; if (shouldPlay) play() else pause() }
                 }
-                bound?.let { item ->
-                    val p = player
-                    history.recordWatchAsync(item, p?.currentPosition ?: item.resumePositionMs, (p?.duration ?: 0L).coerceAtLeast(0L), false)
-                }
                 startWatchdog()
             } else {
                 if (!active && player == null) return
-                if (active) { recordWatchSignals(swipedAway = false); persistHistory(completed = false) }
+                if (active || watch.hasFrame) { recordWatchSignals(swipedAway = false); persistHistory(completed = false) }
                 active = false
                 setPausedControlsHidden(false)
                 setControlsPinned(false)
@@ -1300,14 +1330,21 @@ class VideoAdapter(
 
         fun context(): android.content.Context = itemView.context
 
-        fun refreshFollowButton() {
+        fun rebindFollowButton() {
+            bound?.let { itemView.findViewById<AuthorFollowButton>(R.id.authorFollow).bind(it, this@VideoAdapter) }
+        }
+
+        fun refreshFollowButton(result: AuthorActivity.FollowResult? = null) {
             val item = bound ?: return
+            if (result != null && !matchesAuthor(item, result)) return
             itemView.findViewById<AuthorFollowButton>(R.id.authorFollow)?.render(item.authorFollowing)
         }
 
         fun refreshIfBound(videoId: String) {
             val item = bound ?: return
             if (item.id != videoId) return
+            item.authorFollowing = api.knownFollowing(item.authorId) ?: item.authorFollowing
+            fullscreenDescription.text = item.description.ifBlank { item.title }
             updateLikeUi(item)
             refreshFollowButton()
         }
@@ -1410,7 +1447,7 @@ class VideoAdapter(
             item.sources = null
             item.streamUrl = null
             sourceRequest?.close()
-            sourceRequest = api.resolveSources(item.id) { result ->
+            sourceRequest = api.resolveSources(item) { result ->
                 itemView.post {
                     if (released || !active || generation != bindGeneration || bound?.id != item.id || player !== p) return@post
                     sourceRequest = null
@@ -1445,7 +1482,7 @@ class VideoAdapter(
             val ended = completed || p.playbackState == Player.STATE_ENDED
             item.resumePositionMs = if (ended) 0L else position
             val completedByProgress = duration > 0 && position >= (duration * 0.9).toLong()
-            history.recordWatchAsync(item, position, duration, completed || completedByProgress)
+            if (watch.hasFrame) history.recordWatchAsync(item, position, duration, completed || completedByProgress)
         }
 
         fun savePlaybackPosition() = persistHistory(completed = false)
@@ -1531,7 +1568,7 @@ class VideoAdapter(
             Toast.makeText(itemView.context, UiText.text(R.string.ui_e013be1bb433, "正在读取清晰度…"), Toast.LENGTH_SHORT).show()
             cancelQualityRequest()
             val requestGeneration = choiceGeneration
-            choiceRequest = api.resolveSources(item.id) { result ->
+            choiceRequest = api.resolveSources(item) { result ->
                 itemView.post {
                     if (released || !active || !playbackEnabled || generation != bindGeneration ||
                         choiceGeneration != requestGeneration || player !== requestPlayer || bound?.id != item.id) return@post
@@ -1568,7 +1605,47 @@ class VideoAdapter(
                 }.show()
         }
 
+        private fun loadFullscreenDescription() {
+            val item = bound ?: return
+            if (!active || !fullscreenMode || pipMode || requestedFullscreenDescription || item.description.isNotBlank() || item.sources.isNullOrEmpty()) return
+            requestedFullscreenDescription = true
+            api.getVideo(item.id) { result -> itemView.post {
+                if (bound !== item || released) return@post
+                result.onSuccess { detail ->
+                    item.description = detail.description
+                    fullscreenDescription.text = item.description.ifBlank { item.title }
+                }.onFailure { requestedFullscreenDescription = false }
+            } }
+        }
+
+        private var compactTransport = false
+
+        private fun setCompactTransport(compact: Boolean) {
+            if (compactTransport == compact) return
+            compactTransport = compact
+            val density = itemView.resources.displayMetrics.density
+            fun dp(value: Int) = (value * density + 0.5f).toInt()
+            val buttonSize = pausePip.layoutParams.width
+            fun square(view: View, size: Int) {
+                view.layoutParams = view.layoutParams.apply { width = size; height = size }
+            }
+            for (skip in listOf(skipBack, skipForward)) {
+                square(skip, if (compact) buttonSize else dp(44))
+                square((skip as ViewGroup).getChildAt(0), dp(if (compact) 22 else 28))
+            }
+            square(pauseIndicator, if (compact) buttonSize else dp(40))
+            val params = pauseIndicator.layoutParams as ViewGroup.MarginLayoutParams
+            params.marginStart = if (compact) 0 else dp(6)
+            params.marginEnd = params.marginStart
+            pauseIndicator.layoutParams = params
+            val row = itemView.findViewById<View>(R.id.pauseControls)
+            val pad = dp(if (compact) 3 else 4)
+            row.setPaddingRelative(dp(6), pad, dp(6), pad)
+        }
+
         fun setChromeVisible(visible: Boolean) {
+            setCompactTransport(fullscreenMode && !pipMode)
+            loadFullscreenDescription()
             infoPanel.visibility = if (visible) View.VISIBLE else View.GONE
             actionPanel.visibility = if (visible) View.VISIBLE else View.GONE
             // 时间牌在普通模式下要让开底下的信息栏；全屏没有那一栏，就往下挪到贴近底边。
@@ -1593,7 +1670,8 @@ class VideoAdapter(
         fun isPlaying(): Boolean = active && player?.isPlaying == true
 
         fun release() {
-            if (active) recordWatchSignals(swipedAway = false)
+            itemView.findViewById<AuthorFollowButton>(R.id.authorFollow).unbind()
+            if (active || watch.hasFrame) recordWatchSignals(swipedAway = false)
             persistHistory(completed = false)
             active = false
             tapHandler.removeCallbacks(holdToSpeed)
@@ -1654,17 +1732,13 @@ class VideoAdapter(
      * 作者页关注/取关后同步到视频流：更新同一作者的所有条目，并刷新正在显示的关注按钮。
      */
     fun applyFollowState(result: AuthorActivity.FollowResult) {
-        val key = result.authorId.ifBlank { result.username }
-        if (key.isBlank()) return
-        items.forEach { item ->
-            val itemKey = item.authorId.ifBlank { item.authorUsername }
-            val matches = itemKey == key ||
-                (result.username.isNotBlank() && item.authorUsername == result.username) ||
-                (result.authorId.isNotBlank() && item.authorId == result.authorId)
-            if (matches) item.authorFollowing = result.following
-        }
-        holders.forEach { it.refreshFollowButton() }
+        items.forEach { item -> if (matchesAuthor(item, result)) item.authorFollowing = result.following }
+        holders.forEach { it.refreshFollowButton(result) }
     }
+
+    private fun matchesAuthor(item: VideoItem, result: AuthorActivity.FollowResult): Boolean =
+        if (result.authorId.isNotBlank() && item.authorId.isNotBlank()) item.authorId == result.authorId
+        else result.username.isNotBlank() && item.authorUsername.equals(result.username, ignoreCase = true)
 
     /** 预缓存要判断网络状况，取任意一张已绑定卡片的 Context 就够。 */
     private val itemContext: android.content.Context?

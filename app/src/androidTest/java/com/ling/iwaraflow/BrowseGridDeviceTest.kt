@@ -191,6 +191,7 @@ class BrowseGridDeviceTest {
             main {
                 val card = (pager.getChildAt(0) as RecyclerView).findViewHolderForAdapterPosition(9)!!.itemView
                 assertFalse(card.findViewById<View>(R.id.fullscreenSocial).isShown)
+                assertFalse(card.findViewById<View>(R.id.fullscreenVideoInfo).isShown)
                 card.performClick()
             }
             await("Tapping fullscreen did not reveal transport and social controls together") {
@@ -205,7 +206,8 @@ class BrowseGridDeviceTest {
             await("Second fullscreen tap did not hide transport and social controls together") {
                 val card = (pager.getChildAt(0) as RecyclerView).findViewHolderForAdapterPosition(9)?.itemView
                 card != null && !card.findViewById<View>(R.id.pauseSeekBar).isShown &&
-                    !card.findViewById<View>(R.id.fullscreenSocial).isShown
+                    !card.findViewById<View>(R.id.fullscreenSocial).isShown &&
+                    !card.findViewById<View>(R.id.fullscreenVideoInfo).isShown
             }
             main {
                 (pager.getChildAt(0) as RecyclerView).findViewHolderForAdapterPosition(9)!!.itemView.performClick()
@@ -219,6 +221,11 @@ class BrowseGridDeviceTest {
                 fullscreenPhase = "comments"
                 val card = (pager.getChildAt(0) as RecyclerView).findViewHolderForAdapterPosition(9)!!.itemView
                 assertTrue(card.findViewById<TextView>(R.id.fullscreenLikeCount).text.toString().contains("109"))
+                val info = card.findViewById<View>(R.id.fullscreenVideoInfo)
+                val transport = card.findViewById<View>(R.id.pauseControls)
+                assertTrue(info.isShown && info.height > 0)
+                assertTrue("Metadata must sit above the transport row", info.y + info.height <= transport.y)
+                assertEquals(card.findViewById<View>(R.id.pausePip).width, card.findViewById<View>(R.id.skipBack).width)
                 assertFalse(card.findViewById<View>(R.id.actionPanel).isShown)
                 card.findViewById<View>(R.id.fullscreenComments).performClick()
             }

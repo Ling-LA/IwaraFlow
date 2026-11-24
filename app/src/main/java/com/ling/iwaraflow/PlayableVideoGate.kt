@@ -30,7 +30,9 @@ class PlayableVideoGate(
     fun cancelPending() = synchronized(lifecycleLock) {
         requestScope.cancel()
         requestScope = RequestCancellation()
-        pending.toList().forEach(::cancel)
+        // New probes cannot enter under lifecycleLock. Completed probes can leave
+        // concurrently, so iterate the concurrent set without consulting its size.
+        pending.forEach(::cancel)
     }
 
     /** Result metadata is immediately usable; only the visible head is probed in the background. */
@@ -166,7 +168,7 @@ class PlayableVideoGate(
     private fun probeOne(item: VideoItem, quality: String): VideoItem {
         inspected.incrementAndGet()
         return try {
-            val sources = item.sources?.takeIf { it.isNotEmpty() } ?: api.resolveSourcesBlocking(item.id)
+            val sources = item.sources?.takeIf { it.isNotEmpty() } ?: api.resolveSourcesBlocking(item.id, item)
             val preferred = api.chooseSource(sources, item.selectedQuality ?: quality)
             val ordered = buildList {
                 if (preferred != null) add(preferred)
@@ -218,11 +220,13 @@ class PlayableVideoGate(
         val issue: String?,
         val sources: List<VideoSource>?,
         val streamUrl: String?,
-        val quality: String?
+        val quality: String?,
+        val title: String,
+        val description: String
     )
 
     private fun cacheKey(item: VideoItem, quality: String): String =
-        item.id + "@" + (item.selectedQuality ?: quality)
+        "${SecureSessionStore.accountRevision}:${item.id}@" + (item.selectedQuality ?: quality)
 
     private fun cached(key: String): Verdict? = synchronized(verdicts) {
         val verdict = verdicts[key] ?: return null
@@ -246,11 +250,13 @@ class PlayableVideoGate(
             issue in PERMANENT_ISSUES -> Outcome.PERMANENT
             else -> Outcome.TRANSIENT
         }
-        val verdict = Verdict(System.currentTimeMillis(), outcome, issue, item.sources, item.streamUrl, item.selectedQuality)
+        val verdict = Verdict(System.currentTimeMillis(), outcome, issue, item.sources, item.streamUrl, item.selectedQuality, item.title, item.description)
         synchronized(verdicts) { verdicts[key] = verdict }
     }
 
     private fun apply(item: VideoItem, verdict: Verdict): VideoItem {
+        if (item.title.isBlank() || item.title == "Untitled") item.title = verdict.title.ifBlank { item.title }
+        if (item.description.isBlank()) item.description = verdict.description
         item.playbackIssue = verdict.issue
         if (verdict.issue == null) {
             verdict.sources?.let { item.sources = it }

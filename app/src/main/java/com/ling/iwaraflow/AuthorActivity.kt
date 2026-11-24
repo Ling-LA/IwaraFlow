@@ -39,6 +39,7 @@ class AuthorActivity : AppCompatActivity(), PlaybackGuideHost {
     private lateinit var descriptionView: TextView
     private lateinit var statusView: TextView
     private lateinit var followButton: Button
+    private var followSubscription: java.io.Closeable? = null
     private lateinit var friendButton: Button
 
     private val works = mutableListOf<VideoItem>()
@@ -76,6 +77,12 @@ class AuthorActivity : AppCompatActivity(), PlaybackGuideHost {
 
         PageNavigation.install(this, findViewById(R.id.authorFeedPage)) { feedAdapter.suspendPlayback() }
         api = IwaraApi(this)
+        followSubscription = api.listenFollowing { change ->
+            author?.takeIf { it.id == change.key.author }?.let {
+                it.following = change.following
+                refreshRelationUi()
+            }
+        }
         history = HistoryStore(this)
         prefs = AppPrefs(this)
         gate = PlayableVideoGate(api)
@@ -175,6 +182,7 @@ class AuthorActivity : AppCompatActivity(), PlaybackGuideHost {
         if (username.isNotBlank()) loadProfile(username)
         else if (id.isNotBlank()) {
             author = IwaraAuthor(id, display, "")
+            refreshRelationUi()
             loadNextPage()
         } else {
             Toast.makeText(this, UiText.text(R.string.ui_bffa83e7e0c2, "缺少作者信息"), Toast.LENGTH_SHORT).show()
@@ -371,6 +379,7 @@ class AuthorActivity : AppCompatActivity(), PlaybackGuideHost {
 
     private fun showList() {
         if (!inFeed || exiting) return
+        if (feedAdapter.isFullscreen) setFullscreen(false)
         comments.close()
         feedAdapter.pauseAll()
         inFeed = false
@@ -433,7 +442,7 @@ class AuthorActivity : AppCompatActivity(), PlaybackGuideHost {
         if (!api.isLoggedIn()) { Toast.makeText(this, UiText.text(R.string.ui_b8f65691f992, "请先登录 Iwara"), Toast.LENGTH_SHORT).show(); return }
         followButton.isEnabled = false
         val desired = !a.following
-        api.followUser(a.id, desired) { result ->
+        api.followUser(a.id, desired, a.username) { result ->
             if (isFinishing || isDestroyed || exiting) return@followUser
             runOnUiThread {
                 if (isFinishing || isDestroyed || exiting) return@runOnUiThread
@@ -485,6 +494,7 @@ class AuthorActivity : AppCompatActivity(), PlaybackGuideHost {
 
     private fun refreshRelationUi() {
         val a = author ?: return
+        api.recentFollowing(a.id)?.let { a.following = it }
         followButton.text = if (a.following) UiText.text(R.string.ui_a3c7f74cf331, "✓ 已关注") else UiText.text(R.string.ui_68b61ae1eb6a, "+ 关注")
         friendButton.text = when (a.friendStatus) {
             "friends" -> UiText.text(R.string.ui_9b50be63de55, "✓ 已是好友")
@@ -600,6 +610,7 @@ class AuthorActivity : AppCompatActivity(), PlaybackGuideHost {
     }
 
     override fun onDestroy() {
+        followSubscription?.close()
         PipRegistry.leave(this)
         if (::comments.isInitialized) comments.release()
         feedAdapter.releaseAll()

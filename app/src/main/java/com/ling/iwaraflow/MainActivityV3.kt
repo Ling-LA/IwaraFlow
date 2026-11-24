@@ -234,6 +234,7 @@ class MainActivityV3 : AppCompatActivity(), PlaybackGuideHost {
             onDisliked = { item, _ -> afterDislike(item) },
             onFullscreen = { _, enabled -> setFullscreen(enabled) }
         )
+        adapter.onFirstFrame = ::noteDisplayedVideo
         adapter.onUpcomingChanged = { upcoming -> if (mode == "recommend") warmQueue.save(upcoming) }
         pager.adapter = adapter
         topBar.addOnLayoutChangeListener { _, _, _, _, bottom, _, _, _, _ ->
@@ -474,7 +475,6 @@ class MainActivityV3 : AppCompatActivity(), PlaybackGuideHost {
         setBrowseSurface(false)
         pager.setCurrentItem(index, false)
         adapter.setActive(index)
-        noteImpressions(state.items, 0)
         if (lifecycle.currentState.isAtLeast(Lifecycle.State.RESUMED)) resumeVisiblePlayback()
     }
 
@@ -813,7 +813,6 @@ class MainActivityV3 : AppCompatActivity(), PlaybackGuideHost {
         error.visibility = View.GONE
         val head = decorate(batch)
         adapter.replace(head)
-        noteImpressions(head, 0)
         pager.setCurrentItem(0, false)
         adapter.setActive(0)
         if (lifecycle.currentState.isAtLeast(Lifecycle.State.RESUMED)) resumeVisiblePlayback()
@@ -863,7 +862,6 @@ class MainActivityV3 : AppCompatActivity(), PlaybackGuideHost {
         } else {
             error.visibility = View.GONE
             adapter.replace(list)
-            noteImpressions(list, 0)
             pager.setCurrentItem(0, false)
             adapter.setActive(0)
             if (lifecycle.currentState.isAtLeast(Lifecycle.State.RESUMED)) resumeVisiblePlayback()
@@ -879,7 +877,6 @@ class MainActivityV3 : AppCompatActivity(), PlaybackGuideHost {
     private fun appendFeed(list: List<VideoItem>) {
         val before = adapter.itemCount
         adapter.append(list)
-        noteImpressions(adapter.items.drop(before), before)
         pager.post {
             if (!isFinishing && !isDestroyed) {
                 val current = pager.currentItem
@@ -1028,50 +1025,21 @@ class MainActivityV3 : AppCompatActivity(), PlaybackGuideHost {
         loadFeed(reset = false)
     }
 
-    /** 一次问清这一批的本地收藏状态，不是一条视频查一次库。 */
-    /**
-     * 记一批曝光：这几条视频进了流的第几位、当时是怎么被选出来的。
-     *
-     * 推荐诊断以前是从全局行为表算的，而播放器是所有页面共用的——在作者页连看一小时
-     * 同一个作者，那些观看也会被算进“推荐质量”。改成按曝光记之后，指标只看本流，
-     * 平均播放也是真实播放时长而不是 `history.last_position`。只存本机，不上传。
-     */
-    private fun noteImpressions(list: List<VideoItem>, startPosition: Int) {
-        if (list.isEmpty() || feedSession.isBlank()) return
+    private fun noteDisplayedVideo(item: VideoItem, position: Int) {
         val session = feedSession
+        if (position < 0 || session.isBlank() || adapter.items.getOrNull(position)?.id != item.id) return
         val surface = mode
-        val rows = list.mapIndexed { index, item ->
-            val candidate = if (surface == HistoryStore.SURFACE_RECOMMEND) recommender.candidateFor(item.id) else null
-            ImpressionRow(
-                item = item,
-                position = startPosition + index,
-                sources = candidate?.sources?.joinToString("\u001F").orEmpty(),
-                score = candidate?.let { it.sourceScore + it.baseQuality } ?: 0.0,
-                reason = candidate?.reason().orEmpty(),
-                exploration = candidate?.exploration == true,
-                classic = candidate?.classic == true
-            )
-        }
+        val candidate = if (surface == HistoryStore.SURFACE_RECOMMEND) recommender.candidateFor(item.id) else null
+        val sources = candidate?.sources?.joinToString("\u001f").orEmpty()
+        val score = candidate?.rankedScore
+        val reason = candidate?.let { recommender.reasonFor(item.id) }.orEmpty()
+        val exploration = candidate?.exploration == true
+        val classic = candidate?.classic == true
         history.post {
-            rows.forEach { row ->
-                history.recordImpression(
-                    session, row.item, surface, row.position,
-                    row.sources, row.score, row.reason, row.exploration, row.classic
-                )
-            }
+            history.recordImpression(session, item, surface, position, sources, score?.total ?: 0.0,
+                reason, exploration, classic, score?.textContribution)
         }
     }
-
-    /** [noteImpressions] 里一条待写入的曝光；取好数据再交给写线程，别在后台线程读界面状态。 */
-    private class ImpressionRow(
-        val item: VideoItem,
-        val position: Int,
-        val sources: String,
-        val score: Double,
-        val reason: String,
-        val exploration: Boolean,
-        val classic: Boolean
-    )
 
     private fun decorate(raw: List<VideoItem>): List<VideoItem> {
         if (raw.isEmpty()) return raw

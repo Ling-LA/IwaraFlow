@@ -94,10 +94,9 @@ class DataManagementActivity : AppCompatActivity() {
         card.addView(page.action(UiText.text(R.string.ui_87435e888146, "重置系统推荐画像")) { confirm(UiText.text(R.string.ui_87435e888146, "重置系统推荐画像"), UiText.text(R.string.ui_31c385fbb1a8, "会清除系统学习和推荐统计，手动兴趣与屏蔽保留。")) {
             val db = history.interestDatabase
             db.beginTransaction()
-            try { listOf("preference_entities", "interactions").forEach { db.delete(it, null, null) }; db.setTransactionSuccessful() }
+            try { listOf("preference_entities", "interactions", "recommendation_impressions").forEach { db.delete(it, null, null) }; db.setTransactionSuccessful() }
             finally { db.endTransaction() }
             history.clearExtraLikeSignals()
-            history.writableDatabase.delete("recommendation_impressions", null, null)
             history.invalidateInterests(); UiText.text(R.string.ui_5a0deb23adec, "系统画像已重置")
         } })
         card.addView(page.action(UiText.text(R.string.ui_67ffd99b0412, "上传任务")) { startActivity(android.content.Intent(this, UploadTasksActivity::class.java)) })

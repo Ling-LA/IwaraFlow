@@ -24,20 +24,30 @@ class WatchInteractionTracker(
     private var playingSince = 0L
     private var readyOnce = false
     private var endedOnce = false
+    var hasFrame = false
+        private set
     private var hadError = false
     private var reported = false
     /** 这一条里主动往回拖过 / 点过后退：看了还想再看一遍，是正面信号。 */
     private var rewound = false
 
     fun reset() {
+        hasFrame = false
         playedMs = 0L; playingSince = 0L
         readyOnce = false; endedOnce = false; hadError = false; reported = false; rewound = false
     }
 
     fun notePlaying(isPlaying: Boolean) {
-        val now = System.currentTimeMillis()
-        if (isPlaying) playingSince = now
-        else if (playingSince > 0L) { playedMs += now - playingSince; playingSince = 0L }
+        val now = System.nanoTime() / 1_000_000L
+        if (isPlaying && playingSince == 0L) playingSince = now
+        else if (!isPlaying && playingSince > 0L) { playedMs += now - playingSince; playingSince = 0L }
+    }
+
+    fun noteFrame(): Boolean {
+        val first = !hasFrame
+        hasFrame = true
+        hadError = false
+        return first
     }
 
     fun noteReady() { readyOnce = true }
@@ -56,7 +66,7 @@ class WatchInteractionTracker(
         if (reported) return
         reported = true
         if (playing) notePlaying(false)
-        if (hadError || !readyOnce) return
+        if (hadError || !readyOnce || !hasFrame) return
         val duration = durationMs.takeIf { it > 0L } ?: 0L
         // 兴趣是连续的：43 秒和 45 秒不该一个没信号、一个 +0.8。
         val interest = watchInterest(

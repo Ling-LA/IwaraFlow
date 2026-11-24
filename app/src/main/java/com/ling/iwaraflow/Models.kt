@@ -112,7 +112,7 @@ data class FavoritesPage(
 
 data class VideoItem(
     val id: String,
-    val title: String,
+    var title: String,
     val author: String,
     val tags: List<String>,
     var likes: Int,
@@ -140,7 +140,13 @@ data class VideoItem(
     var likeStateAccount: String? = null,
     /** Warm startup can use cached bytes immediately; choices refresh their signed URLs on demand. */
     var refreshSourcesForSelection: Boolean = false
-)
+) {
+    internal fun mergeTextFrom(detail: VideoItem) {
+        if (id != detail.id) return
+        if (title.isBlank() || title == "Untitled") title = detail.title.ifBlank { title }
+        if (description.isBlank()) description = detail.description
+    }
+}
 
 data class LoginResult(
     val success: Boolean,
@@ -192,13 +198,12 @@ data class PreferenceProfile(
     }
 
     /** Keep explicit choices effective even when years of learned signals saturate the cap. */
-    fun rankingScore(item: VideoItem): Double {
+    fun rankingScore(item: VideoItem, text: Double = ContentInterest.score(item, this)): Double {
         val manual = manualTagScore(item)
         val video = (videoWeights[item.id] ?: 0.0).coerceIn(-6.0, 8.0)
         val author = item.authorId.takeIf { it.isNotBlank() }?.let { authorIdWeights[it] }
             ?: authorWeights[item.author.lowercase()] ?: 0.0
         val (positive, negative) = learnedTagComponents(item)
-        val text = ContentInterest.score(item, this)
         // A saturated author/tag preference must not swallow explicit feedback about
         // this particular video. Apply it after the learned category budget is capped.
         // Cap positive and negative category evidence separately for the same reason.

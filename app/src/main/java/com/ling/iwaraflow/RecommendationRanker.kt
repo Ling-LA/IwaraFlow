@@ -96,15 +96,21 @@ class RecommendationRanker(private val random: Random = Random(), private val no
      * 重排：和 [rank] 是同一套口径，**来源分照旧算进去**。
      * 以前重排只算质量 + 新鲜度 + 画像，于是用户点一次赞，整条队列就换了一套评分体系。
      */
-    fun rerank(items: List<VideoItem>, taste: PreferenceProfile, now: Long): List<VideoItem> =
-        balanceManualInterests(
+    fun rerank(items: List<VideoItem>, taste: PreferenceProfile, now: Long): List<VideoItem> {
+        profile = taste
+        return balanceManualInterests(
             diversify(spreadAuthors(weightedOrder(hardMuteFilter(items, taste), taste, now))), taste)
             .also { assignInterestReasons(it, taste) }
+    }
 
     /** Exponential race: every eligible candidate has a strictly positive probability.
      * Tempering and a bounded score prevent a saturated interest from monopolizing the feed. */
     internal fun weightedOrder(items: List<VideoItem>, taste: PreferenceProfile, now: Long): List<VideoItem> =
-        weightedOrderBy(items) { scoreOf(it, taste, now) }
+        weightedOrderBy(items) { item ->
+            val parts = scoreParts(item, taste, now)
+            candidates[item.id]?.rankedScore = parts
+            parts.total
+        }
 
     private fun weightedOrderBy(items: List<VideoItem>, score: (VideoItem) -> Double): List<VideoItem> {
         if (items.isEmpty()) return items
@@ -132,7 +138,8 @@ class RecommendationRanker(private val random: Random = Random(), private val no
         val freshness: Double,
         val taste: Double,
         val jitter: Double,
-        val seasonal: Double = 0.0
+        val seasonal: Double = 0.0,
+        val textContribution: Double = 0.0
     ) {
         val total: Double get() = source + quality + freshness + taste + jitter + seasonal
     }
@@ -142,13 +149,17 @@ class RecommendationRanker(private val random: Random = Random(), private val no
         val known = candidates[item.id]
         known?.expireSeasonal(taste, now)
         val currentTaste = SeasonalInterest.withoutExpiredLearning(taste, now)
+        val withText = currentTaste.rankingScore(item)
+        val textContribution = if (currentTaste.textWeights.isEmpty()) 0.0 else
+            (withText - currentTaste.rankingScore(item, text = 0.0)) * TASTE_WEIGHT
         return ScoreParts(
             source = known?.sourceScore ?: 0.0,
             quality = known?.baseQuality ?: qualityScore(item.likes, item.views),
             freshness = 1.6 / (1.0 + ageDays / 30.0),
-            taste = currentTaste.rankingScore(item) * TASTE_WEIGHT,
+            taste = withText * TASTE_WEIGHT,
             jitter = ((item.id.hashCode().toLong() and 0xffff) / 65535.0) * JITTER_WEIGHT,
-            seasonal = SeasonalInterest.boost(item, taste, now)
+            seasonal = SeasonalInterest.boost(item, taste, now),
+            textContribution = textContribution
         )
     }
 
@@ -167,7 +178,7 @@ class RecommendationRanker(private val random: Random = Random(), private val no
             append("\n来源 ${signed(parts.source)} · 质量 ${signed(parts.quality)}")
             append(" · 新鲜度 ${signed(parts.freshness)}")
             append("\n画像 ${signed(parts.taste)} · 扰动 ${signed(parts.jitter)}")
-            val text = ContentInterest.score(item, SeasonalInterest.withoutExpiredLearning(taste, now))
+            val text = parts.textContribution
             if (text != 0.0) append(" · 标题/简介 ${signed(text)}（计入画像）")
             if (parts.seasonal > 0) append(" · 节日 ${signed(parts.seasonal)}")
             val hitTags = item.tags.mapNotNull { tag ->

@@ -42,6 +42,51 @@ class Release019DeviceTest {
     private fun views(view: View): List<View> = listOf(view) + if (view is ViewGroup)
         (0 until view.childCount).flatMap { views(view.getChildAt(it)) } else emptyList()
 
+    @Test fun textLearningUpgradeUndoAndExposureIsolationOnDevice() {
+        val prefs = AppPrefs(context)
+        val oldInterest = prefs.isolateInterests
+        val oldLibrary = prefs.isolateLibrary
+        val oldPrivate = prefs.privateBrowsing
+        val account = "qa-text-" + System.nanoTime()
+        try {
+            prefs.privateBrowsing = false
+            prefs.isolateInterests = true
+            prefs.isolateLibrary = true
+            fun video(i: Int) = VideoItem("v$i", "星空夜景，禁止转载", "studio$i", emptyList(), 10, description = "night forest")
+            HistoryStore(context).use { old ->
+                old.accountId = account
+                for (i in 1..2) {
+                    old.recordWatch(video(i), 5000, 10000, false)
+                    old.recordInteraction(video(i), "like", 2.0)
+                }
+                val db = old.interestDatabase
+                db.execSQL("UPDATE interactions SET title_features='', body_features=''")
+                db.version = 13
+            }
+            HistoryStore(context).use { current ->
+                current.accountId = account
+                val hit = video(3).copy(title = "星空夜景摄影", tags = listOf("星空夜景"), description = "")
+                val taste = current.preferenceProfile()
+                assertTrue(ContentInterest.score(hit, taste) > 0)
+                val count = current.interestDatabase.rawQuery("SELECT COUNT(*) FROM interactions", null).use { it.moveToFirst(); it.getInt(0) }
+                assertEquals(2, count)
+                current.recordImpression("device", hit, "recommend", 0, textScore = .2)
+                current.noteImpressionOutcome("device", hit.id, 8000, 10000, false, false)
+                current.noteImpressionReaction("device", hit.id, favorited = true)
+                assertTrue(current.textOutcomeSummary().contains("文字加分 · 1 条"))
+                for (i in 1..2) current.recordInteraction(video(i), "unlike", -1.2)
+                assertEquals(0.0, ContentInterest.score(hit, current.preferenceProfile()), .00001)
+                current.accountId = account + "-other"
+                assertTrue(current.textOutcomeSummary().isEmpty())
+                assertTrue(current.preferenceProfile().textWeights.isEmpty())
+            }
+        } finally {
+            prefs.isolateInterests = oldInterest
+            prefs.isolateLibrary = oldLibrary
+            prefs.privateBrowsing = oldPrivate
+        }
+    }
+
     @Test fun finalVideoCanShowHideTransportAndReplayAfterRealDecoderReachesEnd() {
         val prefs = AppPrefs(context)
         val oldAuto = prefs.autoNext; val oldTap = prefs.tapToPause

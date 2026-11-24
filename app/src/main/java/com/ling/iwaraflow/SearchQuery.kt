@@ -74,16 +74,20 @@ data class SearchQuery(val groups: List<List<String>>) {
             override fun removeEldestEntry(eldest: MutableMap.MutableEntry<String, Regex>?) = size > 256
         }
 
-        internal fun conceptsIn(text: String): Set<String> = aliases.filter { group ->
-            group.any { containsTerm(text, it) }
-        }.map { it.first() }.toSet()
+        // Longest aliases win. Build once and scan each title/body once, using the
+        // same script-aware word boundaries as literal search on Android's ICU.
+        private val conceptPattern by lazy {
+            val alternatives = aliasIndex.keys.map { it.replace('_', ' ') }.distinct()
+                .sortedByDescending(String::length).map { termPattern(it).pattern }
+            alternatives.takeIf { it.isNotEmpty() }?.joinToString("|")?.toRegex()
+        }
 
-        internal fun withoutKnownConcepts(text: String): String {
-            var remaining = normalize(text).replace('_', ' ')
-            aliases.flatten().sortedByDescending(String::length).forEach { alias ->
-                remaining = termPattern(normalize(alias).replace('_', ' ')).replace(remaining, " ")
-            }
-            return remaining
+        internal fun extractConcepts(text: String, concepts: MutableSet<String>): String {
+            val normalized = text.replace('_', ' ')
+            return conceptPattern?.replace(normalized) { match ->
+                aliasIndex[tagKey(match.value)]?.firstOrNull()?.let(concepts::add)
+                " "
+            } ?: normalized
         }
 
         private fun containsTerm(text: String, term: String): Boolean {

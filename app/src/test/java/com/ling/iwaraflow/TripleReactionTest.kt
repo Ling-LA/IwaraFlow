@@ -28,8 +28,10 @@ class TripleReactionTest {
         var followReply: ((Result<Unit>) -> Unit)? = null
         val likes = mutableListOf<Boolean>()
         val follows = mutableListOf<Pair<String, Boolean>>()
-        fun hold(view: View = holder.itemView, ms: Long = 1500) {
-            touch(view, MotionEvent.ACTION_DOWN); idle(ms); touch(view, MotionEvent.ACTION_UP); idle()
+        fun hold(view: View = holder.itemView, ms: Long = 1500, whileHeld: () -> Unit = {}) {
+            touch(view, MotionEvent.ACTION_DOWN); idle(ms)
+            whileHeld()
+            touch(view, MotionEvent.ACTION_UP); idle()
         }
         private fun idle(ms: Long = 1) = shadowOf(Looper.getMainLooper()).idleFor(Duration.ofMillis(ms))
         private fun touch(view: View, action: Int) {
@@ -46,6 +48,8 @@ class TripleReactionTest {
         context.getSharedPreferences(VideoLikeStore.FILE, 0).edit().clear().commit()
         val api = mock(IwaraApi::class.java)
         `when`(api.isLoggedIn()).thenReturn(true)
+        `when`(api.knownFollowing(anyString())).thenReturn(null)
+        `when`(api.recentFollowing(anyString())).thenReturn(null)
         val history = HistoryStore(context)
         val adapter = VideoAdapter(api, history, AppPrefs(context), mock(MediaPreloadCache::class.java),
             { _, _ -> }, {}, {}, {}, favoriteController = acknowledgedFavoritesFixture())
@@ -74,11 +78,13 @@ class TripleReactionTest {
         try { block(fixture) } finally { adapter.releaseAll(); history.close(); host.pause().stop().destroy() }
     }
     @Test fun screenHoldAddsLikeFavoriteAndFollowAndDoesNotRepeat() = fixture { f ->
-        f.hold(ms = 2200)
-        assertEquals(listOf(true), f.likes); assertTrue(f.item.liked); assertTrue(f.item.localFavorite)
-        assertEquals(listOf("creator" to true), f.follows)
-        f.followReply!!(Result.success(Unit)); idle()
-        assertTrue(f.item.authorFollowing)
+        f.hold(ms = 2200) {
+            assertEquals(listOf(true), f.likes); assertTrue(f.item.liked); assertTrue(f.item.localFavorite)
+            assertEquals(listOf("creator" to true), f.follows)
+            f.followReply!!(Result.success(Unit)); idle()
+            assertTrue(f.item.authorFollowing)
+            assertNull("Fullscreen success should only animate the thumb", org.robolectric.shadows.ShadowToast.getTextOfLatestToast())
+        }
         assertEquals("已关注", f.holder.itemView.findViewById<AuthorFollowButton>(R.id.authorFollow).text.toString())
         f.hold(); assertEquals(1, f.follows.size); assertEquals(1, f.likes.size)
     }

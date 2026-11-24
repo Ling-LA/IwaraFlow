@@ -158,6 +158,7 @@ object NavigationDiagnostics {
             buildString {
                 append(store.recommendationMetrics().summary())
                 append("\n" + store.exposureDiversity())
+                store.textOutcomeSummary().takeIf { it.isNotBlank() }?.let { append("\n" + it) }
                 // 按来源拆开：标签召回的作品到底看不看得下去、探索位成功率多少。
                 val bySource = store.impressionSourceStats()
                 if (bySource.isNotEmpty()) {

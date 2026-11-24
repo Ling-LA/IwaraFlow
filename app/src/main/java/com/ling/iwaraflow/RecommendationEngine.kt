@@ -372,7 +372,17 @@ class RecommendationEngine(
         }
         requests += PageRequest("date", samplePage("date", ARCHIVE_DEPTH), 2.2)
         if (seasonal == null) requests += PageRequest("popularity", samplePage("popularity", POPULAR_DEPTH), 2.4)
-        if (round > 0) requests += PageRequest("date", samplePage("date", ARCHIVE_DEPTH), 2.0)
+        if (round > 0) {
+            // Use at most one existing refill slot. Only known public catalogue tags can
+            // be requested; never send a user's free-text keywords to a search service.
+            val topic = if (round == 1) currentTaste.textWeights.entries
+                .filter { (term, weight) -> weight >= .45 && SearchQuery.knownAliases(term) != null &&
+                    term !in tags && term !in currentTaste.mutedTags &&
+                    (currentTaste.manualTagPreferences[term] ?: 0) >= 0 && (currentTaste.tagWeights[term] ?: 0.0) >= 0.0 }
+                .maxByOrNull { it.value }?.key else null
+            requests += if (topic == null) PageRequest("date", samplePage("date", ARCHIVE_DEPTH), 2.0)
+                else PageRequest(TEXT_PREFIX + topic, 0, 1.5, tagSort = "likes")
+        }
         return requests
     }
 
@@ -419,6 +429,7 @@ class RecommendationEngine(
         request.sort.startsWith(SEASONAL_PREFIX) -> RecommendationCandidate.Source.SEASONAL
         request.sort == SUBSCRIBED -> RecommendationCandidate.Source.SUBSCRIBED
         request.month.isNotBlank() -> RecommendationCandidate.Source.MONTH_TOP
+        request.sort.startsWith(TEXT_PREFIX) -> RecommendationCandidate.Source.TEXT
         request.sort.startsWith(TAG_PREFIX) -> RecommendationCandidate.Source.TAG
         request.sort.startsWith(AUTHOR_PREFIX) -> RecommendationCandidate.Source.AUTHOR
         request.sort == "trending" -> RecommendationCandidate.Source.TRENDING
@@ -439,6 +450,13 @@ class RecommendationEngine(
                     request.sort == SUBSCRIBED -> api.getSubscribedVideoPageBlocking(request.page, PAGE_SIZE)
                     request.sort.startsWith(SEASONAL_PREFIX) ->
                         VideoListPage(api.getVideosByTagBlocking(request.sort.removePrefix(SEASONAL_PREFIX), request.page, PAGE_SIZE, request.tagSort), -1)
+                    request.sort.startsWith(TEXT_PREFIX) -> {
+                        val topic = request.sort.removePrefix(TEXT_PREFIX)
+                        val matches = api.getVideosByTagBlocking(topic, request.page, PAGE_SIZE, request.tagSort)
+                            .filter { item -> !profile.isMuted(item) && item.tags.any { SearchQuery.canonicalTag(it) == topic } }
+                            .distinctBy { it.authorId.ifBlank { it.author.lowercase() } }.take(4)
+                        VideoListPage(matches, -1)
+                    }
                     request.month.isNotBlank() -> api.getMonthTopBlocking(request.month, request.page, PAGE_SIZE)
                     request.sort.startsWith(TAG_PREFIX) ->
                         VideoListPage(api.getVideosByTagBlocking(request.sort.removePrefix(TAG_PREFIX), request.page, PAGE_SIZE, request.tagSort), -1)
@@ -488,6 +506,7 @@ class RecommendationEngine(
                 val previous = merged[item.id]
                 val candidate = previous ?: RecommendationCandidate(item).also { merged[item.id] = it }
                 if (previous != null) {
+                    candidate.item.mergeTextFrom(item)
                     if (item.likes > candidate.item.likes) candidate.item.likes = item.likes
                     if (item.liked) candidate.item.liked = true
                 }
@@ -636,6 +655,7 @@ class RecommendationEngine(
         )
         internal const val SUBSCRIBED = "__subscribed__"
         /** 个性化召回的请求：标签 / 作者 id 接在前缀后面。 */
+        internal const val TEXT_PREFIX = "__text__:"
         internal const val TAG_PREFIX = "__tag__:"
         internal const val AUTHOR_PREFIX = "__author__:"
         internal const val SEASONAL_PREFIX = "__seasonal__:"

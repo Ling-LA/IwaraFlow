@@ -14,6 +14,42 @@
         app:resize_mode="fit"
         app:use_controller="false" />
 
+    <LinearLayout
+        android:id="@+id/fullscreenVideoInfo"
+        android:layout_width="wrap_content"
+        android:layout_height="wrap_content"
+        android:layout_gravity="top|start"
+        android:layout_marginStart="16dp"
+        android:layout_marginEnd="16dp"
+        android:orientation="vertical"
+        android:visibility="gone">
+        <TextView
+            android:id="@+id/fullscreenAuthor"
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:maxWidth="400dp"
+            android:maxLines="1"
+            android:ellipsize="end"
+            android:paddingVertical="3dp"
+            android:focusable="true"
+            android:textColor="#FFFFFFFF"
+            android:textStyle="bold"
+            android:textSize="15sp"
+            android:shadowColor="#FF000000" android:shadowRadius="3" android:shadowDy="1" />
+        <TextView
+            android:id="@+id/fullscreenDescription"
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:maxWidth="400dp"
+            android:maxLines="2"
+            android:ellipsize="end"
+            android:paddingVertical="3dp"
+            android:focusable="true"
+            android:textColor="#FFFFFFFF"
+            android:textSize="13sp"
+            android:shadowColor="#FF000000" android:shadowRadius="3" android:shadowDy="1" />
+    </LinearLayout>
+
     <!-- 暂停时的控制行：后退 N 秒 / 播放三角 / 前进 N 秒。左下角、进度条上方，
          位置由 PauseSeekBar 在运行时算出来（跟着进度条走）。 -->
     <LinearLayout

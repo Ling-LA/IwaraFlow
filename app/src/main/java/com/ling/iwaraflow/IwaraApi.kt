@@ -592,13 +592,33 @@ class IwaraApi(context: Context, private val apiRoot: String = DEFAULT_API_ROOT)
         relationWrite("$apiRoot/video/$videoId/like", liked, callback,
             accepted = { likeStates.confirm(snapshot, videoId, liked) }, validSession = { likeStates.isCurrent(snapshot) })
     }
-    fun followUser(userId: String, following: Boolean, callback: (Result<Unit>) -> Unit) {
+    internal fun recentFollowing(userId: String): Boolean? {
+        if (userId.isBlank()) return null
+        val scope = likeStates.snapshot()
+        return FollowWriteState.recent(FollowWriteState.Key(apiRoot, scope.account, scope.session, userId))
+    }
+
+    internal fun knownFollowing(userId: String): Boolean? {
+        if (userId.isBlank()) return null
+        val scope = likeStates.snapshot()
+        return FollowWriteState.known(FollowWriteState.Key(apiRoot, scope.account, scope.session, userId))
+    }
+
+    internal fun recentFollowChanges() = FollowWriteState.changes(apiRoot, likeStates.snapshot())
+
+    internal fun listenFollowing(listener: (FollowWriteState.Change) -> Unit) = FollowWriteState.listen { change ->
+        val key = change.key
+        val scope = likeStates.snapshot()
+        if (key.apiRoot == apiRoot && key.account == scope.account && key.session == scope.session) listener(change)
+    }
+
+    fun followUser(userId: String, following: Boolean, username: String = "", callback: (Result<Unit>) -> Unit) {
         val snapshot = likeStates.snapshot()
         val key = FollowWriteState.Key(apiRoot, snapshot.account, snapshot.session, userId)
         enqueue(callback) { runCatching {
             synchronized(FollowWriteState.lock(key)) {
                 relationWriteBlocking("$apiRoot/user/$userId/followers", following, validSession = { likeStates.isCurrent(snapshot) })
-                FollowWriteState.confirm(key, following)
+                FollowWriteState.confirm(key, following, username)
             }
         } }
     }
@@ -636,7 +656,7 @@ class IwaraApi(context: Context, private val apiRoot: String = DEFAULT_API_ROOT)
                     }
                 }
                 requireSession()
-                FollowWriteState.confirm(key, true)
+                FollowWriteState.confirm(key, true, username)
             }
         } }
     }
@@ -672,13 +692,23 @@ class IwaraApi(context: Context, private val apiRoot: String = DEFAULT_API_ROOT)
     }
 
     fun getAuthorProfile(username: String, callback: (Result<IwaraAuthor>) -> Unit) {
-        enqueue(callback) { runCatching { getAuthorProfileBlocking(username) } }
+        val scope = likeStates.snapshot()
+        enqueue(callback) { runCatching { getAuthorProfileBlocking(username).also { author ->
+            if (!likeStates.isCurrent(scope)) throw IOException("账号已切换，请重试")
+            knownFollowing(author.id)?.let { author.following = it }
+        } } }
     }
 
     internal fun getAuthorProfileBlocking(username: String): IwaraAuthor {
         val root = getJsonObject("$apiRoot/profile/${UriEncoder.encodePath(username)}", optionalAuth = true)
         val user = root.optJSONObject("user") ?: throw IOException("作者资料不存在")
-        return parseAuthor(user, root.optString("body"), followerCount(root, user))
+        val author = parseAuthor(user, root.optString("body"), followerCount(root, user))
+        likeRead.get()?.takeIf { it.authenticated && !user.isNull("following") && author.id.isNotBlank() }?.let { read ->
+            val scope = read.snapshot
+            FollowWriteState.observe(FollowWriteState.Key(apiRoot, scope.account, scope.session, author.id),
+                author.following, author.username)
+        }
+        return author
     }
 
     fun getUploadRules(callback: (Result<JSONObject>) -> Unit) {
@@ -736,7 +766,13 @@ class IwaraApi(context: Context, private val apiRoot: String = DEFAULT_API_ROOT)
         return FollowingPage(users, root.optInt("count", -1), hasMorePages(root, page, arr.length()))
     }
 
-    fun resolveSources(videoId: String, callback: (Result<List<VideoSource>>) -> Unit): java.io.Closeable {
+    fun resolveSources(videoId: String, callback: (Result<List<VideoSource>>) -> Unit): java.io.Closeable =
+        requestSources(videoId, null, callback)
+
+    fun resolveSources(item: VideoItem, callback: (Result<List<VideoSource>>) -> Unit): java.io.Closeable =
+        requestSources(item.id, item, callback)
+
+    private fun requestSources(videoId: String, item: VideoItem?, callback: (Result<List<VideoSource>>) -> Unit): java.io.Closeable {
         val cancellation = RequestCancellation()
         val queuedAt = android.os.SystemClock.elapsedRealtime()
         synchronized(lifecycleLock) {
@@ -746,7 +782,7 @@ class IwaraApi(context: Context, private val apiRoot: String = DEFAULT_API_ROOT)
                     if (closed || epoch != requestEpoch.get() || cancellation.cancelled) return@execute
                     val started = android.os.SystemClock.elapsedRealtime()
                     requestPriority.set(RequestScheduler.Priority.PLAYBACK)
-                    val result = try { cancellation.run { runCatching { resolveSourcesBlocking(videoId) } } }
+                    val result = try { cancellation.run { runCatching { resolveSourcesBlocking(videoId, item) } } }
                         finally { requestPriority.remove() }
                     PlaybackMetrics.sourceResolved(started - queuedAt, android.os.SystemClock.elapsedRealtime() - started,
                         result.isSuccess, cancellation.cancelled)
@@ -758,14 +794,14 @@ class IwaraApi(context: Context, private val apiRoot: String = DEFAULT_API_ROOT)
         // metadata requests keep running, while the two playback workers are freed immediately.
         return java.io.Closeable { cancellation.cancel() }
     }
-    fun resolvePreloadSources(videoId: String, callback: (Result<List<VideoSource>>) -> Unit) {
-        enqueue(callback) { runCatching { resolveSourcesBlocking(videoId) } }
+    fun resolvePreloadSources(videoId: String, item: VideoItem? = null, callback: (Result<List<VideoSource>>) -> Unit) {
+        enqueue(callback) { runCatching { resolveSourcesBlocking(videoId, item) } }
     }
 
-    fun resolveSourcesBlocking(videoId: String): List<VideoSource> {
+    fun resolveSourcesBlocking(videoId: String, item: VideoItem? = null): List<VideoSource> {
         val detail = getJsonObject("$apiRoot/video/$videoId", optionalAuth = true)
         // This detail request already carries personal status; reuse it instead of making a second request.
-        parseVideo(detail)
+        parseVideo(detail)?.let { if (item?.id == it.id) item.mergeTextFrom(it) }
         val fileUrl = detail.optString("fileUrl")
         if (fileUrl.isBlank()) {
             val reason = when {
@@ -881,6 +917,7 @@ class IwaraApi(context: Context, private val apiRoot: String = DEFAULT_API_ROOT)
             liked = o.optBoolean("liked", false),
             authorId = user?.optString("id").orEmpty(),
             authorUsername = user?.optString("username").orEmpty(),
+            authorFollowing = knownFollowing(user?.optString("id").orEmpty()) ?: (user?.optBoolean("following") == true),
             isPrivate = o.optBoolean("private", false),
             status = o.optString("status"),
             thumbnailUrl = thumbnailUrl,

@@ -39,6 +39,8 @@ class FullscreenSocialTest {
             assertEquals("Social controls must follow transport controls", if (visible && fullscreen) View.VISIBLE else View.GONE,
                 root.findViewById<View>(R.id.fullscreenSocial).visibility)
             assertEquals("Bottom control row", expected, root.findViewById<View>(R.id.pauseTopRow).visibility)
+            assertEquals("Author and description follow fullscreen controls", if (visible && fullscreen) View.VISIBLE else View.GONE,
+                root.findViewById<View>(R.id.fullscreenVideoInfo).visibility)
         }
     }
 
@@ -50,7 +52,7 @@ class FullscreenSocialTest {
         context.setContentView(parent)
         lateinit var f: Fixture
         val adapter = VideoAdapter(mock(IwaraApi::class.java), mock(HistoryStore::class.java), prefs,
-            mock(MediaPreloadCache::class.java), { _, _ -> }, {}, {}, {}, onComments = { f.opened = it })
+            mock(MediaPreloadCache::class.java), { _, _ -> }, {}, {}, {}, onComments = { f.opened = it }, onInfo = { f.opened = it })
         val video = VideoItem("social", "作品", "作者", emptyList(), 345)
         adapter.replace(listOf(video))
         val holder = adapter.onCreateViewHolder(parent, 0)
@@ -121,6 +123,30 @@ class FullscreenSocialTest {
         f.adapter.setPipMode(true); f.controls(false)
         f.adapter.setPipMode(false); f.controls(true)
         f.adapter.setFullscreen(false, resumeOnExit = false); f.controls(true, fullscreen = false)
+    }
+
+    @Test fun fullscreenTransportMatchesRightHandButtonsAndMetadataOpensTheCurrentVideo() = fixture(900, 450) { f ->
+        val skip = f.root.findViewById<View>(R.id.skipBack)
+        val normal = skip.layoutParams.width
+        f.playing(false)
+        f.adapter.setFullscreen(true)
+        val right = f.root.findViewById<View>(R.id.pausePip).layoutParams.width
+        for (id in listOf(R.id.skipBack, R.id.pauseIndicator, R.id.skipForward)) {
+            assertEquals(right, f.root.findViewById<View>(id).layoutParams.width)
+            assertEquals(right, f.root.findViewById<View>(id).layoutParams.height)
+        }
+        val description = f.root.findViewById<TextView>(R.id.fullscreenDescription)
+        assertEquals(f.video.title, description.text.toString())
+        f.video.description = "视频简介"; f.adapter.refreshItem(f.video.id)
+        assertEquals(f.video.description, description.text.toString())
+        description.performClick(); assertSame(f.video, f.opened)
+        var openedAuthor = false
+        f.root.findViewById<View>(R.id.author).setOnClickListener { openedAuthor = true }
+        val author = f.root.findViewById<TextView>(R.id.fullscreenAuthor)
+        assertEquals("@作者", author.text.toString())
+        author.performClick(); assertTrue(openedAuthor)
+        f.adapter.setFullscreen(false, resumeOnExit = false)
+        assertEquals(normal, skip.layoutParams.width)
     }
 
     @Test fun recyclingAndDetachingImmediatelyHideSocialAndRebindingDoesNotCarryPinnedState() = fixture { f ->

@@ -18,7 +18,17 @@ internal class ScreenReactionHold(private val view: View, complete: () -> Unit) 
             style = Paint.Style.STROKE; strokeWidth = 3 * density; strokeCap = Paint.Cap.ROUND
         }
         var progress = 0f
+        var finishing = false
         override fun draw(canvas: Canvas) {
+            if (finishing) {
+                val scale = 1f + .16f * kotlin.math.sin(progress * Math.PI).toFloat()
+                canvas.save()
+                canvas.scale(scale, scale, bounds.exactCenterX(), bounds.exactCenterY())
+                icon?.alpha = (255 * (1f - progress)).toInt()
+                icon?.draw(canvas)
+                canvas.restore()
+                return
+            }
             val inset = 4 * density
             paint.color = 0x66FFFFFF
             canvas.drawOval(bounds.left + inset, bounds.top + inset, bounds.right - inset, bounds.bottom - inset, paint)
@@ -35,7 +45,13 @@ internal class ScreenReactionHold(private val view: View, complete: () -> Unit) 
         override fun setColorFilter(filter: ColorFilter?) { icon?.colorFilter = filter }
         @Deprecated("Deprecated in Android") override fun getOpacity() = PixelFormat.TRANSLUCENT
     }
-    private val progress = HoldProgress({ value -> ring.progress = value; ring.invalidateSelf() }, complete)
+    private fun drawProgress(value: Float) { ring.progress = value; ring.invalidateSelf() }
+    private val pulse = HoldProgress(::drawProgress) { view.overlay.remove(ring) }
+    private val progress = HoldProgress(::drawProgress) {
+        ring.finishing = true
+        pulse.start(220L)
+        complete()
+    }
     val running get() = progress.running
 
     fun start(x: Float, y: Float, alreadyHeldMs: Long = 0L) {
@@ -48,5 +64,13 @@ internal class ScreenReactionHold(private val view: View, complete: () -> Unit) 
         view.overlay.add(ring)
         progress.start(HoldReaction.DURATION_MS - alreadyHeldMs.coerceAtLeast(0L))
     }
-    fun cancel() { progress.cancel(); view.overlay.remove(ring); ring.progress = 0f }
+    fun releaseTouch() { if (progress.running) cancel() }
+    fun cancel() {
+        progress.cancel()
+        pulse.cancel()
+        view.overlay.remove(ring)
+        ring.finishing = false
+        ring.progress = 0f
+        icon?.alpha = 255
+    }
 }

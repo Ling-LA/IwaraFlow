@@ -63,6 +63,23 @@ class RecommendationSourcesTest {
 
     private fun pageOf(id: String): Int = id.substringAfter("-p").substringBefore("-").toInt()
 
+    @Test fun strongTextMayReplaceOneRefillSlotOnlyWithAKnownEligibleTopic() {
+        val engine = RecommendationEngine(api(false), history())
+        try {
+            fun topics(round: Int) = engine.requestsFor(round).map { it.sort }.filter { it.startsWith(RecommendationEngine.TEXT_PREFIX) }
+            val base = PreferenceProfile(emptyMap(), emptyMap())
+            val refillSize = engine.requestsFor(1).size
+            val taste = base.copy(textWeights = mapOf("hatsune_miku" to .55, "private phrase" to .6))
+            engine.useProfile(taste)
+            assertTrue(topics(0).isEmpty())
+            assertEquals(listOf(RecommendationEngine.TEXT_PREFIX + "hatsune_miku"), topics(1))
+            assertEquals(refillSize, engine.requestsFor(1).size)
+            assertTrue(topics(2).isEmpty())
+            engine.useProfile(taste.copy(mutedTags = setOf("hatsune_miku")))
+            assertTrue(topics(1).isEmpty())
+        } finally { engine.close() }
+    }
+
     @Test fun theSubscriptionFeedIsOneOfTheSources() {
         val feed = load(RecommendationEngine(api(loggedIn = true), history()))
         assertTrue("关注作者的更新必须进入候选", feed.any { it.id.startsWith("subscribed-") })

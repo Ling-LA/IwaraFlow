@@ -96,6 +96,21 @@ class Release019RegressionTest {
         } finally { prefs.privateBrowsing = false; db.close() }
     }
 
+    @Test fun sameDayToggleLimitStillHonorsTheFinalAction() {
+        val context = RuntimeEnvironment.getApplication()
+        HistoryStore(context, "toggle-state.db").use { store ->
+            for (i in 1..2) {
+                val item = VideoItem("v$i", "forest", "author$i", emptyList(), 0)
+                repeat(4) {
+                    store.recordInteraction(item, "like", 2.0)
+                    store.recordInteraction(item, "unlike", -1.2)
+                }
+                store.recordInteraction(item, "like", 2.0)
+            }
+            assertTrue((store.preferenceProfile().textWeights["forest"] ?: 0.0) > 0.0)
+        }
+    }
+
     @Test fun versionTwelveUpgradeBackfillsSavedTitlesWithoutNewInteractions() {
         val context = RuntimeEnvironment.getApplication()
         val name = "text-upgrade-019.db"
@@ -112,7 +127,7 @@ class Release019RegressionTest {
             db.version = 12
         }
         HistoryStore(context, name).use { upgraded ->
-            assertEquals(13, upgraded.readableDatabase.version)
+            assertEquals(14, upgraded.readableDatabase.version)
             assertEquals(2, upgraded.recentHistory().size)
             assertTrue(upgraded.preferenceProfile().textWeights.getValue("robot") > 0)
             upgraded.readableDatabase.rawQuery("SELECT COUNT(*) FROM interactions WHERE body_features<>''", null).use {

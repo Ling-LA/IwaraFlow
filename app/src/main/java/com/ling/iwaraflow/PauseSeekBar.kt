@@ -127,6 +127,7 @@ class PauseSeekBar @JvmOverloads constructor(
         topRow(root)?.visibility = View.GONE
         preview(root)?.visibility = View.GONE
         root?.findViewById<View>(R.id.fullscreenSocial)?.visibility = View.GONE
+        root?.findViewById<View>(R.id.fullscreenVideoInfo)?.visibility = View.GONE
     }
 
     override fun onAttachedToWindow() {
@@ -221,8 +222,20 @@ class PauseSeekBar @JvmOverloads constructor(
             )
             rowHeight = row.measuredHeight
         }
-        val gap = (2f * resources.displayMetrics.density).roundToInt()
+        val fullscreen = mode(root) == MODE_FULLSCREEN
+        val gap = ((if (fullscreen) 4f else 2f) * resources.displayMetrics.density).roundToInt()
         row.translationY = (translationY - rowHeight - gap).coerceAtLeast(0f)
+        val info = root.findViewById<View>(R.id.fullscreenVideoInfo)
+        info.visibility = if (fullscreen) View.VISIBLE else View.GONE
+        if (fullscreen) {
+            if (info.height == 0 || info.isLayoutRequested) {
+                val margins = info.layoutParams as android.view.ViewGroup.MarginLayoutParams
+                val width = (root.width - margins.marginStart - margins.marginEnd).coerceAtLeast(0)
+                info.measure(View.MeasureSpec.makeMeasureSpec(width, View.MeasureSpec.AT_MOST),
+                    View.MeasureSpec.makeMeasureSpec(root.height, View.MeasureSpec.AT_MOST))
+            }
+            info.translationY = (row.translationY - info.measuredHeight - gap).coerceAtLeast(0f)
+        }
     }
 
     private fun controls(root: View?): View? = root?.findViewById(R.id.pauseControls)

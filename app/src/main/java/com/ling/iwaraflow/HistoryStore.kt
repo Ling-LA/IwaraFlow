@@ -17,7 +17,7 @@ data class MutedEntities(
 )
 
 // SQLiteOpenHelper only implements AutoCloseable on newer Android versions.
-class HistoryStore(context: Context, private val profileFile: String? = null) : SQLiteOpenHelper(context, profileFile ?: "iwaraflow.db", null, 13), java.io.Closeable {
+class HistoryStore(context: Context, private val profileFile: String? = null) : SQLiteOpenHelper(context, profileFile ?: "iwaraflow.db", null, 14), java.io.Closeable {
     /**
      * **UI 线程不写库**。划一条视频要写好几笔（观看记录、行为、已看标记），
      * 而这些方法都是 `@Synchronized` 的——和后台算画像抢同一把锁，用久了就是划走那一下的微卡顿。
@@ -348,6 +348,16 @@ class HistoryStore(context: Context, private val profileFile: String? = null) : 
         }
         val hasSavedTitles = db.rawQuery("SELECT COUNT(*) FROM sqlite_master WHERE type='table' AND name IN ('history','favorites')", null)
             .use { it.moveToFirst(); it.getInt(0) == 2 }
+        if (oldVersion < 14) {
+            val columns = db.rawQuery("PRAGMA table_info(recommendation_impressions)", null).use { c ->
+                buildSet { while (c.moveToNext()) add(c.getString(1)) }
+            }
+            if ("text_score" !in columns) db.execSQL("ALTER TABLE recommendation_impressions ADD COLUMN text_score REAL")
+            if (profileFile?.startsWith("interest_") == true) {
+                db.execSQL("CREATE TABLE IF NOT EXISTS legacy_text_repair(cutoff INTEGER NOT NULL)")
+                db.execSQL("INSERT INTO legacy_text_repair SELECT COALESCE(MAX(id),0) FROM interactions")
+            }
+        }
         if (oldVersion < 13 && hasSavedTitles) {
             // Reuse only titles already kept on this device; never fetch old descriptions.
             // Keep action, time and account unchanged, so migration creates no new signals.
@@ -765,11 +775,16 @@ class HistoryStore(context: Context, private val profileFile: String? = null) : 
         // Repeated toggles / replays of one video cannot farm the same signal indefinitely.
         val recent = db.rawQuery("SELECT COUNT(*) FROM interactions WHERE video_id=? AND action=? AND created_at>?",
             arrayOf(item.id, action, (now - 86_400_000L).toString())).use { it.moveToFirst(); it.getInt(0) }
-        if (recent >= 3) return
+        if (recent >= 3) {
+            if (action !in setOf("like", "unlike", "favorite", "unfavorite")) return
+            // Keep the latest toggle visible even after the daily learning cap.
+            db.execSQL("DELETE FROM interactions WHERE id=(SELECT id FROM interactions WHERE video_id=? AND action=? " +
+                "ORDER BY created_at DESC, id DESC LIMIT 1)", arrayOf(item.id, action))
+        }
         val boundedWeight = weight.coerceIn(-3.0, 3.0)
         db.insertOrThrow("interactions", null, interactionValues(item, action, boundedWeight, now))
         // 同一笔行为还要累加进长期画像，见 [PREFERENCE_TABLE]。
-        if (countsTowardLongTerm(action)) {
+        if (recent < 3 && countsTowardLongTerm(action)) {
             applyPreferenceDeltas(db, item.author, item.authorId, item.tags, boundedWeight, now)
         }
         trimInteractions()
@@ -987,11 +1002,51 @@ class HistoryStore(context: Context, private val profileFile: String? = null) : 
      * 里发生的再乘 [SESSION_BOOST]——连着看了几条同一主题，后面的推荐就该马上跟上。
      * 官方点赞的种子不算“当前兴趣”，否则一次同步进来几百条就把画像冲成旧口味。
      */
+    private val checkedTextRepairs = mutableSetOf<String>()
+
+    // Only existing interactions can receive titles, from the currently selected library.
+    private fun repairLegacyTextIfNeeded() {
+        val scope = interestScope()
+        if (profileFile != null || scope.isBlank() || scope in checkedTextRepairs) return
+        val db = interestDatabase
+        val pending = db.rawQuery("SELECT 1 FROM sqlite_master WHERE name='legacy_text_repair'", null).use { it.moveToFirst() }
+        if (pending) {
+            val cutoff = db.rawQuery("SELECT cutoff FROM legacy_text_repair LIMIT 1", null).use {
+                if (!it.moveToFirst()) { checkedTextRepairs += scope; return }
+                it.getLong(0)
+            }
+            val ids = db.rawQuery("SELECT DISTINCT video_id FROM (SELECT video_id, title_features FROM interactions " +
+                "WHERE id <= ? ORDER BY created_at DESC, id DESC LIMIT $PROFILE_ROWS) WHERE title_features=''",
+                arrayOf(cutoff.toString())).use { c -> buildList { while (c.moveToNext()) add(c.getString(0)) } }
+            val titles = mutableMapOf<String, String>()
+            val library = libraryDatabase
+            for (batch in ids.chunked(400)) {
+                val filter = "video_id IN (" + batch.joinToString(",") { "?" } + ") AND title<>''"
+                for (table in listOf("favorites", "history")) library.query(table, arrayOf("video_id", "title"),
+                    filter, batch.toTypedArray(), null, null, null).use { c ->
+                    while (c.moveToNext()) titles[c.getString(0)] = c.getString(1)
+                }
+            }
+            db.beginTransaction()
+            try {
+                for ((id, title) in titles) {
+                    val features = ContentInterest.features(VideoItem(id, title, "", emptyList(), 0)).title
+                    db.execSQL("UPDATE interactions SET title_features=? WHERE video_id=? AND title_features='' AND id<=?",
+                        arrayOf(features.joinToString("\u001f"), id, cutoff))
+                }
+                db.execSQL("DELETE FROM legacy_text_repair")
+                db.setTransactionSuccessful()
+            } finally { db.endTransaction() }
+        }
+        checkedTextRepairs += scope
+    }
+
     fun preferenceProfile(): PreferenceProfile = preferenceProfileAt(System.currentTimeMillis())
 
     @Synchronized
     internal fun preferenceProfileAt(now: Long, applySystemAdjustments: Boolean = true): PreferenceProfile {
         // 长期口味来自聚合表（不会因为滚出窗口而突然消失），当前兴趣仍然来自行为窗口。
+        repairLegacyTextIfNeeded()
         val longTerm = longTermPreferences(now)
         val author = HashMap(longTerm.getValue(PREF_AUTHOR))
         val authorIds = HashMap(longTerm.getValue(PREF_AUTHOR_ID))
@@ -1030,7 +1085,7 @@ class HistoryStore(context: Context, private val profileFile: String? = null) : 
             "interactions",
             arrayOf("author", "tags", "weight", "created_at", "author_id", "action", "video_id", "title_features", "body_features"),
             // 别的账号导进来的点赞不算这个账号的口味；本机行为（account_id 为空）永远算数。
-            ACCOUNT_SCOPE, arrayOf(accountId), null, null, "created_at DESC", PROFILE_ROWS.toString()
+            ACCOUNT_SCOPE, arrayOf(accountId), null, null, "created_at DESC, id DESC", PROFILE_ROWS.toString()
         ).use { c ->
             while (c.moveToNext()) {
                 val at = c.getLong(3)
@@ -1157,7 +1212,8 @@ class HistoryStore(context: Context, private val profileFile: String? = null) : 
         score: Double = 0.0,
         reason: String = "",
         exploration: Boolean = false,
-        classic: Boolean = false
+        classic: Boolean = false,
+        textScore: Double? = null
     ) {
         if (appPrefs.privateBrowsing || session.isBlank() || item.id.isBlank() || surface.isBlank()) return
         val values = ContentValues().apply {
@@ -1167,6 +1223,7 @@ class HistoryStore(context: Context, private val profileFile: String? = null) : 
             put("position", position)
             put("sources", sources)
             put("score", score)
+            put("text_score", textScore)
             put("reason", reason)
             put("shown_at", System.currentTimeMillis())
             put("author", item.author.lowercase())
@@ -1174,7 +1231,7 @@ class HistoryStore(context: Context, private val profileFile: String? = null) : 
             put("exploration", if (exploration) 1 else 0)
             put("classic", if (classic) 1 else 0)
         }
-        writableDatabase.insertWithOnConflict(
+        interestDatabase.insertWithOnConflict(
             "recommendation_impressions", null, values, SQLiteDatabase.CONFLICT_IGNORE
         )
         trimImpressions()
@@ -1200,7 +1257,7 @@ class HistoryStore(context: Context, private val profileFile: String? = null) : 
             put("completed", if (completed) 1 else 0)
             put("skipped", if (skipped) 1 else 0)
         }
-        writableDatabase.update(
+        interestDatabase.update(
             "recommendation_impressions", values, "session_id=? AND video_id=?", arrayOf(session, videoId)
         )
     }
@@ -1213,7 +1270,7 @@ class HistoryStore(context: Context, private val profileFile: String? = null) : 
             if (liked) put("liked", 1)
             if (favorited) put("favorited", 1)
         }
-        writableDatabase.update(
+        interestDatabase.update(
             "recommendation_impressions", values, "session_id=? AND video_id=?", arrayOf(session, videoId)
         )
     }
@@ -1225,7 +1282,7 @@ class HistoryStore(context: Context, private val profileFile: String? = null) : 
         impressionsSinceTrim += 1
         if (impressionsSinceTrim < TRIM_EVERY) return
         impressionsSinceTrim = 0
-        val db = writableDatabase
+        val db = interestDatabase
         val count = runCatching {
             android.database.DatabaseUtils.queryNumEntries(db, "recommendation_impressions")
         }.getOrDefault(0L)
@@ -1272,7 +1329,7 @@ class HistoryStore(context: Context, private val profileFile: String? = null) : 
      */
     @Synchronized
     fun recommendationMetrics(limit: Int = METRICS_ROWS, surface: String = SURFACE_RECOMMEND): RecommendationMetrics =
-        impressionMetrics(limit, surface) ?: legacyMetrics(limit)
+        impressionMetrics(limit, surface) ?: if (interestScope().isEmpty()) legacyMetrics(limit) else RecommendationMetrics(0, 0.0, 0L, 0.0, 0.0, 0.0, 0.0)
 
     /** 曝光口径的指标；这个流还没有可统计的曝光就返回 null。 */
     private fun impressionMetrics(limit: Int, surface: String): RecommendationMetrics? {
@@ -1284,7 +1341,7 @@ class HistoryStore(context: Context, private val profileFile: String? = null) : 
         val authors = ArrayList<String>()
         val tags = ArrayList<String>()
         runCatching {
-            readableDatabase.query(
+            interestDatabase.query(
                 "recommendation_impressions",
                 arrayOf("played_ms", "completed", "skipped", "liked", "favorited", "author", "tags"),
                 "surface=?", arrayOf(surface), null, null, "shown_at DESC", limit.toString()
@@ -1330,7 +1387,7 @@ class HistoryStore(context: Context, private val profileFile: String? = null) : 
         val skipped = HashMap<String, Int>()
         val played = HashMap<String, Long>()
         runCatching {
-            readableDatabase.query(
+            interestDatabase.query(
                 "recommendation_impressions",
                 arrayOf("sources", "played_ms", "completed", "skipped", "liked", "favorited", "exploration", "classic"),
                 "surface=?", arrayOf(surface), null, null, "shown_at DESC", limit.toString()
@@ -1411,10 +1468,28 @@ class HistoryStore(context: Context, private val profileFile: String? = null) : 
         )
     }
 
+    /** Observational outcomes on actual frames, excluding old or unscored impressions. */
+    fun textOutcomeSummary(): String {
+        val sql = """SELECT CASE WHEN text_score > 0 THEN 1 WHEN text_score < 0 THEN -1 ELSE 0 END,
+            COUNT(*), AVG(skipped), AVG(played_ms), AVG(favorited) FROM (
+            SELECT text_score, skipped, played_ms, favorited FROM recommendation_impressions
+            WHERE surface=? AND text_score IS NOT NULL AND (played_ms>0 OR skipped=1 OR completed=1 OR liked=1 OR favorited=1)
+            ORDER BY shown_at DESC LIMIT $METRICS_ROWS) GROUP BY 1 ORDER BY 1 DESC"""
+        return interestDatabase.rawQuery(sql, arrayOf(SURFACE_RECOMMEND)).use { c ->
+            buildList {
+                while (c.moveToNext()) {
+                    val group = when (c.getInt(0)) { 1 -> "加分"; -1 -> "减分"; else -> "无加减分" }
+                    add("文字$group · %d 条 · 划走 %.0f%% · 平均 %.1f 秒 · 收藏 %.0f%%"
+                        .format(c.getInt(1), c.getDouble(2) * 100, c.getDouble(3) / 1000, c.getDouble(4) * 100))
+                }
+            }.joinToString("\n")
+        }
+    }
+
     fun exposureDiversity(): String {
         val tagCounts = hashMapOf<String, Int>()
         var rows = 0
-        readableDatabase.query("recommendation_impressions", arrayOf("tags"), "surface=?", arrayOf(SURFACE_RECOMMEND), null, null, "shown_at DESC", "200").use { c ->
+        interestDatabase.query("recommendation_impressions", arrayOf("tags"), "surface=?", arrayOf(SURFACE_RECOMMEND), null, null, "shown_at DESC", "200").use { c ->
             while (c.moveToNext()) {
                 rows++
                 splitTags(c.getString(0)).map(SearchQuery::canonicalTag).distinct().forEach { tagCounts[it] = (tagCounts[it] ?: 0) + 1 }
@@ -1561,6 +1636,7 @@ class HistoryStore(context: Context, private val profileFile: String? = null) : 
                 position INTEGER NOT NULL,
                 sources TEXT NOT NULL DEFAULT '',
                 score REAL NOT NULL DEFAULT 0,
+                text_score REAL,
                 reason TEXT NOT NULL DEFAULT '',
                 shown_at INTEGER NOT NULL,
                 author TEXT NOT NULL DEFAULT '',

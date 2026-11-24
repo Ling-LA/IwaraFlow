@@ -64,6 +64,44 @@ class FollowApiTest {
         }
     }
 
+    @Test fun twoBoundFeedsAndLateProfileReadsKeepTheLastConfirmedFollowAndUnfollow() {
+        MockWebServer().use { server ->
+            val writer = api(server)
+            val reader = api(server)
+            fun feed(api: IwaraApi, id: String): Pair<VideoAdapter, AuthorFollowButton> {
+                val adapter = VideoAdapter(api, org.mockito.Mockito.mock(HistoryStore::class.java), AppPrefs(context),
+                    org.mockito.Mockito.mock(MediaPreloadCache::class.java), { _, _ -> }, {}, {}, {})
+                adapter.replace(listOf(VideoItem(id, "演示", "作者", emptyList(), 0, authorId = "creator", authorUsername = "creator-name")))
+                val holder = adapter.onCreateViewHolder(android.widget.FrameLayout(context), 0)
+                adapter.onBindViewHolder(holder, 0)
+                return adapter to holder.itemView.findViewById(R.id.authorFollow)
+            }
+            val (first, firstButton) = feed(writer, "first")
+            val (second, secondButton) = feed(reader, "second")
+            try {
+                for ((desired, buttonText) in listOf(true to "已关注", false to "关注")) {
+                    server.enqueue(MockResponse().setResponseCode(204))
+                    val write = CompletableFuture<Result<Unit>>()
+                    writer.followUser("creator", desired, "creator-name") { write.complete(it) }
+                    write.await().getOrThrow()
+                    server.enqueue(profile(!desired))
+                    val late = CompletableFuture<Result<IwaraAuthor>>()
+                    reader.getAuthorProfile("creator-name") { late.complete(it) }
+                    assertEquals(desired, late.get(5, TimeUnit.SECONDS).getOrThrow().following)
+                    org.robolectric.Shadows.shadowOf(android.os.Looper.getMainLooper()).idle()
+                    assertEquals(desired, first.items.single().authorFollowing)
+                    assertEquals(desired, second.items.single().authorFollowing)
+                    assertEquals(buttonText, firstButton.text.toString())
+                    assertEquals(buttonText, secondButton.text.toString())
+                }
+                AppPrefs(context).accountId = "account-b"
+                assertNull(reader.knownFollowing("creator"))
+            } finally {
+                first.releaseAll(); second.releaseAll(); writer.close(); reader.close()
+            }
+        }
+    }
+
     @Test fun simultaneousPagesOnlyWriteOnce() {
         MockWebServer().use { server ->
             val entered = CountDownLatch(1); val release = CountDownLatch(1)

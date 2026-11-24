@@ -65,8 +65,12 @@ class FullscreenGesturesTest {
         val view = View(RuntimeEnvironment.getApplication()); view.layout(0, 0, 900, 450)
         var completed = 0
         val hold = ScreenReactionHold(view) { completed++ }
+        val ring = hold.javaClass.getDeclaredField("ring").apply { isAccessible = true }.get(hold) as android.graphics.drawable.Drawable
         hold.start(450f, 225f); idle(1499); assertEquals(0, completed)
+        assertNotNull(ring.callback)
         idle(1); assertEquals(1, completed); idle(4000); assertEquals(1, completed)
+        assertNull("The finished thumb must disappear while the finger is still down", ring.callback)
+        hold.releaseTouch(); assertEquals(1, completed)
         hold.cancel()
     }
     @Test fun cancelledScreenRingCanRestartButNeverCompletesTheOldHold() {

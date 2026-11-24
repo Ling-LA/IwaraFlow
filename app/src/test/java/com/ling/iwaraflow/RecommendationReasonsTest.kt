@@ -97,6 +97,24 @@ class RecommendationReasonsTest {
         }
     }
 
+    @Test fun liveRerankUsesTheSameTextSignalForScoreReasonAndRecordedContribution() {
+        val empty = PreferenceProfile(emptyMap(), emptyMap())
+        val ranker = RecommendationRanker(Random(31))
+        val items = (1..8).map { item("forest-$it").copy(title = "forest") }
+        items.forEach { ranker.remember(it) { c -> c.sources += RecommendationCandidate.Source.DATE } }
+        val fresh = empty.copy(textWeights = mapOf("forest" to .6))
+        val now = System.currentTimeMillis()
+        ranker.rerank(items, fresh, now)
+        val chosen = items.first { ranker.candidateFor(it.id)!!.interestSuggested }
+        assertEquals("标题或简介与你近期偏好相符", ranker.reasonFor(chosen.id))
+        val score = ranker.candidateFor(chosen.id)!!.rankedScore!!
+        assertEquals(ranker.scoreOf(chosen, fresh, now) - ranker.scoreOf(chosen, empty, now),
+            score.textContribution, .00001)
+        assertTrue(ranker.explain(chosen.id)!!.contains("标题/简介"))
+        ranker.rerank(items, empty, now)
+        assertFalse(ranker.explain(chosen.id)!!.contains("标题/简介"))
+    }
+
     @Test fun finalAssemblyAndLiveRerankingKeepTheSameBoundWithoutChangingScoresOrOrder() {
         val videos = (0 until 40).map { item("feed-$it") }
         fun feed(profile: PreferenceProfile): Pair<RecommendationRanker, List<VideoItem>> {
